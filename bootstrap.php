@@ -13,5 +13,5 @@ if (!is_file($_ = ROOT . '/vendor/autoload.php')) {
 }
 
 if (is_file(ROOT . '/.env')) {
-	(new \Dotenv\Dotenv(ROOT, '.env'))->load();
+    (new \Dotenv\Dotenv(ROOT, '.env'))->load();
 }
