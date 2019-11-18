@@ -13,6 +13,7 @@
     "require": {
         "php": ">=7.3.0",
         "phpunit/phpunit": "^8.1",
+        "composer/composer": "^1.8",
         "amphp/amp": "^2.2",
         "amphp/postgres": "^1.0"
     },
