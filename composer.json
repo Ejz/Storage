@@ -1,0 +1,22 @@
+{
+    "name": "ejz/storage",
+    "description": "",
+    "keywords": ["ejz", "storage"],
+    "license": "WTFPL",
+    "repositories": [
+        {
+            "type": "vcs",
+            "url": "https://github.com/Ejz/Storage"
+        }
+    ],
+    "authors": [],
+    "require": {
+        "php": ">=7.3.0",
+        "phpunit/phpunit": "^8.1",
+        "amphp/amp": "^2.2",
+        "amphp/postgres": "^1.0"
+    },
+    "autoload": {
+        "psr-4": {"Ejz\\": "src/Ejz"}
+    }
+}
