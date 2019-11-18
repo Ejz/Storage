@@ -1,0 +1,16 @@
+dist: trusty
+sudo: required
+
+language: php
+
+php:
+  - 7.3
+
+services:
+  - docker
+
+branches:
+  except:
+    - /^v\d+\.\d+(\.\d+)?(-\S*)?$/
+
+script: ./.travis.sh
