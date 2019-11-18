@@ -14,6 +14,5 @@ else
     composer install
 fi
 
-test -n "$GH_TOKEN" && php composer.phar config -g github-oauth.github.com "$GH_TOKEN"
-file vendor/bin/composer
-file vendor/bin/phpunit
+vendor/bin/composer update
+vendor/bin/phpunit

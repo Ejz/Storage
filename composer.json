@@ -11,13 +11,19 @@
     ],
     "authors": [],
     "require": {
-        "php": ">=7.3.0",
+        "php": ">=7.2.0",
         "phpunit/phpunit": "^8.1",
         "composer/composer": "^1.8",
         "amphp/amp": "^2.2",
         "amphp/postgres": "^1.0"
     },
+    "require-dev": {
+        "vlucas/phpdotenv": "~2.0"
+    },
     "autoload": {
-        "psr-4": {"Ejz\\": "src/Ejz"}
+        "psr-4": {
+            "Ejz\\": "src/Ejz",
+            "Tests\\": "tests"
+        }
     }
 }
