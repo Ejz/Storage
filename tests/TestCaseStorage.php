@@ -139,18 +139,59 @@ class TestCaseStorage extends AbstractTestCase
         ]);
         $table = $storage->table();
         $table->create();
-        $id1 = $table->insert(['u1' => 'foo']);
-        try {
-            $id2 = $table->insert(['u1' => 'foo']);
-        } catch (\Amp\Postgres\QueryExecutionError $e) {
-            $id2 = 0;
-        }
-        // $this->assertTrue($id2 === 0);
-        // $elem = $table->get($id1);
-        // $this->assertTrue($elem['text'] === 'hello');
-        // $this->assertTrue($elem['json'] === ['hi']);
+        $id1 = $table->insert(['u1' => 'foo', 'u2' => mt_rand(), 'u3' => mt_rand()]);
+        $this->assertTrue($id1 === 1);
+        $id2 = $table->insert(['u1' => 'foo', 'u2' => mt_rand(), 'u3' => mt_rand()]);
+        $this->assertTrue($id2 === 0);
+        $id3 = $table->insert(['u1' => mt_rand(), 'u2' => mt_rand(), 'u3' => mt_rand()]);
+        $this->assertTrue($id3 === 3);
+        $elem = $table->get($id1);
+        $this->assertTrue($elem['u1'] === 'foo');
     }
 
+    /**
+     * @test
+     */
+    public function test_case_storage_select()
+    {
+        $storage = $this->getStorage([
+            'table' => [
+                'fields' => [
+                    'text1' => [
+                    ],
+                    'text2' => [
+                    ],
+                ],
+                'get_shards' => function (?int $id, array $values, array $shards) {
+                    return $shards;
+                },
+            ],
+        ]);
+        $table = $storage->table();
+        $table->create();
+        foreach (range(1, 1000) as $_) {
+            $table->insert($_ = ['text1' => mt_rand() % 5, 'text2' => mt_rand() % 5]);
+            // var_dump($_);
+        }
+        $elems = $table->select(['text1' => 1]);
+        var_dump(count($elems));
+        var_dump($elems[0]);
+        // $elems = $table->select(['text2' => 0]);
+        // var_dump($elems);
+        // $elems = $table->select(['text1' => 0, 'text2' => 0]);
+        // var_dump($elems);
+    }
+}
+
+        // var_dump($elem);
+        // \Amp\Promise\wait(\Amp\Promise\all(
+        //     $storage->getPool()->dbs([0, 1])->truncateAsync('table')
+        // ));
+        // $elem = $table->get($id1);
+        // var_dump($elem);
+        // forEach(function ($db) {
+        //     $db->tru
+        // });
 // var_dump($elem);
         // $this->assertTrue($elem['blob'] === chr(0));
         // // $id2 = $table->insert(['blob' => str_repeat(chr(1), 1E7)]);
@@ -209,4 +250,3 @@ class TestCaseStorage extends AbstractTestCase
         // $this->assertTrue($id2 === 2);
         // $id3 = $table->insert([]);
         // $this->assertTrue($id3 === 3);
-}

@@ -14,12 +14,16 @@ abstract class AbstractTestCase extends TestCase
     /** DatabasePostgres */
     protected $database;
 
+    /** DatabasePool */
+    protected $pool;
+
     /**
      * @return void
      */
     protected function setUp(): void
     {
-        $this->database = $this->getDatabasePostgres();
+        $this->database = $this->getDatabasePostgres(0);
+        $this->pool = $this->getDatabasePool();
     }
 
     /**
@@ -27,18 +31,19 @@ abstract class AbstractTestCase extends TestCase
      */
     protected function tearDown(): void
     {
-        $tables = $this->database->tables();
-        foreach ($tables as $table) {
-            $this->database->drop($table);
-        }
+        $this->pool->forEach(function ($db) {
+            foreach ($db->tables() as $table) {
+                $db->drop($table);
+            }
+        });
     }
 
     /**
-     * @param int $n (optional)
+     * @param int $n
      *
      * @return DatabasePostgres
      */
-    protected function getDatabasePostgres(int $n = 0): DatabasePostgres
+    protected function getDatabasePostgres(int $n): DatabasePostgres
     {
         $dsn = sprintf(
             'host=%s port=%s user=%s password=%s db=%s',
@@ -70,8 +75,7 @@ abstract class AbstractTestCase extends TestCase
      */
     protected function getStorage(array $tables): Storage
     {
-        $pool = $this->getDatabasePool();
-        return new Storage($pool, $tables);
+        return new Storage($this->pool, $tables);
     }
 
     /**

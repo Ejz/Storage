@@ -150,9 +150,9 @@ class TestCaseDatabasePostgres extends AbstractTestCase
         $fields = $d->fields('t1');
         $this->assertTrue(isset($fields['t1']));
         $this->assertTrue($fields['t1']['type'] === 'text');
-        $this->assertTrue($fields['t1']['is_null'] === true);
+        $this->assertTrue($fields['t1']['is_nullable'] === true);
         $this->assertTrue($fields['ti']['type'] === 'integer');
-        $this->assertTrue($fields['ti']['is_null'] === false);
+        $this->assertTrue($fields['ti']['is_nullable'] === false);
         $this->assertTrue($fields['pk1']['is_primary'] === true);
         $fields = $d->fields('t2');
         $this->assertTrue($fields['t2']['type'] === 'text');

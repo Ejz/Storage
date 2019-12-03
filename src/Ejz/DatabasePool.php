@@ -41,13 +41,9 @@ class DatabasePool
      */
     public function dbs(array $filter): DatabasePool
     {
-        $dbs = [];
-        foreach ($this->dbs as $key => $db) {
-            if (in_array($key, $filter, true)) {
-                $dbs[$key] = $db;
-            }
-        }
-        return new self($dbs);
+        return new self(array_filter($this->dbs, function ($key) use ($filter) {
+            return in_array($key, $filter, true);
+        }, ARRAY_FILTER_USE_KEY));
     }
 
     /**
@@ -59,29 +55,32 @@ class DatabasePool
     }
 
     /**
+     * @param callable $function
+     *
+     * @return array
+     */
+    public function forEach(callable $function): array
+    {
+        $ret = [];
+        foreach ($this->dbs as $key => $db) {
+            $ret[$key] = $function($db);
+        }
+        return $ret;
+    }
+
+    /**
      * @param string $call
      * @param array  $arguments
      *
-     * @return array|Promise
+     * @return Promise[]
      */
-    public function __call(string $call, array $arguments)
+    public function __call(string $call, array $arguments): array
     {
-        $is_async = stripos($call, 'async') !== false;
-        if (!$is_async) {
-            $call .= 'Async';
-        }
         $promises = [];
         foreach ($this->dbs as $key => $db) {
             $promises[$key] = $db->$call(...$arguments);
         }
-        $promise = \Amp\Promise\all($promises);
-        if ($is_async) {
-            return $promise;
-        }
-        Loop::run(function () use ($promise, &$ret) {
-            $ret = yield $promise;
-        });
-        return $ret;
+        return $promises;
     }
 
     /**
@@ -90,26 +89,17 @@ class DatabasePool
      *
      * @return Generator
      */
-    public function iterate(string $table, array $params = []): Generator
+    public function iterate2(string $table, array $params = []): Generator
     {
-        $ret = null;
-        $iterator = function () use ($table, $params, &$ret) {
-            static $iterator;
-            if ($iterator === null) {
-                $iterator = $this->iterateAsync($table, $params);
-            }
-            $ret = null;
-            if (yield $iterator->advance()) {
-                $ret = $iterator->getCurrent();
+        $producer = $this->iterateAsync($table, $params);
+        $iterator = function ($producer) {
+            if (yield $producer->advance()) {
+                return $producer->getCurrent();
             }
         };
-        do {
-            \Amp\Loop::run($iterator);
-            if ($ret === null) {
-                break;
-            }
-            yield $ret;
-        } while (true);
+        while ($yield = \Amp\call($iterator, $producer)) {
+            yield $yield;
+        }
     }
 
     /**
@@ -118,7 +108,7 @@ class DatabasePool
      *
      * @return Producer
      */
-    public function iterateAsync(string $table, array $params = []): Producer
+    public function iterateAsync2(string $table, array $params = []): Producer
     {
         $emit = function (callable $emit) use ($table, $params) {
             $iterators = [];

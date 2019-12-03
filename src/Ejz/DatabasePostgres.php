@@ -5,7 +5,6 @@ namespace Ejz;
 use Generator;
 use Amp\Loop;
 use Amp\Promise;
-use Amp\Deferred;
 use Amp\Postgres;
 use Amp\Producer;
 use Amp\Postgres\Connection;
@@ -45,48 +44,26 @@ class DatabasePostgres implements DatabaseInterface
      */
     public function execAsync(string $sql, ...$args): Promise
     {
-        $deferred = new Deferred();
-        $promise = $deferred->promise();
-        $call = function () use ($deferred, $sql, $args) {
+        return \Amp\call(function ($sql, $args) {
             if (!$this->connection instanceof Connection) {
                 yield $this->connect();
             }
-            // var_dump($sql);
-            // var_dump($args);
+            // var_dump($sql, $args);
             if ($args) {
                 $statement = yield $this->connection->prepare($sql);
-                $promise = $statement->execute($args);
+                $result = yield $statement->execute($args);
             } else {
-                $promise = $this->connection->query($sql);
+                $result = yield $this->connection->query($sql);
             }
-            $promise->onResolve(function ($err, $res) use ($deferred) {
-                if ($err) {
-                    $deferred->fail($err);
-                    return;
-                }
-                if ($res instanceof Postgres\PgSqlCommandResult) {
-                    $deferred->resolve($res->getAffectedRowCount());
-                    return;
-                }
-                $return = [];
-                while (yield $res->advance()) {
-                    $return[] = $res->getCurrent();
-                }
-                $deferred->resolve($return);
-                 // else {
-                    
-                // }
-                // var_dump($return);
-            });
-            // $result = yield 
-            // $result = yield 
-        };
-        Loop::defer($call);
-        return $promise;
-        // try {
-        // } catch (\Throwable $e) {
-        //     var_dump(1);
-        // }
+            if ($result instanceof Postgres\PgSqlCommandResult) {
+                return $result->getAffectedRowCount();
+            }
+            $return = [];
+            while (yield $result->advance()) {
+                $return[] = $result->getCurrent();
+            }
+            return $return;
+        }, $sql, $args);
     }
 
     /**
@@ -97,10 +74,7 @@ class DatabasePostgres implements DatabaseInterface
      */
     public function exec(string $sql, ...$args)
     {
-        Loop::run(function () use (&$ret, $sql, $args) {
-            $ret = yield $this->execAsync($sql, ...$args);
-        });
-        return $ret;
+        return \Amp\Promise\wait($this->execAsync($sql, ...$args));
     }
 
     /**
@@ -133,12 +107,10 @@ class DatabasePostgres implements DatabaseInterface
      */
     public function oneAsync(string $sql, ...$args): Promise
     {
-        $deferred = new Deferred();
-        $promise = $deferred->promise();
-        $this->allAsync($sql, ...$args)->onResolve(function ($_, $all) use ($deferred) {
-            $deferred->resolve($all ? $all[0] : []);
-        });
-        return $promise;
+        return \Amp\call(function ($sql, $args) {
+            $all = yield $this->allAsync($sql, ...$args);
+            return $all ? $all[0] : [];
+        }, $sql, $args);
     }
 
     /**
@@ -161,13 +133,11 @@ class DatabasePostgres implements DatabaseInterface
      */
     public function valAsync(string $sql, ...$args): Promise
     {
-        $deferred = new Deferred();
-        $promise = $deferred->promise();
-        $this->oneAsync($sql, ...$args)->onResolve(function ($_, $one) use ($deferred) {
+        return \Amp\call(function ($sql, $args) {
+            $one = yield $this->oneAsync($sql, ...$args);
             $vals = array_values($one);
-            $deferred->resolve($vals[0] ?? null);
-        });
-        return $promise;
+            return $vals[0] ?? null;
+        }, $sql, $args);
     }
 
     /**
@@ -191,12 +161,10 @@ class DatabasePostgres implements DatabaseInterface
      */
     public function colAsync(string $sql, ...$args): Promise
     {
-        $deferred = new Deferred();
-        $promise = $deferred->promise();
-        $this->allAsync($sql, ...$args)->onResolve(function ($_, $all) use ($deferred) {
-            $deferred->resolve($this->all2col($all));
-        });
-        return $promise;
+        return \Amp\call(function ($sql, $args) {
+            $all = yield $this->allAsync($sql, ...$args);
+            return $this->all2col($all);
+        }, $sql, $args);
     }
 
     /**
@@ -219,12 +187,10 @@ class DatabasePostgres implements DatabaseInterface
      */
     public function mapAsync(string $sql, ...$args): Promise
     {
-        $deferred = new Deferred();
-        $promise = $deferred->promise();
-        $this->allAsync($sql, ...$args)->onResolve(function ($_, $all) use ($deferred) {
-            $deferred->resolve($this->all2map($all));
-        });
-        return $promise;
+        return \Amp\call(function ($sql, $args) {
+            $all = yield $this->allAsync($sql, ...$args);
+            return $this->all2map($all);
+        }, $sql, $args);
     }
 
     /**
@@ -247,12 +213,10 @@ class DatabasePostgres implements DatabaseInterface
      */
     public function dictAsync(string $sql, ...$args): Promise
     {
-        $deferred = new Deferred();
-        $promise = $deferred->promise();
-        $this->allAsync($sql, ...$args)->onResolve(function ($_, $all) use ($deferred) {
-            $deferred->resolve($this->all2dict($all));
-        });
-        return $promise;
+        return \Amp\call(function ($sql, $args) {
+            $all = yield $this->allAsync($sql, ...$args);
+            return $this->all2dict($all);
+        }, $sql, $args);
     }
 
     /**
@@ -272,16 +236,13 @@ class DatabasePostgres implements DatabaseInterface
      */
     public function tablesAsync(): Promise
     {
-        $deferred = new Deferred();
-        $promise = $deferred->promise();
-        $sql = '
-            SELECT table_name FROM information_schema.tables
-            WHERE table_schema = ?
-        ';
-        $this->colAsync($sql, 'public')->onResolve(function ($_, $col) use ($deferred) {
-            $deferred->resolve($col);
+        return \Amp\call(function () {
+            $sql = '
+                SELECT table_name FROM information_schema.tables
+                WHERE table_schema = ?
+            ';
+            return yield $this->colAsync($sql, 'public');
         });
-        return $promise;
     }
 
     /**
@@ -289,10 +250,7 @@ class DatabasePostgres implements DatabaseInterface
      */
     public function tables(): array
     {
-        Loop::run(function () use (&$ret) {
-            $ret = yield $this->tablesAsync();
-        });
-        return $ret;
+        return \Amp\Promise\wait($this->tablesAsync());
     }
 
     /**
@@ -302,9 +260,8 @@ class DatabasePostgres implements DatabaseInterface
      */
     public function fieldsAsync(string $table): Promise
     {
-        $deferred = new Deferred();
-        $promise = $deferred->promise();
-        Loop::defer(function () use ($deferred, $table) {
+        return \Amp\call(function ($table) {
+            $quote = $this->config['quote'];
             $sql = '
                 SELECT * FROM information_schema.columns
                 WHERE table_schema = ? AND table_name = ?
@@ -312,7 +269,6 @@ class DatabasePostgres implements DatabaseInterface
             $pk = yield $this->pkAsync($table);
             $all = yield $this->allAsync($sql, 'public', $table);
             $collect = [];
-            $quote = $this->config['quote'];
             foreach ($all as $row) {
                 $collect[$row['column_name']] = [
                     'quoted' => $quote . $row['column_name'] . $quote,
@@ -321,9 +277,8 @@ class DatabasePostgres implements DatabaseInterface
                     'is_primary' => $row['column_name'] === $pk,
                 ];
             }
-            $deferred->resolve($collect);
-        });
-        return $promise;
+            return $collect;
+        }, $table);
     }
 
     /**
@@ -333,10 +288,7 @@ class DatabasePostgres implements DatabaseInterface
      */
     public function fields(string $table): array
     {
-        Loop::run(function () use (&$ret, $table) {
-            $ret = yield $this->fieldsAsync($table);
-        });
-        return $ret;
+        return \Amp\Promise\wait($this->fieldsAsync($table));
     }
 
     /**
@@ -346,9 +298,7 @@ class DatabasePostgres implements DatabaseInterface
      */
     public function pkAsync(string $table): Promise
     {
-        $deferred = new Deferred();
-        $promise = $deferred->promise();
-        Loop::defer(function () use ($deferred, $table) {
+        return \Amp\call(function ($table) {
             $sql = '
                 SELECT pg_attribute.attname
                 FROM pg_index, pg_class, pg_attribute, pg_namespace
@@ -362,10 +312,8 @@ class DatabasePostgres implements DatabaseInterface
                     AND indisprimary
             ';
             $exists = in_array($table, yield $this->tablesAsync(), true);
-            $pk = $exists ? yield $this->valAsync($sql, $table, 'public') : '';
-            $deferred->resolve($pk);
-        });
-        return $promise;
+            return $exists ? yield $this->valAsync($sql, $table, 'public') : '';
+        }, $table);
     }
 
     /**
@@ -375,10 +323,7 @@ class DatabasePostgres implements DatabaseInterface
      */
     public function pk(string $table): string
     {
-        Loop::run(function () use (&$ret, $table) {
-            $ret = yield $this->pkAsync($table);
-        });
-        return $ret;
+        return \Amp\Promise\wait($this->pkAsync($table));
     }
 
     /**
@@ -398,10 +343,7 @@ class DatabasePostgres implements DatabaseInterface
      */
     public function min(string $table): int
     {
-        Loop::run(function () use (&$ret, $table) {
-            $ret = yield $this->minAsync($table);
-        });
-        return $ret;
+        return \Amp\Promise\wait($this->minAsync($table));
     }
 
     /**
@@ -421,10 +363,7 @@ class DatabasePostgres implements DatabaseInterface
      */
     public function max(string $table): int
     {
-        Loop::run(function () use (&$ret, $table) {
-            $ret = yield $this->maxAsync($table);
-        });
-        return $ret;
+        return \Amp\Promise\wait($this->maxAsync($table));
     }
 
     /**
@@ -434,18 +373,15 @@ class DatabasePostgres implements DatabaseInterface
      */
     public function truncateAsync(string $table): Promise
     {
-        $deferred = new Deferred();
-        $promise = $deferred->promise();
-        Loop::defer(function () use ($deferred, $table) {
+        return \Amp\call(function ($table) {
+            $quote = $this->config['quote'];
             $tables = yield $this->tablesAsync();
             if (!in_array($table, $tables, true)) {
-                return $deferred->resolve(false);
+                return false;
             }
-            $quote = $this->config['quote'];
             yield $this->execAsync("TRUNCATE {$quote}{$table}{$quote} CASCADE");
-            $deferred->resolve(true);
-        });
-        return $promise;
+            return true;
+        }, $table);
     }
 
     /**
@@ -455,10 +391,7 @@ class DatabasePostgres implements DatabaseInterface
      */
     public function truncate(string $table): bool
     {
-        Loop::run(function () use (&$ret, $table) {
-            $ret = yield $this->truncateAsync($table);
-        });
-        return $ret;
+        return \Amp\Promise\wait($this->truncateAsync($table));
     }
 
     /**
@@ -468,14 +401,11 @@ class DatabasePostgres implements DatabaseInterface
      */
     public function dropAsync(string $table): Promise
     {
-        $deferred = new Deferred();
-        $promise = $deferred->promise();
-        Loop::defer(function () use ($deferred, $table) {
+        return \Amp\call(function ($table) {
             $quote = $this->config['quote'];
-            yield $this->execAsync("DROP TABLE IF EXISTS {$quote}{$table}{$quote} CASCADE");
-            $deferred->resolve();
-        });
-        return $promise;
+            $sql = "DROP TABLE IF EXISTS {$quote}{$table}{$quote} CASCADE";
+            yield $this->execAsync($sql);
+        }, $table);
     }
 
     /**
@@ -483,9 +413,7 @@ class DatabasePostgres implements DatabaseInterface
      */
     public function drop(string $table)
     {
-        Loop::run(function () use ($table) {
-            yield $this->dropAsync($table);
-        });
+        \Amp\Promise\wait($this->dropAsync($table));
     }
 
     /**
@@ -494,7 +422,7 @@ class DatabasePostgres implements DatabaseInterface
      *
      * @return Producer
      */
-    public function iterateAsync(string $table, array $params = []): Producer
+    public function iterate(string $table, array $params = []): Producer
     {
         $params += [
             'fields' => null,
@@ -514,6 +442,7 @@ class DatabasePostgres implements DatabaseInterface
                 'min' => $min,
                 'max' => $max,
             ] = $params;
+            $where = is_array($where) ? $this->flattenWhere($where) : $where;
             $quote = $params['config']['quote'];
             $iterator_chunk_size = $params['config']['iterator_chunk_size'];
             $pk = yield $this->pkAsync($table);
@@ -538,7 +467,7 @@ class DatabasePostgres implements DatabaseInterface
                     $key = array_rand($intervals);
                     if (!isset($intervals[$key]['iterator'])) {
                         [$min, $max] = $intervals[$key];
-                        $iterator = $this->iterateAsync(
+                        $iterator = $this->iterate(
                             $table,
                             [
                                 'asc' => mt_rand() % 2,
@@ -567,7 +496,7 @@ class DatabasePostgres implements DatabaseInterface
                 'SELECT %s FROM %s WHERE (%s) AND (%%s) ORDER BY %s LIMIT %s',
                 implode(', ', $fields),
                 $quote . $table . $quote,
-                $where === null ? 'TRUE' : $where,
+                $where === null ? 'TRUE' : (is_array($where) ? $where[0] : $where),
                 $order_by,
                 $iterator_chunk_size
             );
@@ -586,14 +515,15 @@ class DatabasePostgres implements DatabaseInterface
             do {
                 $f = $quote . $pk . $quote;
                 $op = ($asc ? '>' : '<') . ($first_iteration ? '=' : '');
-                $where = "({$f} {$op} ?)";
-                $args = [$asc ? $min : $max];
+                $_where = "({$f} {$op} ?)";
+                $args = is_array($where) ? $where[1] : [];
+                $args[] = $asc ? $min : $max;
                 if ($asc && $max || !$asc && $min) {
                     $op = $asc ? '<=' : '>=';
-                    $where = "{$where} AND ({$f} {$op} ?)";
+                    $_where = "{$_where} AND ({$f} {$op} ?)";
                     $args = [$args[0], $asc ? $max : $min];
                 }
-                $sql = sprintf($template, $where);
+                $sql = sprintf($template, $_where);
                 $all = yield $this->allAsync($sql, ...$args);
                 if (!$all) {
                     break;
@@ -615,51 +545,19 @@ class DatabasePostgres implements DatabaseInterface
     }
 
     /**
-     * @param string $table
-     * @param array  $params (optional)
-     *
-     * @return Generator
-     */
-    public function iterate(string $table, array $params = []): Generator
-    {
-        $ret = null;
-        $iterator = function () use ($table, $params, &$ret) {
-            static $iterator;
-            if ($iterator === null) {
-                $iterator = $this->iterateAsync($table, $params);
-            }
-            $ret = null;
-            if (yield $iterator->advance()) {
-                $ret = $iterator->getCurrent();
-            }
-        };
-        do {
-            \Amp\Loop::run($iterator);
-            if ($ret === null) {
-                break;
-            }
-            yield $ret;
-        } while (true);
-    }
-
-    /**
      * @param TableDefinition $definition
      *
      * @return Promise
      */
     public function createAsync(TableDefinition $definition): Promise
     {
-        $deferred = new Deferred();
-        $promise = $deferred->promise();
-        Loop::defer(function () use ($deferred, $definition) {
+        return \Amp\call(function ($definition) {
             yield $this->dropAsync($definition->getTable());
             $commands = $this->createCommands($definition);
             foreach ($commands as $command) {
                 yield $this->execAsync($command);
             }
-            $deferred->resolve();
-        });
-        return $promise;
+        }, $definition);
     }
 
     /**
@@ -670,15 +568,10 @@ class DatabasePostgres implements DatabaseInterface
      */
     public function insertAsync(TableDefinition $definition, array $values): Promise
     {
-        $deferred = new Deferred();
-        $promise = $deferred->promise();
-        Loop::defer(function () use ($deferred, $definition, $values) {
+        return \Amp\call(function ($definition, $values) {
             [$cmd, $args] = $this->insertCommand($definition, $values);
-            $this->valAsync($cmd, ...$args)->onResolve(function ($err, $res) use ($deferred) {
-                $deferred->resolve($err ? 0 : $res);
-            });
-        });
-        return $promise;
+            return yield $this->valAsync($cmd, ...$args);
+        }, $definition, $values);
     }
 
     /**
@@ -689,9 +582,7 @@ class DatabasePostgres implements DatabaseInterface
      */
     public function getAsync(TableDefinition $definition, int $id): Promise
     {
-        $deferred = new Deferred();
-        $promise = $deferred->promise();
-        Loop::defer(function () use ($deferred, $definition, $id) {
+        return \Amp\call(function ($definition, $id) {
             [$cmd, $args] = $this->getCommand($definition, $id);
             $one = yield $this->oneAsync($cmd, ...$args);
             $fields = $definition->getFields();
@@ -701,9 +592,8 @@ class DatabasePostgres implements DatabaseInterface
                 }
             }
             unset($value);
-            $deferred->resolve($one);
-        });
-        return $promise;
+            return $one;
+        }, $definition, $id);
     }
 
     /**
@@ -711,14 +601,9 @@ class DatabasePostgres implements DatabaseInterface
      */
     private function connect(): Promise
     {
-        $deferred = new Deferred();
-        $promise = $deferred->promise();
-        $call = function () use ($deferred) {
+        return \Amp\call(function () {
             $this->connection = yield Postgres\connect($this->connectionConfig);
-            $deferred->resolve();
-        };
-        Loop::defer($call);
-        return $promise;
+        });
     }
 
     /**
@@ -785,14 +670,11 @@ class DatabasePostgres implements DatabaseInterface
      */
     private function minMaxAsync(string $table, string $type): Promise
     {
-        $deferred = new Deferred();
-        $promise = $deferred->promise();
-        Loop::defer(function () use ($deferred, $table, $type) {
+        return \Amp\call(function ($table, $type) {
             $quote = $this->config['quote'];
             $pk = yield $this->pkAsync($table);
             if (!$pk) {
-                $deferred->resolve(0);
-                return;
+                return 0;
             }
             $sql = 'SELECT %s FROM %s ORDER BY %s LIMIT 1';
             $pk = $quote . $pk . $quote;
@@ -802,10 +684,8 @@ class DatabasePostgres implements DatabaseInterface
                 $quote . $table . $quote,
                 $pk . ' ' . ($type === 'min' ? 'ASC' : 'DESC')
             );
-            $val = yield $this->valAsync($sql);
-            $deferred->resolve($val);
-        });
-        return $promise;
+            return yield $this->valAsync($sql);
+        }, $table, $type);
     }
 
     /**
@@ -986,6 +866,26 @@ class DatabasePostgres implements DatabaseInterface
         $_fields = implode(', ', $_fields);
         $command = "SELECT {$_fields} FROM {$q}{$table}{$q} WHERE {$where} LIMIT 1";
         return [$command, $args];
+    }
+
+    /**
+     * @param array $where
+     *
+     * @return array
+     */
+    private function flattenWhere(array $where): array
+    {
+        if (!$where) {
+            return ['(TRUE)', []];
+        }
+        $q = $this->config['quote'];
+        foreach ($where as $key => &$value) {
+            $args[] = $value;
+            $value = "({$q}{$key}{$q} = ?)";
+        }
+        unset($value);
+        // $where = array_map
+        return ['(' . implode(' AND ', $where) . ')', $args];
     }
 }
 

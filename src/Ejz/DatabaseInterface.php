@@ -216,17 +216,9 @@ interface DatabaseInterface
      * @param string $table
      * @param array  $params (optional)
      *
-     * @return Producer
-     */
-    public function iterateAsync(string $table, array $params = []): Producer;
-
-    /**
-     * @param string $table
-     * @param array  $params (optional)
-     *
      * @return Generator
      */
-    public function iterate(string $table, array $params = []): Generator;
+    public function iterate(string $table, array $params = []): Producer;
 
     /**
      * @param TableDefinition $definition
