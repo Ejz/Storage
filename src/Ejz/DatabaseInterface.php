@@ -227,4 +227,19 @@ interface DatabaseInterface
      * @return Generator
      */
     public function iterate(string $table, array $params = []): Generator;
+
+    /**
+     * @param TableDefinition $definition
+     *
+     * @return Promise
+     */
+    public function createAsync(TableDefinition $definition): Promise;
+
+    /**
+     * @param TableDefinition $definition
+     * @param array           $values
+     *
+     * @return Promise
+     */
+    public function insertAsync(TableDefinition $definition, array $values): Promise;
 }

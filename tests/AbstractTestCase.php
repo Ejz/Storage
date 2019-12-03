@@ -5,9 +5,34 @@ namespace Tests;
 use ReflectionClass;
 use PHPUnit\Framework\TestCase;
 use Ejz\DatabasePostgres;
+use Ejz\DatabasePool;
+use Ejz\Storage;
+use Ejz\TableDefinition;
 
 abstract class AbstractTestCase extends TestCase
 {
+    /** DatabasePostgres */
+    protected $database;
+
+    /**
+     * @return void
+     */
+    protected function setUp(): void
+    {
+        $this->database = $this->getDatabasePostgres();
+    }
+
+    /**
+     * @return void
+     */
+    protected function tearDown(): void
+    {
+        $tables = $this->database->tables();
+        foreach ($tables as $table) {
+            $this->database->drop($table);
+        }
+    }
+
     /**
      * @param int $n (optional)
      *
@@ -24,6 +49,29 @@ abstract class AbstractTestCase extends TestCase
             getenv("POSTGRES{$n}_DB")
         );
         return new DatabasePostgres($dsn);
+    }
+
+    /**
+     * @return DatabasePool
+     */
+    protected function getDatabasePool(): DatabasePool
+    {
+        return new DatabasePool([
+            $this->getDatabasePostgres(0),
+            $this->getDatabasePostgres(1),
+            $this->getDatabasePostgres(2),
+        ]);
+    }
+
+    /**
+     * @param array $tables
+     *
+     * @return Storage
+     */
+    protected function getStorage(array $tables): Storage
+    {
+        $pool = $this->getDatabasePool();
+        return new Storage($pool, $tables);
     }
 
     /**

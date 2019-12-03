@@ -4,28 +4,6 @@ namespace Tests;
 
 class TestCaseDatabasePostgres extends AbstractTestCase
 {
-    /** DatabasePostgres */
-    private $database;
-
-    /**
-     * @return void
-     */
-    protected function setUp(): void
-    {
-        $this->database = $this->getDatabasePostgres();
-    }
-
-    /**
-     * @return void
-     */
-    protected function tearDown(): void
-    {
-        $tables = $this->database->tables();
-        foreach ($tables as $table) {
-            $this->database->drop($table);
-        }
-    }
-
     /**
      * @test
      */

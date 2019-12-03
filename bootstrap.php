@@ -12,6 +12,8 @@ if (!is_file($_ = ROOT . '/vendor/autoload.php')) {
     exit(1);
 }
 
+require $_;
+
 if (is_file(ROOT . '/.env')) {
     (new \Dotenv\Dotenv(ROOT, '.env'))->load();
 }

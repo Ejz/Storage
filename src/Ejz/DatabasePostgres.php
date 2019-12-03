@@ -51,24 +51,42 @@ class DatabasePostgres implements DatabaseInterface
             if (!$this->connection instanceof Connection) {
                 yield $this->connect();
             }
+            // var_dump($sql);
+            // var_dump($args);
             if ($args) {
                 $statement = yield $this->connection->prepare($sql);
-                $result = yield $statement->execute($args);
+                $promise = $statement->execute($args);
             } else {
-                $result = yield $this->connection->query($sql);
+                $promise = $this->connection->query($sql);
             }
-            if ($result instanceof Postgres\PgSqlCommandResult) {
-                $return = $result->getAffectedRowCount();
-            } else {
-                $return = [];
-                while (yield $result->advance()) {
-                    $return[] = $result->getCurrent();
+            $promise->onResolve(function ($err, $res) use ($deferred) {
+                if ($err) {
+                    $deferred->fail($err);
+                    return;
                 }
-            }
-            $deferred->resolve($return);
+                if ($res instanceof Postgres\PgSqlCommandResult) {
+                    $deferred->resolve($res->getAffectedRowCount());
+                    return;
+                }
+                $return = [];
+                while (yield $res->advance()) {
+                    $return[] = $res->getCurrent();
+                }
+                $deferred->resolve($return);
+                 // else {
+                    
+                // }
+                // var_dump($return);
+            });
+            // $result = yield 
+            // $result = yield 
         };
         Loop::defer($call);
         return $promise;
+        // try {
+        // } catch (\Throwable $e) {
+        //     var_dump(1);
+        // }
     }
 
     /**
@@ -299,7 +317,7 @@ class DatabasePostgres implements DatabaseInterface
                 $collect[$row['column_name']] = [
                     'quoted' => $quote . $row['column_name'] . $quote,
                     'type' => $row['data_type'],
-                    'is_null' => strcasecmp($row['is_nullable'], 'yes') === 0,
+                    'is_nullable' => strcasecmp($row['is_nullable'], 'yes') === 0,
                     'is_primary' => $row['column_name'] === $pk,
                 ];
             }
@@ -625,6 +643,70 @@ class DatabasePostgres implements DatabaseInterface
     }
 
     /**
+     * @param TableDefinition $definition
+     *
+     * @return Promise
+     */
+    public function createAsync(TableDefinition $definition): Promise
+    {
+        $deferred = new Deferred();
+        $promise = $deferred->promise();
+        Loop::defer(function () use ($deferred, $definition) {
+            yield $this->dropAsync($definition->getTable());
+            $commands = $this->createCommands($definition);
+            foreach ($commands as $command) {
+                yield $this->execAsync($command);
+            }
+            $deferred->resolve();
+        });
+        return $promise;
+    }
+
+    /**
+     * @param TableDefinition $definition
+     * @param array           $values
+     *
+     * @return Promise
+     */
+    public function insertAsync(TableDefinition $definition, array $values): Promise
+    {
+        $deferred = new Deferred();
+        $promise = $deferred->promise();
+        Loop::defer(function () use ($deferred, $definition, $values) {
+            [$cmd, $args] = $this->insertCommand($definition, $values);
+            $this->valAsync($cmd, ...$args)->onResolve(function ($err, $res) use ($deferred) {
+                $deferred->resolve($err ? 0 : $res);
+            });
+        });
+        return $promise;
+    }
+
+    /**
+     * @param TableDefinition $definition
+     * @param int             $id
+     *
+     * @return Promise
+     */
+    public function getAsync(TableDefinition $definition, int $id): Promise
+    {
+        $deferred = new Deferred();
+        $promise = $deferred->promise();
+        Loop::defer(function () use ($deferred, $definition, $id) {
+            [$cmd, $args] = $this->getCommand($definition, $id);
+            $one = yield $this->oneAsync($cmd, ...$args);
+            $fields = $definition->getFields();
+            foreach ($one as $key => &$value) {
+                if ($fields[$key]['get'] ?? null) {
+                    $value = $fields[$key]['get']($value);
+                }
+            }
+            unset($value);
+            $deferred->resolve($one);
+        });
+        return $promise;
+    }
+
+    /**
      * @return Promise
      */
     private function connect(): Promise
@@ -749,164 +831,212 @@ class DatabasePostgres implements DatabaseInterface
         return $intervals;
     }
 
-    // /**
-    //  * @param TableDefinition $definition
-    //  *
-    //  * @return Promise
-    //  */
-    // public function createAsync(TableDefinition $definition): Promise
-    // {
-    //     $deferred = new Deferred();
-    //     $promise = $deferred->promise();
-    //     Loop::defer(function () use ($deferred, $definition) {
-    //         yield $this->dropAsync($definition->getTable());
-    //         $commands = $this->createCommands($definition);
-    //         foreach ($commands as $command) {
-    //             yield $this->execAsync($command);
-    //         }
-    //         $deferred->resolve();
-    //     });
-    //     return $promise;
-    // }
+    /**
+     * @param TableDefinition $definition
+     *
+     * @return array
+     */
+    private function createCommands(TableDefinition $definition): array
+    {
+        $q = $this->config['quote'];
+        $table = $definition->getTable();
+        $fields = $definition->getFields();
+        $pk = $definition->getPrimaryKey();
+        $commands = [];
+        $alters = [];
+        $_fields = [];
+        $map = [
+            TableDefinition::TYPE_INT => 'INTEGER',
+            TableDefinition::TYPE_BLOB => 'BYTEA',
+            TableDefinition::TYPE_TEXT => 'TEXT',
+            TableDefinition::TYPE_JSON => 'JSONB',
+        ];
+        $defaults = [
+            TableDefinition::TYPE_INT => '0::INTEGER',
+            TableDefinition::TYPE_BLOB => '\'\'::BYTEA',
+            TableDefinition::TYPE_TEXT => '\'\'::TEXT',
+            TableDefinition::TYPE_JSON => '\'{}\'::JSONB',
+        ];
+        // $type_append = [
+        //     'timestamp' => '(0) without time zone',
+        // ];
+        // $sql_defaults = [
+        //     'smallint' => '0',
+        //     'integer' => '0',
+        //     'int' => '0',
+        //     'bigint' => '0',
+        //     'text' => '\'\'::text',
+        //     'date' => 'CURRENT_DATE',
+        //     'timestamp' => 'CURRENT_TIMESTAMP',
+        //     TableDefinition::TYPE_BLOB => 'CURRENT_TIMESTAMP',
+        // ];
+        $seq = "{$table}_seq";
+        $pk_start_with = $definition->getPrimaryKeyStartWith();
+        $pk_increment_by = $definition->getPrimaryKeyIncrementBy();
+        $commands[] = "DROP SEQUENCE IF EXISTS {$q}{$seq}{$q} CASCADE";
+        $commands[] = "
+            CREATE SEQUENCE {$q}{$seq}{$q}
+            AS BIGINT
+            START WITH {$pk_start_with}
+            INCREMENT BY {$pk_increment_by}
+            MINVALUE {$pk_start_with}
+        ";
+        $alters[] = "
+            ALTER TABLE {$q}{$table}{$q}
+            ADD CONSTRAINT {$q}{$table}_{$pk}_pk{$q}
+            PRIMARY KEY ({$q}{$pk}{$q})
+        ";
+        $_fields[] = "
+            {$q}{$pk}{$q} BIGINT DEFAULT
+            nextval('{$seq}'::regclass) NOT NULL
+        ";
+        $uniques = [];
+        // $indexes = [];
+        foreach ($fields as $field => $meta) {
+            [
+                'is_nullable' => $is_nullable,
+                'type' => $type,
+                'database_default' => $database_default,
+                'unique' => $unique,
+            ] = $meta;
+            foreach ($unique as $_) {
+                @ $uniques[$_][] = $field;
+            }
+            $database_default = $database_default ?? ($is_nullable ? 'NULL' : $defaults[$type]);
+            $database_default = (string) $database_default;
+            // $default = array_key_exists('database_default', $meta) ? $meta['database_default'] : ();
 
-    // /**
-    //  * @param TableDefinition $definition
-    //  *
-    //  * @return array
-    //  */
-    // private function createCommands(TableDefinition $definition): array
-    // {
-    //     $q = $this->config['quote'];
-    //     $table = $definition->getTable();
-    //     $fields = $definition->getFields();
-    //     $config = $definition->getConfig();
-    //     $pk = $definition->getPk();
-    //     $commands = [];
-    //     $alters = [];
-    //     $_fields = [];
-    //     $type_append = [
-    //         'timestamp' => '(0) without time zone',
-    //     ];
-    //     $sql_defaults = [
-    //         'smallint' => '0',
-    //         'integer' => '0',
-    //         'bigint' => '0',
-    //         'text' => '\'\'::text',
-    //         'date' => 'CURRENT_DATE',
-    //         'timestamp' => 'CURRENT_TIMESTAMP',
-    //     ];
-    //     $seq = "{$table}_seq";
-    //     $pk_start_with = $config['pk_start_with'] ?? 1;
-    //     $pk_increment_by = $config['pk_increment_by'] ?? 1;
-    //     $commands[] = "DROP SEQUENCE IF EXISTS {$q}{$seq}{$q} CASCADE";
-    //     $commands[] = "
-    //         CREATE SEQUENCE {$q}{$seq}{$q}
-    //         AS bigint
-    //         START WITH {$pk_start_with}
-    //         INCREMENT BY {$pk_increment_by}
-    //         MINVALUE {$pk_start_with}
-    //     ";
-    //     $alters[] = "
-    //         ALTER TABLE {$q}{$table}{$q}
-    //         ADD CONSTRAINT {$q}{$table}_{$pk}_pk{$q}
-    //         PRIMARY KEY ({$q}{$pk}{$q})
-    //     ";
-    //     $_fields[] = sprintf(
-    //         '%s bigint DEFAULT %s NOT NULL',
-    //         $q . $pk . $q,
-    //         "nextval('{$seq}'::regclass)"
-    //     );
-    //     $uniques = [];
-    //     $indexes = [];
-    //     foreach ($fields as $field => $meta) {
-    //         if (!empty($meta['unique'])) {
-    //             $u = (array) $meta['unique'];
-    //             foreach ($u as $_) {
-    //                 @ $uniques[$_][] = $field;
-    //             }
-    //         }
-    //         $is_null = !empty($meta['is_null']);
-    //         $_fields[] = sprintf(
-    //             '%s %s%s DEFAULT %s %s',
-    //             $q . $field . $q,
-    //             $meta['type'],
-    //             $type_append[$meta['type']] ?? '',
-    //             $meta['sql_default'] ?? ($is_null ? 'NULL' : $sql_defaults[$meta['type']]),
-    //             !$is_null ? 'NOT NULL' : 'NULL'
-    //         );
-    //     }
-    //     foreach ($uniques as $name => $fs) {
-    //         $fs = implode(', ', array_map(function ($f) use ($q) {
-    //             return $q . $f . $q;
-    //         }, $fs));
-    //         $alters[] = "ALTER TABLE {$q}{$table}{$q} ADD CONSTRAINT {$name} UNIQUE ({$fs})";
-    //     }
-    //     foreach ($indexes as $name => [$type, $fs]) {
-    //         $fs = implode(', ', array_map(function ($f) use ($q) {
-    //             return $q . $f . $q;
-    //         }, $fs));
-    //         $alters[] = "CREATE INDEX {$q}{$name}{$q} ON {$q}{$table}{$q} USING {$type} ({$fs})";
-    //     }
-    //     $_fields = implode(', ', $_fields);
-    //     $commands[] = "CREATE TABLE {$q}{$table}{$q} ({$_fields})";
-    //     print_r($commands);
-    //     print_r($alters);
-    //     return array_merge($commands, $alters);
-    // }
+            // $ ?? 
+            $_field = $q . $field . $q . ' ' . $map[$type];
+            if ($database_default !== '') {
+                $_field .= ' DEFAULT ' . $database_default;
+            }
+            $_field .= ' ' . ($is_nullable ? 'NULL' : 'NOT NULL');
+            $_fields[] = $_field;
+        }
+        foreach ($uniques as $unique => $fs) {
+            $fs = implode(', ', array_map(function ($f) use ($q) {
+                return $q . $f . $q;
+            }, $fs));
+            $alters[] = "ALTER TABLE {$q}{$table}{$q} ADD CONSTRAINT {$unique} UNIQUE ({$fs})";
+        }
+        // foreach ($indexes as $name => [$type, $fs]) {
+        //     $fs = implode(', ', array_map(function ($f) use ($q) {
+        //         return $q . $f . $q;
+        //     }, $fs));
+        //     $alters[] = "CREATE INDEX {$q}{$name}{$q} ON {$q}{$table}{$q} USING {$type} ({$fs})";
+        // }
+        $_fields = implode(', ', $_fields);
+        $commands[] = "CREATE TABLE {$q}{$table}{$q} ({$_fields})";
+        // print_r($commands);
+        // print_r($alters);
+        return array_merge($commands, $alters);
+    }
 
-    
+    /**
+     * @param TableDefinition $definition
+     * @param array           $values
+     *
+     * @return array
+     */
+    private function insertCommand(TableDefinition $definition, array $values): array
+    {
+        $q = $this->config['quote'];
+        $table = $definition->getTable();
+        $fields = $definition->getFields();
+        $pk = $definition->getPrimaryKey();
+        $_columns = [];
+        $_values = [];
+        $args = [];
+        foreach ($values as $key => $value) {
+            $_columns[] = $q . $key . $q;
+            $_values[] = $fields[$key]['set_pattern'];
+            if ($fields[$key]['set'] ?? null) {
+                $value = $fields[$key]['set']($value);
+            }
+            $args[] = $value;
+        }
+        $_columns = implode(', ', $_columns);
+        $_values = implode(', ', $_values);
+        $insert = ($_columns && $_values) ? "({$_columns}) VALUES ({$_values})" : 'DEFAULT VALUES';
+        $command = "INSERT INTO {$q}{$table}{$q} {$insert} RETURNING {$q}{$pk}{$q}";
+        return [$command, $args];
+    }
 
-    // /**
-    //  * @param TableDefinition $definition
-    //  * @param array           $values
-    //  *
-    //  * @return Promise
-    //  */
-    // public function insertAsync(TableDefinition $definition, array $values): Promise
-    // {
-    //     $deferred = new Deferred();
-    //     $promise = $deferred->promise();
-    //     Loop::defer(function () use ($deferred, $definition, $values) {
-    //         [$cmd, $args] = $this->insertCommand($definition, $values);
-    //         $id = yield $this->valAsync($cmd, $args);
-    //         $deferred->resolve($id);
-    //     });
-    //     return $promise;
-    // }
+    /**
+     * @param TableDefinition $definition
+     * @param int             $id
+     *
+     * @return array
+     */
+    private function getCommand(TableDefinition $definition, int $id): array
+    {
+        $q = $this->config['quote'];
+        $table = $definition->getTable();
+        $fields = $definition->getFields();
+        $pk = $definition->getPrimaryKey();
+        $args = [$id];
+        $where = "{$q}{$pk}{$q} = ?";
+        $_fields = [];
+        foreach ($fields as $field => $meta) {
+            $get_pattern = $meta['get_pattern'];
+            $f = sprintf($get_pattern, $q . $field . $q);
+            $_fields[] = $f . ' AS ' . $q . $field . $q;
+        }
+        $_fields = implode(', ', $_fields);
+        $command = "SELECT {$_fields} FROM {$q}{$table}{$q} WHERE {$where} LIMIT 1";
+        return [$command, $args];
+    }
+}
 
-    // /**
-    //  * @param TableDefinition $definition
-    //  * @param array           $values
-    //  *
-    //  * @return array
-    //  */
-    // private function insertCommand(TableDefinition $definition, array $values): array
-    // {
-    //     $table = $definition->getTable();
-    //     $fields = $definition->getFields();
-    //     $pk = $definition->getPk();
-    //     $q = $this->config['quote'];
-    //     $_columns = [];
-    //     $_values = [];
-    //     $args = [];
-    //     foreach ($fields as $field => $meta) {
-    //         $_columns[] = $q . $field . $q;
-    //         if (array_key_exists($field, $values)) {
-    //             $args[] = $values[$field];
-    //             $_values[] = '?';
-    //         } else {
-    //             $_values[] = 'DEFAULT';
-    //         }
-    //     }
-    //     $_columns = implode(', ', $_columns);
-    //     $_values = implode(', ', $_values);
-    //     $insert = ($_columns && $_values) ? "({$_columns}) VALUES ({$_values})" : 'DEFAULT VALUES';
-    //     $command = "INSERT INTO {$q}{$table}{$q} {$insert} RETURNING {$q}{$pk}{$q}";
-    //     print_r($command);
-    //     return [$command, $args];
-    // }
 
-    // /**
+/*
+$_columns = [];
+        $_values = [];
+        $args = [];
+        foreach ($values as $key => $value) {
+            $_columns[] = $q . $key . $q;
+            $_values[] = '?';
+            $args[] = $value;
+        }
+        // ("field") AS "field", 
+        $_columns = implode(', ', $_columns);
+        $_values = implode(', ', $_values);
+        $insert = ($_columns && $_values) ? "({$_columns}) VALUES ({$_values})" : 'DEFAULT VALUES';
+        $command = "INSERT INTO {$q}{$table}{$q} {$insert} RETURNING {$q}{$pk}{$q}";
+        // print_r($command);
+        // print_r($args);
+        return [$command, $args];
+
+        $quote = $this->config['quote'];
+        $table = $definition->getTable();
+        $pk = $definition->getPk();
+        
+        // $fields = $definition->getFields();
+        // $select = is_numeric($select) ? 
+        // $_columns = [];
+        // $_values = [];
+        // $args = [];
+        // $pk = '';
+        // foreach ($fields as $field => $meta) {
+        //     if ($meta['type'] === 'primary') {
+        //         $pk = $field;
+        //         continue;
+        //     }
+        //     $_columns[] = $q . $field . $q;
+        //     if (array_key_exists($field, $values)) {
+        //         $args[] = $values[$field];
+        //         $_values[] = '?';
+        //     } else {
+        //         $_values[] = 'DEFAULT';
+        //     }
+        // }
+        // // $_columns = implode(', ', $_columns);
+        // // $_values = implode(', ', $_values);
+        // // $insert = $_columns && $_values ? "({$_columns}) VALUES ({$_values})" : 'DEFAULT VALUES';
+        // print_r($command);
+ */
+// /**
     //  * @param TableDefinition $definition
     //  * @param int             $id
     //  *
@@ -932,35 +1062,5 @@ class DatabasePostgres implements DatabaseInterface
     //  */
     // private function getCommand(TableDefinition $definition, int $id): array
     // {
-    //     $quote = $this->config['quote'];
-    //     $table = $definition->getTable();
-    //     $pk = $definition->getPk();
-    //     $args = [$id];
-    //     $where = "{$q}{$pk}{$q} = ?";
-    //     $command = "SELECT * FROM {$q}{$table}{$q} WHERE {$where} LIMIT 1";
-    //     return [$command, $args];
-    //     // $fields = $definition->getFields();
-    //     // $select = is_numeric($select) ? 
-    //     // $_columns = [];
-    //     // $_values = [];
-    //     // $args = [];
-    //     // $pk = '';
-    //     // foreach ($fields as $field => $meta) {
-    //     //     if ($meta['type'] === 'primary') {
-    //     //         $pk = $field;
-    //     //         continue;
-    //     //     }
-    //     //     $_columns[] = $q . $field . $q;
-    //     //     if (array_key_exists($field, $values)) {
-    //     //         $args[] = $values[$field];
-    //     //         $_values[] = '?';
-    //     //     } else {
-    //     //         $_values[] = 'DEFAULT';
-    //     //     }
-    //     // }
-    //     // // $_columns = implode(', ', $_columns);
-    //     // // $_values = implode(', ', $_values);
-    //     // // $insert = $_columns && $_values ? "({$_columns}) VALUES ({$_values})" : 'DEFAULT VALUES';
-    //     // print_r($command);
+    
     // }
-}
