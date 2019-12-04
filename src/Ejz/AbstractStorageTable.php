@@ -107,6 +107,37 @@ abstract class AbstractStorageTable
     }
 
     /**
+     * @param int   $id
+     * @param array $values (optional)
+     *
+     * @return Promise
+     */
+    public function updateAsync(int $id, array $values = []): Promise
+    {
+        $values = $this->definition->setDefaultValues($values);
+        return \Amp\call(function ($id, $values) {
+            $deferred = new Deferred();
+            $pool = $this->getShards($id, $values);
+            $promises = $pool->updateAsync($this->definition, $id, $values);
+            \Amp\Promise\all($promises)->onResolve(function ($err) use ($deferred) {
+                $deferred->resolve(!$err);
+            });
+            return $deferred->promise();
+        }, $id, $values);
+    }
+
+    /**
+     * @param int   $id
+     * @param array $values (optional)
+     *
+     * @return bool
+     */
+    public function update(int $id, array $values = []): bool
+    {
+        return \Amp\Promise\wait($this->updateAsync($id, $values));
+    }
+
+    /**
      * @param int $id
      * @param mixed $fields (optional)
      *

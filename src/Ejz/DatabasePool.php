@@ -10,6 +10,8 @@ use RuntimeException;
 
 class DatabasePool
 {
+    const NO_SUCH_DB_ERROR = 'NO_SUCH_DB_ERROR: %s';
+
     /** @var DatabaseInterface[] */
     private $dbs;
 
@@ -29,7 +31,7 @@ class DatabasePool
     public function db(string $db): DatabaseInterface
     {
         if (!isset($this->dbs[$db])) {
-            throw new RuntimeException();
+            throw new RuntimeException(sprintf(self::NO_SUCH_DB_ERROR, $db));
         }
         return $this->dbs[$db];
     }

@@ -49,7 +49,6 @@ class DatabasePostgres implements DatabaseInterface
             if (!$this->connection instanceof Connection) {
                 yield $this->connect();
             }
-            // var_dump($sql, $args);
             if ($args) {
                 $statement = yield $this->connection->prepare($sql);
                 $result = yield $statement->execute($args);
@@ -457,12 +456,6 @@ class DatabasePostgres implements DatabaseInterface
             if (!array_filter(array_keys($fields), 'is_string')) {
                 $fields = array_fill_keys($fields, []);
             }
-            // if ($fields === null) {
-            //     $fields = yield $this->fieldsAsync($table);
-            //     $fields = array_map(function ($_) {
-            //         return $_['quoted'];
-            //     }, $fields);
-            // }
             if ($rand) {
                 $min = $min ?? yield $this->minAsync($table);
                 $max = $max ?? yield $this->maxAsync($table);
@@ -607,6 +600,24 @@ class DatabasePostgres implements DatabaseInterface
             unset($value);
             return $one;
         }, $definition, $id, $fields);
+    }
+
+    /**
+     * @param TableDefinition $definition
+     * @param int             $id
+     * @param array           $values
+     *
+     * @return Promise
+     */
+    public function updateAsync(TableDefinition $definition, int $id, array $values): Promise
+    {
+        return \Amp\call(function ($definition, $id, $values) {
+            if (!$values) {
+                return false;
+            }
+            [$cmd, $args] = $this->updateCommand($definition, $id, $values);
+            return yield $this->execAsync($cmd, ...$args);
+        }, $definition, $id, $values);
     }
 
     /**
@@ -879,6 +890,32 @@ class DatabasePostgres implements DatabaseInterface
         }
         $_fields = implode(', ', $_fields);
         $command = "SELECT {$_fields} FROM {$q}{$table}{$q} WHERE {$where} LIMIT 1";
+        return [$command, $args];
+    }
+
+    /**
+     * @param TableDefinition $definition
+     * @param int             $id
+     * @param array           $values
+     *
+     * @return array
+     */
+    private function updateCommand(TableDefinition $definition, int $id, array $values): array
+    {
+        $q = $this->config['quote'];
+        $table = $definition->getTable();
+        $pk = $definition->getPrimaryKey();
+        $fields = $definition->getFields();
+        $args = [];
+        $update = [];
+        foreach ($values as $key => $value) {
+            $field = $fields[$key];
+            $update[] = $q . ($field['field'] ?? $key) . $q . ' = ' . $field['set_pattern'];
+            $args[] = isset($field['set']) ? $field['set']($value) : $value;
+        }
+        $update = implode(', ', $update);
+        $args[] = $id;
+        $command = "UPDATE {$q}{$table}{$q} SET {$update} WHERE {$q}{$pk}{$q} = ?";
         return [$command, $args];
     }
 

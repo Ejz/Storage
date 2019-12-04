@@ -279,4 +279,43 @@ class TestCaseStorage extends AbstractTestCase
         $this->assertTrue(count($ids) === 2000);
         $this->assertTrue(count(array_unique($ids)) === 2000);
     }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_update()
+    {
+        $storage = $this->getStorage([
+            'table' => [
+                'fields' => [
+                    'text1' => [],
+                ],
+                'get_shards' => function (?int $id, array $values, array $shards) {
+                    $c = count($shards);
+                    $keys = array_keys($shards);
+                    if (!isset($id)) {
+                        $key = $keys[mt_rand(0, $c - 1)];
+                    } else {
+                        $id %= $c;
+                        $id -= 1;
+                        $id = $id < 0 ? $id + $c : $id;
+                        $key = $keys[$id];
+                    }
+                    return [$shards[$key]];
+                },
+                'primary_key_start_with' => function ($shard, $shards) {
+                    return 1 + ((int) array_search($shard, $shards));
+                },
+                'primary_key_increment_by' => function ($shard, $shards) {
+                    return count($shards);
+                },
+            ],
+        ]);
+        $table = $storage->table();
+        $table->create();
+        $id = $table->insert(['text1' => 'foo']);
+        $ok = $table->update($id, ['text1' => 'bar']);
+        $this->assertTrue($ok);
+        $this->assertTrue($table->get($id)['text1'] === 'bar');
+    }
 }
