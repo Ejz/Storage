@@ -78,11 +78,20 @@ class TableDefinition
     }
 
     /**
+     * @param mixed $filter (optional)
+     *
      * @return array
      */
-    public function getFields(): array
+    public function getFields($filter = null): array
     {
-        return $this->definition['fields'];
+        $fields = $this->definition['fields'];
+        $fields = $filter !== null ? array_filter($fields, function ($value, $key) use ($filter) {
+            if (is_array($filter)) {
+                return in_array($value['field'] ?? $key, $filter);
+            }
+            return in_array($filter, (array) ($value['filter'] ?? []));
+        }, ARRAY_FILTER_USE_BOTH) : $fields;
+        return $fields;
     }
 
     /**
@@ -113,7 +122,7 @@ class TableDefinition
      */
     public function getShards(?int $id, array $values = []): array
     {
-        $shards = $this->definition['names'];
+        $shards = $this->definition['shards'];
         return $this->definition['get_shards']($id, $values, $shards);
     }
 
@@ -121,27 +130,53 @@ class TableDefinition
      * @param ?int  $id
      * @param array $values (optional)
      *
-     * @return int
+     * @return string
      */
-    public function getShard(?int $id, array $values = []): int
+    public function getShard(?int $id, array $values = []): string
     {
         $shards = $this->getShards($id, $values);
         return $shards[array_rand($shards)];
     }
 
     /**
+     * @param string $shard
+     *
      * @return int
      */
-    public function getPrimaryKeyStartWith(): int
+    public function getPrimaryKeyStartWith(string $shard): int
     {
-        return (int) ($this->definition['primary_key_start_with'] ?? 1);
+        $shards = $this->definition['shards'];
+        $val = $this->definition['primary_key_start_with'] ?? 1;
+        return (int) (is_callable($val) ? $val($shard, $shards) : $val);
     }
 
     /**
+     * @param string $shard
+     *
      * @return int
      */
-    public function getPrimaryKeyIncrementBy(): int
+    public function getPrimaryKeyIncrementBy(string $shard): int
     {
-        return (int) ($this->definition['primary_key_increment_by'] ?? 1);
+        $shards = $this->definition['shards'];
+        $val = $this->definition['primary_key_increment_by'] ?? 1;
+        return (int) (is_callable($val) ? $val($shard, $shards) : $val);
+    }
+
+    /**
+     * @param mixed $filter
+     *
+     * @return array
+     */
+    public function getFieldsForIterate($filter): array
+    {
+        $fields = $this->getFields($filter);
+        $ret = [];
+        foreach ($fields as $key => $value) {
+            $ret[$key] = [
+                'pattern' => $value['get_pattern'] ?? '%s',
+                'field' => $value['field'] ?? $key,
+            ];
+        }
+        return $ret;
     }
 }

@@ -32,6 +32,7 @@ class DatabasePostgres implements DatabaseInterface
             'quote' => '"',
             'iterator_chunk_size' => 100,
             'rand_iterator_intervals' => 1000,
+            'shard' => '',
         ];
         $this->connection = null;
     }
@@ -255,10 +256,11 @@ class DatabasePostgres implements DatabaseInterface
 
     /**
      * @param string $table
+     * @param bool   $pk    (optional)
      *
      * @return Promise
      */
-    public function fieldsAsync(string $table): Promise
+    public function fieldsAsync(string $table, bool $pk = true): Promise
     {
         return \Amp\call(function ($table) {
             $quote = $this->config['quote'];
@@ -283,12 +285,13 @@ class DatabasePostgres implements DatabaseInterface
 
     /**
      * @param string $table
+     * @param bool   $pk    (optional)
      *
      * @return array
      */
-    public function fields(string $table): array
+    public function fields(string $table, bool $pk = true): array
     {
-        return \Amp\Promise\wait($this->fieldsAsync($table));
+        return \Amp\Promise\wait($this->fieldsAsync($table, $pk));
     }
 
     /**
@@ -442,23 +445,29 @@ class DatabasePostgres implements DatabaseInterface
                 'min' => $min,
                 'max' => $max,
             ] = $params;
-            $where = is_array($where) ? $this->flattenWhere($where) : $where;
-            $quote = $params['config']['quote'];
-            $iterator_chunk_size = $params['config']['iterator_chunk_size'];
-            $pk = yield $this->pkAsync($table);
+            $pk = $params['_pk'] ?? yield $this->pkAsync($table);
             if (!$pk) {
                 return;
             }
-            if ($fields === null) {
-                $fields = yield $this->fieldsAsync($table);
-                $fields = array_map(function ($_) {
-                    return $_['quoted'];
-                }, $fields);
+            $where = is_array($where) ? $this->flattenWhere($where) : $where;
+            $quote = $params['config']['quote'];
+            $iterator_chunk_size = $params['config']['iterator_chunk_size'];
+            $fields = $fields ?? array_fill_keys(array_keys(yield $this->fieldsAsync($table)), []);
+            $fields = (array) $fields;
+            if (!array_filter(array_keys($fields), 'is_string')) {
+                $fields = array_fill_keys($fields, []);
             }
+            // if ($fields === null) {
+            //     $fields = yield $this->fieldsAsync($table);
+            //     $fields = array_map(function ($_) {
+            //         return $_['quoted'];
+            //     }, $fields);
+            // }
             if ($rand) {
                 $min = $min ?? yield $this->minAsync($table);
                 $max = $max ?? yield $this->maxAsync($table);
                 $params['fields'] = $fields;
+                $params['_pk'] = $pk;
                 $n = $params['config']['rand_iterator_intervals'];
                 $n = min($n, $max - $min + 1);
                 $intervals = $this->getIntervalsForRandIterator($min, $max, $n);
@@ -485,12 +494,15 @@ class DatabasePostgres implements DatabaseInterface
                 }
                 return;
             }
-            $qk = $quote . $pk . $quote;
-            $fields[$_pk = 'pk_' . md5($pk)] = $qk;
-            $order_by = $qk . ' ' . ($asc ? 'ASC' : 'DESC');
+            $qpk = $quote . $pk . $quote;
+            $order_by = $qpk . ' ' . ($asc ? 'ASC' : 'DESC');
+            $fields[$_pk = 'pk_' . md5($pk)] = ['field' => $pk];
             $fields = array_map(function ($field) use ($quote) {
-                [$as, $exp] = $field;
-                return $exp . ' AS ' . $quote . $as . $quote;
+                [$alias, $value] = $field;
+                return sprintf(
+                    $value['pattern'] ?? '%s',
+                    $quote . ($value['field'] ?? $alias) . $quote
+                ) . ' AS ' . $quote . $alias . $quote;
             }, array_map(null, array_keys($fields), array_values($fields)));
             $template = sprintf(
                 'SELECT %s FROM %s WHERE (%s) AND (%%s) ORDER BY %s LIMIT %s',
@@ -577,13 +589,14 @@ class DatabasePostgres implements DatabaseInterface
     /**
      * @param TableDefinition $definition
      * @param int             $id
+     * @param mixed           $fields
      *
      * @return Promise
      */
-    public function getAsync(TableDefinition $definition, int $id): Promise
+    public function getAsync(TableDefinition $definition, int $id, $fields): Promise
     {
-        return \Amp\call(function ($definition, $id) {
-            [$cmd, $args] = $this->getCommand($definition, $id);
+        return \Amp\call(function ($definition, $id, $fields) {
+            [$cmd, $args] = $this->getCommand($definition, $id, $fields);
             $one = yield $this->oneAsync($cmd, ...$args);
             $fields = $definition->getFields();
             foreach ($one as $key => &$value) {
@@ -593,7 +606,7 @@ class DatabasePostgres implements DatabaseInterface
             }
             unset($value);
             return $one;
-        }, $definition, $id);
+        }, $definition, $id, $fields);
     }
 
     /**
@@ -751,8 +764,8 @@ class DatabasePostgres implements DatabaseInterface
         //     TableDefinition::TYPE_BLOB => 'CURRENT_TIMESTAMP',
         // ];
         $seq = "{$table}_seq";
-        $pk_start_with = $definition->getPrimaryKeyStartWith();
-        $pk_increment_by = $definition->getPrimaryKeyIncrementBy();
+        $pk_start_with = $definition->getPrimaryKeyStartWith($this->config['shard']);
+        $pk_increment_by = $definition->getPrimaryKeyIncrementBy($this->config['shard']);
         $commands[] = "DROP SEQUENCE IF EXISTS {$q}{$seq}{$q} CASCADE";
         $commands[] = "
             CREATE SEQUENCE {$q}{$seq}{$q}
@@ -846,14 +859,15 @@ class DatabasePostgres implements DatabaseInterface
     /**
      * @param TableDefinition $definition
      * @param int             $id
+     * @param mixed           $fields
      *
      * @return array
      */
-    private function getCommand(TableDefinition $definition, int $id): array
+    private function getCommand(TableDefinition $definition, int $id, $fields): array
     {
         $q = $this->config['quote'];
         $table = $definition->getTable();
-        $fields = $definition->getFields();
+        $fields = $definition->getFields($fields);
         $pk = $definition->getPrimaryKey();
         $args = [$id];
         $where = "{$q}{$pk}{$q} = ?";
@@ -884,7 +898,6 @@ class DatabasePostgres implements DatabaseInterface
             $value = "({$q}{$key}{$q} = ?)";
         }
         unset($value);
-        // $where = array_map
         return ['(' . implode(' AND ', $where) . ')', $args];
     }
 }

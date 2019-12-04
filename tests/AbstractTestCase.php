@@ -53,7 +53,7 @@ abstract class AbstractTestCase extends TestCase
             getenv("POSTGRES{$n}_PASSWORD"),
             getenv("POSTGRES{$n}_DB")
         );
-        return new DatabasePostgres($dsn);
+        return new DatabasePostgres($dsn, ['shard' => $n]);
     }
 
     /**

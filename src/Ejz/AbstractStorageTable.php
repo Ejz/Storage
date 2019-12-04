@@ -108,26 +108,28 @@ abstract class AbstractStorageTable
 
     /**
      * @param int $id
+     * @param mixed $fields (optional)
      *
      * @return Promise
      */
-    public function getAsync(int $id): Promise
+    public function getAsync(int $id, $fields = null): Promise
     {
         $values = $this->definition->setDefaultValues([]);
-        return \Amp\call(function ($id, $values) {
+        return \Amp\call(function ($id, $values, $fields) {
             $db = $this->getShard($id, $values);
-            return yield $db->getAsync($this->definition, $id);
-        }, $id, $values);
+            return yield $db->getAsync($this->definition, $id, $fields);
+        }, $id, $values, $fields);
     }
 
     /**
-     * @param int $id
+     * @param int   $id
+     * @param mixed $fields (optional)
      *
      * @return array
      */
-    public function get(int $id): array
+    public function get(int $id, $fields = null): array
     {
-        return \Amp\Promise\wait($this->getAsync($id));
+        return \Amp\Promise\wait($this->getAsync($id, $fields));
     }
 
     /**
@@ -138,68 +140,57 @@ abstract class AbstractStorageTable
     public function iterate(array $params = []): Producer
     {
         $table = $this->definition->getTable();
+        $params['fields'] = $this->definition->getFieldsForIterate($params['fields'] ?? null);
         $iterators = $this->pool->iterate($table, $params);
-        return $this->joinIterators($iterators);
+        return $this->joinIterators($iterators, $params);
     }
 
     /**
-     * @param array $where (optional)
-     *
-     * @return Promise
-     */
-    public function selectAsync(array $where = []): Promise
-    {
-        return \Amp\call(function ($where) {
-            $iterator = $this->iterate(compact('where'));
-            return yield \Amp\Iterator\toArray($iterator);
-        }, $where);
-    }
-
-    /**
-     * @param array $where (optional)
+     * @param array $params (optional)
      *
      * @return array
      */
-    public function select(array $where = []): array
+    public function iterateAsArray(array $params = []): array
     {
-        return \Amp\Promise\wait($this->selectAsync($where));
+        return \Amp\Promise\wait(\Amp\call(function ($params) {
+            $iterator = $this->iterate($params);
+            $elems = yield \Amp\Iterator\toArray($iterator);
+            $ret = [];
+            foreach ($elems as [$k, $v]) {
+                $ret[$k] = $v;
+            }
+            return $ret;
+        }, $params));
     }
 
-    // /**
-    //  * @param int $id
-    //  *
-    //  * @return Promise
-    //  */
-    // public function getEverywhereAsync(int $id): Promise
-    // {
-    //     $values = $this->definition->setDefaultValues([]);
-    //     return \Amp\call(function ($id, $values) {
-    //         $deferred = new Deferred();
-    //         $promises = $this->pool->getAsync($this->definition, $id);
-    //         \Amp\Promise\any($promises)->onResolve(function ($err, $res) use ($deferred) {
-    //             [, $vals] = $res;
-    //             var_dump($vals);
-    //             foreach ($vals as $val) {
-    //                 if ($val) {
-    //                     return $deferred->resolve($val);
-    //                 }
-    //             }
-    //             $deferred->resolve([]);
-    //             // if ($err) {
-    //             //     return $deferred->resolve(0);
-    //             // }
-    //             // $ids = array_values($res);
-    //             // $id = array_pop($ids);
-    //             // foreach ($ids as $_) {
-    //             //     if ($_ !== $id) {
-    //             //         return $deferred->resolve(0);
-    //             //     }
-    //             // }
-    //             // $deferred->resolve($id);
-    //         });
-    //         return $deferred->promise();
-    //     }, $id, $values);
-    // }
+    /**
+     * @param array $params (optional)
+     *
+     * @return array
+     */
+    public function iterateAsGenerator(array $params = []): Generator
+    {
+        $producer = $this->iterate($params);
+        $iterator = function ($producer) {
+            if (yield $producer->advance()) {
+                return $producer->getCurrent();
+            }
+        };
+        while ($yield = \Amp\Promise\wait(\Amp\call($iterator, $producer))) {
+            yield $yield[0] => $yield[1];
+        }
+    }
+
+    /**
+     * @param array $where  (optional)
+     * @param mixed $fields (optional)
+     *
+     * @return array
+     */
+    public function filter(array $where = [], $fields = null): array
+    {
+        return $this->iterateAsArray(compact('where', 'fields'));
+    }
 
     /**
      * @param ?int  $id
@@ -227,38 +218,53 @@ abstract class AbstractStorageTable
 
     /**
      * @param array $iterators
+     * @param array $params
      *
      * @return Producer
      */
-    private function joinIterators(array $iterators): Producer
+    private function joinIterators(array $iterators, array $params): Producer
     {
-        $emit = function (callable $emit) use ($iterators) {
+        $emit = function ($emit) use ($iterators, $params) {
             $values = [];
-            while ($iterators) {
+            $ids = [];
+            $already = [];
+            $asc = $params['asc'] ?? true;
+            $rand = $params['rand'] ?? false;
+            do {
                 $keys = array_keys($iterators);
                 foreach ($keys as $key) {
                     if (isset($values[$key])) {
                         continue;
                     }
-                    if (yield $iterators[$key]->advance()) {
-                        $values[$key] = $iterators[$key]->getCurrent();
-                    } else {
-                        unset($iterators[$key]);
-                    }
+                    do {
+                        if (!yield $iterators[$key]->advance()) {
+                            unset($iterators[$key]);
+                            continue 2;
+                        }
+                        $value = $iterators[$key]->getCurrent();
+                    } while (isset($already[$value[0]]));
+                    $values[$key] = $value;
+                    $already[$value[0]] = true;
+                    $ids[$value[0]] = $key;
                 }
-                uasort($values, function ($a, $b) {
-                    return $a[0] - $b[0];
-                });
-                if (!$values) {
-                    break;
+                if ($rand) {
+                    @ $id = (int) array_rand($ids);
+                } else {
+                    $keys = array_keys($ids);
+                    @ $id = (int) ($asc ? min($keys) : max($keys));
                 }
-                $key = array_keys($values)[0];
-                yield $emit($values[$key]);
-                unset($values[$key]);
-            }
+                while (isset($ids[$id])) {
+                    $k = $ids[$id];
+                    yield $emit($values[$k]);
+                    unset($values[$k]);
+                    unset($ids[$id]);
+                    $id++;
+                }
+            } while ($iterators || $values);
         };
         return new Producer($emit);
     }
+}
 
     /**
      * @param int $id
@@ -294,4 +300,3 @@ abstract class AbstractStorageTable
     // $storage->user()->col(1)
     // $storage->user([1])
     // $storage->user([1, 2])
-}

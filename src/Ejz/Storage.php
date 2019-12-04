@@ -44,7 +44,7 @@ class Storage
         if (!$definition) {
             throw new RuntimeException();
         }
-        $definition['names'] = $this->pool->names();
+        $definition['shards'] = $this->pool->names();
         $definition = new TableDefinition($table, $definition);
         return new class (
             $this->pool,

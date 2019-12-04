@@ -76,9 +76,9 @@ class TestCaseStorage extends AbstractTestCase
         $id1 = $table->insert(['blob' => chr(0)]);
         $elem = $table->get($id1);
         $this->assertTrue($elem['blob'] === chr(0));
-        // $id2 = $table->insert(['blob' => str_repeat(chr(1), 1E7)]);
-        // $elem = $table->get($id2);
-        // $this->assertTrue(strlen($elem['blob']) == 1E7);
+        $id2 = $table->insert(['blob' => str_repeat(chr(1), 1E7)]);
+        $elem = $table->get($id2);
+        $this->assertTrue(strlen($elem['blob']) == 1E7);
         $id3 = $table->insert(['blob' => '']);
         $elem = $table->get($id3);
         $this->assertTrue($elem['blob'] === '');
@@ -152,7 +152,7 @@ class TestCaseStorage extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_storage_select()
+    public function test_case_storage_filter()
     {
         $storage = $this->getStorage([
             'table' => [
@@ -160,6 +160,7 @@ class TestCaseStorage extends AbstractTestCase
                     'text1' => [
                     ],
                     'text2' => [
+                        'filter' => ['f'],
                     ],
                 ],
                 'get_shards' => function (?int $id, array $values, array $shards) {
@@ -171,82 +172,111 @@ class TestCaseStorage extends AbstractTestCase
         $table->create();
         foreach (range(1, 1000) as $_) {
             $table->insert($_ = ['text1' => mt_rand() % 5, 'text2' => mt_rand() % 5]);
-            // var_dump($_);
         }
-        $elems = $table->select(['text1' => 1]);
-        var_dump(count($elems));
-        var_dump($elems[0]);
-        // $elems = $table->select(['text2' => 0]);
-        // var_dump($elems);
-        // $elems = $table->select(['text1' => 0, 'text2' => 0]);
-        // var_dump($elems);
+        $elems = $table->filter(['text1' => 1]);
+        $this->assertTrue(100 < count($elems) && count($elems) < 300);
+        $this->assertTrue(
+            count($table->filter(['text1' => 0])) +
+            count($table->filter(['text1' => 1])) +
+            count($table->filter(['text1' => 2])) +
+            count($table->filter(['text1' => 3])) +
+            count($table->filter(['text1' => 4])) ===
+            1000
+        );
+        [$id, $row] = [key($elems), current($elems)];
+        $this->assertTrue($id > 0);
+        $this->assertTrue(isset($row['text1']));
+        $this->assertTrue(isset($row['text2']));
+        $this->assertTrue(!isset($row['table_id']));
+        $elem = $table->get($id, 'f');
+        $this->assertTrue(!isset($elem['text1']));
+        $this->assertTrue(isset($elem['text2']));
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_iterate_1()
+    {
+        $storage = $this->getStorage([
+            'table' => [
+                'fields' => [
+                    'text1' => [
+                    ],
+                    'text2' => [
+                    ],
+                    'text3' => [
+                        'field' => 'text2',
+                        'get_pattern' => 'CONCAT(%s, \'hello\')',
+                        'filter' => 'f',
+                    ],
+                ],
+                'get_shards' => function (?int $id, array $values, array $shards) {
+                    return $shards;
+                },
+            ],
+        ]);
+        $table = $storage->table();
+        $table->create();
+        foreach (range(1, 2E3) as $_) {
+            $table->insert($_ = ['text1' => mt_rand() % 5, 'text2' => mt_rand() % 5]);
+        }
+        $ids = [];
+        foreach ($table->iterateAsGenerator(['fields' => 'f']) as $id => $row) {
+            $ids[] = $id;
+        }
+        $this->assertTrue(isset($row['text3']));
+        $this->assertTrue(!!preg_match('~^\dhello$~', $row['text3']));
+        $this->assertTrue(min($ids) === 1);
+        $this->assertTrue(max($ids) === 2000);
+        $this->assertTrue(count($ids) === 2000);
+        $all = array_fill_keys($ids, true);
+        $ids = [];
+        foreach ($table->iterateAsGenerator(['rand' => true]) as $id => $row) {
+            $ids[] = $id;
+            unset($all[$id]);
+        }
+        $this->assertTrue($ids[0] !== 1 && $ids[1999] !== 2000);
+        $this->assertTrue(!$all);
+        $this->assertTrue(min($ids) === 1);
+        $this->assertTrue(max($ids) === 2000);
+        $this->assertTrue(count($ids) === 2000);
+        $this->assertTrue(count(array_unique($ids)) === 2000);
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_iterate_2()
+    {
+        $storage = $this->getStorage([
+            'table' => [
+                'fields' => [
+                    'text1' => [],
+                ],
+                'get_shards' => function (?int $id, array $values, array $shards) {
+                    return [$shards[array_rand($shards)]];
+                },
+                'primary_key_start_with' => function ($shard, $shards) {
+                    return 1 + ((int) $shard);
+                },
+                'primary_key_increment_by' => function ($shard, $shards) {
+                    return count($shards);
+                },
+            ],
+        ]);
+        $table = $storage->table();
+        $table->create();
+        foreach (range(1, 2E3) as $_) {
+            $table->insert($_ = ['text1' => mt_rand() % 5]);
+        }
+        $ids = [];
+        foreach ($table->iterateAsGenerator() as $id => $row) {
+            $ids[] = $id;
+        }
+        $this->assertTrue(min($ids) === 1);
+        $this->assertTrue(100 * abs(max($ids) - 2E3) / 2E3 < 10);
+        $this->assertTrue(count($ids) === 2000);
+        $this->assertTrue(count(array_unique($ids)) === 2000);
     }
 }
-
-        // var_dump($elem);
-        // \Amp\Promise\wait(\Amp\Promise\all(
-        //     $storage->getPool()->dbs([0, 1])->truncateAsync('table')
-        // ));
-        // $elem = $table->get($id1);
-        // var_dump($elem);
-        // forEach(function ($db) {
-        //     $db->tru
-        // });
-// var_dump($elem);
-        // $this->assertTrue($elem['blob'] === chr(0));
-        // // $id2 = $table->insert(['blob' => str_repeat(chr(1), 1E7)]);
-        // // $elem = $table->get($id2);
-        // // $this->assertTrue(strlen($elem['blob']) == 1E7);
-        // $id3 = $table->insert(['blob' => '']);
-        // $elem = $table->get($id3);
-        // $this->assertTrue($elem['blob'] === '');
-        // $id4 = $table->insert();
-        // $elem = $table->get($id4);
-        // $this->assertTrue($elem['blob'] === '');
-    // $table = [
-    //         'fields' => [
-    //             'table_id' => [
-    //                 'type' => 'primary',
-    //             ],
-    //             'email' => [
-    //                 'type' => 'text',
-    //                 'unique' => 'email',
-    //             ],
-    //         ],
-    //     ];
-    //     $storage = $this->getStorage(compact('table'));
-    //     $table = $storage->table();
-    //     $table->create();
-    //     $id1 = $table->insert(['email' => 1]);
-    //     $this->assertTrue($id1 === 1);
-    //     $id2 = $table->insert(['email' => 2]);
-    //     $this->assertTrue($id2 === 2);
-    //     $id3 = $table->insert(['email' => 3]);
-    //     $this->assertTrue($id3 === 3);
-    //     $t1 = $table->get(1);
-    //     $t2 = $table->get(2);
-    //     $t3 = $table->get(3);
-        
-        // $d = $this->database;
-        // $fields = [
-        //     'tt' => [
-        //         'type' => 'integer',
-        //         'default' => 0,
-        //     ],
-        // ];
-        // $table = [$fields, []];
-        // $storage = $this->getStorage(compact('table'));
-        // $table = $storage->table();
-        // $table->create();
-        // $fields = $storage->getPool()->db(0)->fields('table');
-        
-        // $fields = $storage->getPool()->fields('table')[0];
-        // $this->assertTrue(isset($fields['tt']));
-        // $this->assertTrue($fields['tt']['type'] === 'integer');
-        
-        // $id1 = $table->insert([]);
-        // $this->assertTrue($id1 === 1);
-        // $id2 = $table->insert([]);
-        // $this->assertTrue($id2 === 2);
-        // $id3 = $table->insert([]);
-        // $this->assertTrue($id3 === 3);

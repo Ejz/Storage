@@ -205,7 +205,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
             $d->exec('INSERT INTO t1 (pk1) VALUES (?)', $_id);
         }
         \Amp\Loop::run(function () use ($d, &$is) {
-            $iterator = $d->iterateAsync('t1');
+            $iterator = $d->iterate('t1');
             while (yield $iterator->advance()) {
                 [$key, $row] = $iterator->getCurrent();
                 $this->assertEquals(array_values($row)[0], $key);
@@ -215,7 +215,14 @@ class TestCaseDatabasePostgres extends AbstractTestCase
             }
         });
         $this->assertTrue($is === []);
-        foreach ($d->iterate('t1') as [$key, $row]) {
+        $iterator = $d->iterate('t1');
+        while (
+            [$key, $row] = \Amp\Promise\wait(\Amp\call(function ($iterator) {
+                if (yield $iterator->advance()) {
+                    return $iterator->getCurrent();
+                }
+            }, $iterator))
+        ) {
             $this->assertEquals(array_values($row)[0], $key);
         }
     }
@@ -234,8 +241,14 @@ class TestCaseDatabasePostgres extends AbstractTestCase
             $d->exec('INSERT INTO t1 (pk1) VALUES (?)', $_2);
         }
         $config = ['rand_iterator_intervals' => 10];
-        $generator = $d->iterate('t1', ['rand' => true, 'config' => $config]);
-        foreach ($generator as [$key, $row]) {
+        $iterator = $d->iterate('t1', ['rand' => true, 'config' => $config]);
+        while (
+            [$key, $row] = \Amp\Promise\wait(\Amp\call(function ($iterator) {
+                if (yield $iterator->advance()) {
+                    return $iterator->getCurrent();
+                }
+            }, $iterator))
+        ) {
             $k = array_search($key, $is);
             $this->assertTrue($k !== false, $key);
             unset($is[$k]);
