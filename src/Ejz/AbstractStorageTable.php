@@ -74,9 +74,9 @@ abstract class AbstractStorageTable
      */
     public function insertAsync(array $values = []): Promise
     {
-        $values = $this->definition->setDefaultValues($values);
         return \Amp\call(function ($values) {
             $deferred = new Deferred();
+            $values = $this->definition->normalizeValues($values);
             $pool = $this->getShards(null, $values);
             $promises = $pool->insertAsync($this->definition, $values);
             \Amp\Promise\all($promises)->onResolve(function ($err, $res) use ($deferred) {
@@ -114,9 +114,9 @@ abstract class AbstractStorageTable
      */
     public function updateAsync(int $id, array $values = []): Promise
     {
-        $values = $this->definition->setDefaultValues($values);
         return \Amp\call(function ($id, $values) {
             $deferred = new Deferred();
+            $values = $this->definition->normalizeValues($values);
             $pool = $this->getShards($id, $values);
             $promises = $pool->updateAsync($this->definition, $id, $values);
             \Amp\Promise\all($promises)->onResolve(function ($err) use ($deferred) {
@@ -145,11 +145,13 @@ abstract class AbstractStorageTable
      */
     public function getAsync(int $id, $fields = null): Promise
     {
-        $values = $this->definition->setDefaultValues([]);
-        return \Amp\call(function ($id, $values, $fields) {
-            $db = $this->getShard($id, $values);
+        return \Amp\call(function ($id, $fields) {
+            $fields = $fields ?? array_keys($this->definition->getFields());
+            $fields = array_fill_keys((array) $fields, null);
+            $fields = $this->definition->normalizeValues($fields);
+            $db = $this->getShard($id, []);
             return yield $db->getAsync($this->definition, $id, $fields);
-        }, $id, $values, $fields);
+        }, $id, $fields);
     }
 
     /**
@@ -171,7 +173,9 @@ abstract class AbstractStorageTable
     public function iterate(array $params = []): Producer
     {
         $table = $this->definition->getTable();
-        $params['fields'] = $this->definition->getFieldsForIterate($params['fields'] ?? null);
+        $fields = $params['fields'] ?? array_keys($this->definition->getFields());
+        $fields = array_fill_keys((array) $fields, null);
+        $params['fields'] = $this->definition->normalizeValues($fields);
         $iterators = $this->pool->iterate($table, $params);
         return $this->joinIterators($iterators, $params);
     }

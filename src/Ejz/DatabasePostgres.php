@@ -490,12 +490,13 @@ class DatabasePostgres implements DatabaseInterface
             $qpk = $quote . $pk . $quote;
             $order_by = $qpk . ' ' . ($asc ? 'ASC' : 'DESC');
             $fields[$_pk = 'pk_' . md5($pk)] = ['field' => $pk];
-            $fields = array_map(function ($field) use ($quote) {
-                [$alias, $value] = $field;
-                return sprintf(
-                    $value['pattern'] ?? '%s',
-                    $quote . ($value['field'] ?? $alias) . $quote
-                ) . ' AS ' . $quote . $alias . $quote;
+            $fields = array_map(function ($_) use ($quote) {
+                [$alias, $field] = $_;
+                $fa = $quote . $alias . $quote;
+                $f = $quote . ($field['field'] ?? $alias) . $quote;
+                $pattern = $field['get_pattern'] ?? '%s';
+                $head = str_replace('%s', $f, $pattern);
+                return $head . ' AS ' . $fa;
             }, array_map(null, array_keys($fields), array_values($fields)));
             $template = sprintf(
                 'SELECT %s FROM %s WHERE (%s) AND (%%s) ORDER BY %s LIMIT %s',
@@ -582,29 +583,6 @@ class DatabasePostgres implements DatabaseInterface
     /**
      * @param TableDefinition $definition
      * @param int             $id
-     * @param mixed           $fields
-     *
-     * @return Promise
-     */
-    public function getAsync(TableDefinition $definition, int $id, $fields): Promise
-    {
-        return \Amp\call(function ($definition, $id, $fields) {
-            [$cmd, $args] = $this->getCommand($definition, $id, $fields);
-            $one = yield $this->oneAsync($cmd, ...$args);
-            $fields = $definition->getFields();
-            foreach ($one as $key => &$value) {
-                if ($fields[$key]['get'] ?? null) {
-                    $value = $fields[$key]['get']($value);
-                }
-            }
-            unset($value);
-            return $one;
-        }, $definition, $id, $fields);
-    }
-
-    /**
-     * @param TableDefinition $definition
-     * @param int             $id
      * @param array           $values
      *
      * @return Promise
@@ -618,6 +596,28 @@ class DatabasePostgres implements DatabaseInterface
             [$cmd, $args] = $this->updateCommand($definition, $id, $values);
             return yield $this->execAsync($cmd, ...$args);
         }, $definition, $id, $values);
+    }
+
+    /**
+     * @param TableDefinition $definition
+     * @param int             $id
+     * @param mixed           $fields
+     *
+     * @return Promise
+     */
+    public function getAsync(TableDefinition $definition, int $id, $fields): Promise
+    {
+        return \Amp\call(function ($definition, $id, $fields) {
+            [$cmd, $args] = $this->getCommand($definition, $id, $fields);
+            $one = yield $this->oneAsync($cmd, ...$args);
+            foreach ($one as $key => &$value) {
+                if ($fields[$key]['get'] ?? null) {
+                    $value = $fields[$key]['get']($value);
+                }
+            }
+            unset($value);
+            return $one;
+        }, $definition, $id, $fields);
     }
 
     /**
@@ -800,20 +800,20 @@ class DatabasePostgres implements DatabaseInterface
             [
                 'is_nullable' => $is_nullable,
                 'type' => $type,
-                'database_default' => $database_default,
+                'default' => $default,
                 'unique' => $unique,
             ] = $meta;
             foreach ($unique as $_) {
                 @ $uniques[$_][] = $field;
             }
-            $database_default = $database_default ?? ($is_nullable ? 'NULL' : $defaults[$type]);
-            $database_default = (string) $database_default;
+            $default = $default ?? ($is_nullable ? 'NULL' : $defaults[$type]);
+            $default = (string) $default;
             // $default = array_key_exists('database_default', $meta) ? $meta['database_default'] : ();
 
             // $ ?? 
             $_field = $q . $field . $q . ' ' . $map[$type];
-            if ($database_default !== '') {
-                $_field .= ' DEFAULT ' . $database_default;
+            if ($default !== '') {
+                $_field .= ' DEFAULT ' . $default;
             }
             $_field .= ' ' . ($is_nullable ? 'NULL' : 'NOT NULL');
             $_fields[] = $_field;
@@ -847,49 +847,20 @@ class DatabasePostgres implements DatabaseInterface
     {
         $q = $this->config['quote'];
         $table = $definition->getTable();
-        $fields = $definition->getFields();
         $pk = $definition->getPrimaryKey();
         $_columns = [];
         $_values = [];
         $args = [];
-        foreach ($values as $key => $value) {
-            $_columns[] = $q . $key . $q;
-            $_values[] = $fields[$key]['set_pattern'];
-            if ($fields[$key]['set'] ?? null) {
-                $value = $fields[$key]['set']($value);
-            }
-            $args[] = $value;
+        foreach ($values as $value) {
+            $f = $q . $value['field'] . $q;
+            $_columns[] = $f;
+            $_values[] = str_replace('%s', $f, $value['set_pattern']);
+            $args[] = $value['set'] ? $value['set']($value['value']) : $value['value'];
         }
         $_columns = implode(', ', $_columns);
         $_values = implode(', ', $_values);
         $insert = ($_columns && $_values) ? "({$_columns}) VALUES ({$_values})" : 'DEFAULT VALUES';
         $command = "INSERT INTO {$q}{$table}{$q} {$insert} RETURNING {$q}{$pk}{$q}";
-        return [$command, $args];
-    }
-
-    /**
-     * @param TableDefinition $definition
-     * @param int             $id
-     * @param mixed           $fields
-     *
-     * @return array
-     */
-    private function getCommand(TableDefinition $definition, int $id, $fields): array
-    {
-        $q = $this->config['quote'];
-        $table = $definition->getTable();
-        $fields = $definition->getFields($fields);
-        $pk = $definition->getPrimaryKey();
-        $args = [$id];
-        $where = "{$q}{$pk}{$q} = ?";
-        $_fields = [];
-        foreach ($fields as $field => $meta) {
-            $get_pattern = $meta['get_pattern'];
-            $f = sprintf($get_pattern, $q . $field . $q);
-            $_fields[] = $f . ' AS ' . $q . $field . $q;
-        }
-        $_fields = implode(', ', $_fields);
-        $command = "SELECT {$_fields} FROM {$q}{$table}{$q} WHERE {$where} LIMIT 1";
         return [$command, $args];
     }
 
@@ -905,17 +876,40 @@ class DatabasePostgres implements DatabaseInterface
         $q = $this->config['quote'];
         $table = $definition->getTable();
         $pk = $definition->getPrimaryKey();
-        $fields = $definition->getFields();
         $args = [];
         $update = [];
-        foreach ($values as $key => $value) {
-            $field = $fields[$key];
-            $update[] = $q . ($field['field'] ?? $key) . $q . ' = ' . $field['set_pattern'];
-            $args[] = isset($field['set']) ? $field['set']($value) : $value;
+        foreach ($values as $value) {
+            $f = $q . $value['field'] . $q;
+            $update[] = $f . ' = ' . str_replace('%s', $f, $value['set_pattern']);
+            $args[] = $value['set'] ? $value['set']($value['value']) : $value['value'];
         }
         $update = implode(', ', $update);
         $args[] = $id;
         $command = "UPDATE {$q}{$table}{$q} SET {$update} WHERE {$q}{$pk}{$q} = ?";
+        return [$command, $args];
+    }
+
+    /**
+     * @param TableDefinition $definition
+     * @param int             $id
+     * @param mixed           $fields
+     *
+     * @return array
+     */
+    private function getCommand(TableDefinition $definition, int $id, $fields): array
+    {
+        $q = $this->config['quote'];
+        $table = $definition->getTable();
+        $pk = $definition->getPrimaryKey();
+        $args = [$id];
+        $where = "{$q}{$pk}{$q} = ?";
+        $_fields = [];
+        foreach ($fields as $alias => $field) {
+            $f = str_replace('%s', $q . $field['field'] . $q, $field['get_pattern']);
+            $_fields[] = $f . ' AS ' . $q . $alias . $q;
+        }
+        $_fields = implode(', ', $_fields);
+        $command = "SELECT {$_fields} FROM {$q}{$table}{$q} WHERE {$where} LIMIT 1";
         return [$command, $args];
     }
 

@@ -160,7 +160,6 @@ class TestCaseStorage extends AbstractTestCase
                     'text1' => [
                     ],
                     'text2' => [
-                        'filter' => ['f'],
                     ],
                 ],
                 'get_shards' => function (?int $id, array $values, array $shards) {
@@ -188,9 +187,15 @@ class TestCaseStorage extends AbstractTestCase
         $this->assertTrue(isset($row['text1']));
         $this->assertTrue(isset($row['text2']));
         $this->assertTrue(!isset($row['table_id']));
-        $elem = $table->get($id, 'f');
+        $elem = $table->get($id, 'text2');
         $this->assertTrue(!isset($elem['text1']));
         $this->assertTrue(isset($elem['text2']));
+        $elem = $table->get($id);
+        $this->assertTrue(isset($elem['text1']));
+        $this->assertTrue(isset($elem['text2']));
+        $elem = $table->get($id, []);
+        $this->assertTrue(!isset($elem['text1']));
+        $this->assertTrue(!isset($elem['text2']));
     }
 
     /**
@@ -205,11 +210,14 @@ class TestCaseStorage extends AbstractTestCase
                     ],
                     'text2' => [
                     ],
-                    'text3' => [
-                        'field' => 'text2',
-                        'get_pattern' => 'CONCAT(%s, \'hello\')',
-                        'filter' => 'f',
-                    ],
+                ],
+                'modifiers' => [
+                    '~^text3$~i' => function ($match) {
+                        return [
+                            'text2',
+                            ['get_pattern' => 'CONCAT(%s, \'hello\')'],
+                        ];
+                    },
                 ],
                 'get_shards' => function (?int $id, array $values, array $shards) {
                     return $shards;
@@ -222,7 +230,7 @@ class TestCaseStorage extends AbstractTestCase
             $table->insert($_ = ['text1' => mt_rand() % 5, 'text2' => mt_rand() % 5]);
         }
         $ids = [];
-        foreach ($table->iterateAsGenerator(['fields' => 'f']) as $id => $row) {
+        foreach ($table->iterateAsGenerator(['fields' => 'text3']) as $id => $row) {
             $ids[] = $id;
         }
         $this->assertTrue(isset($row['text3']));
@@ -317,5 +325,90 @@ class TestCaseStorage extends AbstractTestCase
         $ok = $table->update($id, ['text1' => 'bar']);
         $this->assertTrue($ok);
         $this->assertTrue($table->get($id)['text1'] === 'bar');
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_modifiers_1()
+    {
+        $storage = $this->getStorage([
+            'table' => [
+                'fields' => [
+                    'text1' => [],
+                    'json1' => [
+                        'type' => TableDefinition::TYPE_JSON,
+                    ],
+                ],
+                'modifiers' => [
+                    '~^(.*)\|trim$~i' => function ($match) {
+                        $append = ['set' => function ($v) { return trim($v); }];
+                        return [$match[1], $append];
+                    },
+                    '~^(.*)\{\}$~i' => function ($match) {
+                        $append = [
+                            'set_pattern' => '%s || ?',
+                        ];
+                        return [$match[1], $append];
+                    },
+                ],
+            ],
+        ]);
+        $table = $storage->table();
+        $table->create();
+        $id = $table->insert(['text1|Trim' => ' foo ']);
+        $this->assertTrue($table->get($id)['text1'] === 'foo');
+        $id = $table->insert(['json1' => ['a' => 1, 'b' => 2]]);
+        $this->assertTrue($table->get($id)['json1']['a'] === 1);
+        $table->update($id, ['json1{}' => ['c' => 3]]);
+        $this->assertTrue($table->get($id)['json1']['a'] === 1);
+        $this->assertTrue($table->get($id)['json1']['c'] === 3);
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_modifiers_2()
+    {
+        $storage = $this->getStorage([
+            'table' => [
+                'fields' => [
+                    'json1' => [
+                        'type' => TableDefinition::TYPE_JSON,
+                        'get' => function ($v) {
+                            return ['x' => 1] + $v;
+                        },
+                        'set' => function ($v) {
+                            return ['y' => 1] + $v;
+                        },
+                    ],
+                ],
+                'modifiers' => [
+                    '~^(.*)\|ab$~i' => function ($match) {
+                        $append = [
+                            'get' => function ($v) {
+                                return ['a' => 1] + $v;
+                            },
+                            'set' => function ($v) {
+                                return ['b' => 1] + $v;
+                            },
+                        ];
+                        $append['alias'] = 'rnd';
+                        return [$match[1], $append];
+                    },
+                ],
+            ],
+        ]);
+        $table = $storage->table();
+        $table->create();
+        $id = $table->insert(['json1' => ['m' => 1]]);
+        $json1 = $table->get($id)['json1'];
+        $this->assertTrue(isset($json1['x'], $json1['y'], $json1['m']));
+        $id = $table->insert(['json1|ab' => ['m' => 2]]);
+        $json1 = $table->get($id)['json1'];
+        $this->assertTrue(isset($json1['x'], $json1['b'], $json1['m']));
+        $this->assertTrue(!isset($json1['a']));
+        $elem = $table->get($id, 'json1|ab');
+        $this->assertTrue(isset($elem['rnd']['a']));
     }
 }

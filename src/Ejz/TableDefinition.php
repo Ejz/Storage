@@ -11,6 +11,8 @@ class TableDefinition
     const TYPE_TEXT = 'text';
     const TYPE_JSON = 'json';
 
+    const INVALID_FIELD_ERROR = 'INVALID_FIELD_ERROR: %s';
+
     /** @var string */
     private $table;
 
@@ -25,7 +27,7 @@ class TableDefinition
     {
         $this->table = $table;
         $this->definition = $definition;
-        $this->normalizeFields();
+        $this->setDefaults();
         $this->test();
     }
 
@@ -42,19 +44,38 @@ class TableDefinition
     /**
      *
      */
-    private function normalizeFields()
+    private function setDefaults()
     {
-        $fields = $this->definition['fields'];
+        $fields = $this->definition['fields'] ?? [];
         foreach ($fields as $field => &$meta) {
             $meta['type'] = $meta['type'] ?? self::TYPE_TEXT;
-            $meta['get_pattern'] = $meta['get_pattern'] ?? '%s';
-            $meta['set_pattern'] = $meta['set_pattern'] ?? '?';
             $meta['is_nullable'] = !empty($meta['is_nullable']);
-            $meta['database_default'] = $meta['database_default'] ?? null;
             $meta['unique'] = (array) ($meta['unique'] ?? []);
+            // $meta['tags'] = (array) ($meta['tags'] ?? []);
+            $meta['default'] = $meta['default'] ?? null;
+            $meta['get'] = $meta['get'] ?? null;
+            $meta['get_pattern'] = $meta['get_pattern'] ?? '%s';
+            $meta['set'] = $meta['set'] ?? null;
+            $meta['set_pattern'] = $meta['set_pattern'] ?? '?';
             if ($meta['type'] === self::TYPE_JSON) {
-                $meta['set'] = $meta['set'] ?? function ($_) { return json_encode($_); };
-                $meta['get'] = $meta['get'] ?? function ($_) { return json_decode($_, true); };
+                $get = function ($_) {
+                    return json_decode($_, true);
+                };
+                $set = function ($_) {
+                    return json_encode($_);
+                };
+                if ($g = $meta['get']) {
+                    $meta['get'] = function ($_) use ($g, $get) {
+                        return $g($get($_));
+                    };
+                }
+                if ($s = $meta['set']) {
+                    $meta['set'] = function ($_) use ($s, $set) {
+                        return $set($s($_));
+                    };
+                }
+                $meta['get'] = $meta['get'] ?? $get;
+                $meta['set'] = $meta['set'] ?? $set;
             }
         }
         unset($meta);
@@ -78,40 +99,82 @@ class TableDefinition
     }
 
     /**
-     * @param mixed $filter (optional)
-     *
      * @return array
      */
-    public function getFields($filter = null): array
+    public function getFields(): array
     {
-        $fields = $this->definition['fields'];
-        $fields = $filter !== null ? array_filter($fields, function ($value, $key) use ($filter) {
-            if (is_array($filter)) {
-                return in_array($value['field'] ?? $key, $filter);
-            }
-            return in_array($filter, (array) ($value['filter'] ?? []));
-        }, ARRAY_FILTER_USE_BOTH) : $fields;
-        return $fields;
+        return $this->definition['fields'];
     }
 
     /**
-     * @param array $values
+     * @param ?array $values
      *
      * @return array
      */
-    public function setDefaultValues(array $values): array
+    public function normalizeValues(array $values): array
     {
+        $collect = [];
         $fields = $this->getFields();
-        foreach ($fields as $key => $value) {
-            if (array_key_exists('default', $value) && !array_key_exists($key, $values)) {
-                if (is_callable($value['default'])) {
-                    $values[$key] = $value['default']($values);
-                } else {
-                    $values[$key] = $value['default'];
+        foreach ($values as $key => $value) {
+            $modifiers = $this->getModifiers();
+            [$field, $append] = [false, []];
+            foreach ($modifiers as $regex => $callback) {
+                if (preg_match($regex, $key, $match)) {
+                    [$field, $append] = $callback($match);
+                    break;
                 }
             }
+            $field = $field ?: $key;
+            if (!isset($fields[$field])) {
+                throw new RuntimeException(sprintf(self::INVALID_FIELD_ERROR, $field));
+            }
+            $value = ['value' => $value, 'field' => $field];
+            $value['get'] = $fields[$field]['get'];
+            $value['get_pattern'] = $fields[$field]['get_pattern'];
+            $value['set'] = $fields[$field]['set'];
+            $value['set_pattern'] = $fields[$field]['set_pattern'];
+            if ($get = $append['get'] ?? null) {
+                if ($g = $value['get']) {
+                    $value['get'] = function ($_) use ($g, $get) {
+                        return $get($g($_));
+                    };
+                }
+                $value['get'] = $value['get'] ?? $get;
+            }
+            if ($get = $append['get_pattern'] ?? null) {
+                if ($g = $value['get_pattern']) {
+                    $value['get_pattern'] = str_replace('%s', $get, $g);
+                }
+                $value['get_pattern'] = $value['get_pattern'] ?? $get;
+            }
+            if ($set = $append['set'] ?? null) {
+                if ($s = $value['set']) {
+                    $value['set'] = function ($_) use ($s, $set) {
+                        return $s($set($_));
+                    };
+                }
+                $value['set'] = $value['set'] ?? $set;
+            }
+            if ($set = $append['set_pattern'] ?? null) {
+                if ($s = $value['set_pattern']) {
+                    $value['set_pattern'] = str_replace('?', $set, $s);
+                }
+                $value['set_pattern'] = $value['set_pattern'] ?? $set;
+            }
+            $collect[$append['alias'] ?? $key] = $value;
         }
-        return $values;
+        return $collect;
+        // $values = $collect;
+        // foreach ($this->normalizeFields() as $key => $value) {
+        //     if (array_key_exists('default', $value) && !array_key_exists($key, $values)) {
+        //         if (is_callable($value['default'])) {
+        //             $values[$key]['value'] = $value['default']($values);
+        //         } else {
+        //             $values[$key]['value'] = $value['default'];
+        //         }
+        //     }
+        // }
+        // return $values;
     }
 
     /**
@@ -123,7 +186,10 @@ class TableDefinition
     public function getShards(?int $id, array $values = []): array
     {
         $shards = $this->definition['shards'];
-        return $this->definition['get_shards']($id, $values, $shards);
+        if ($this->definition['get_shards'] ?? null) {
+            return $this->definition['get_shards']($id, $values, $shards);
+        }
+        return $shards;
     }
 
     /**
@@ -163,20 +229,24 @@ class TableDefinition
     }
 
     /**
-     * @param mixed $filter
-     *
      * @return array
      */
-    public function getFieldsForIterate($filter): array
+    private function getModifiers(): array
     {
-        $fields = $this->getFields($filter);
-        $ret = [];
-        foreach ($fields as $key => $value) {
-            $ret[$key] = [
-                'pattern' => $value['get_pattern'] ?? '%s',
-                'field' => $value['field'] ?? $key,
-            ];
-        }
-        return $ret;
+        $modifiers = $this->definition['modifiers'] ?? [];
+        return $modifiers + $this->getDefaultModifiers();
+    }
+
+    /**
+     * @return array
+     */
+    private function getDefaultModifiers(): array
+    {
+        return [
+            '~^(.*)\{\}$~' => function ($match) {
+                $append = [];
+                return [$match[1], $append];
+            },
+        ];
     }
 }
