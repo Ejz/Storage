@@ -10,6 +10,7 @@ class TableDefinition
     const TYPE_BLOB = 'blob';
     const TYPE_TEXT = 'text';
     const TYPE_JSON = 'json';
+    const TYPE_FOREIGN_KEY = 'foreign';
 
     const INVALID_FIELD_ERROR = 'INVALID_FIELD_ERROR: %s';
 
@@ -51,7 +52,7 @@ class TableDefinition
             $meta['type'] = $meta['type'] ?? self::TYPE_TEXT;
             $meta['is_nullable'] = !empty($meta['is_nullable']);
             $meta['unique'] = (array) ($meta['unique'] ?? []);
-            // $meta['tags'] = (array) ($meta['tags'] ?? []);
+            $meta['index'] = (array) ($meta['index'] ?? []);
             $meta['default'] = $meta['default'] ?? null;
             $meta['get'] = $meta['get'] ?? null;
             $meta['get_pattern'] = $meta['get_pattern'] ?? '%s';
@@ -64,18 +65,48 @@ class TableDefinition
                 $set = function ($_) {
                     return json_encode($_);
                 };
+            }
+            if ($meta['type'] === self::TYPE_BLOB) {
+                $get = function ($_) {
+                    return base64_decode($_);
+                };
+                $set = function ($_) {
+                    return base64_encode($_);
+                };
+                $get_pattern = 'encode((%s)::BYTEA, \'base64\')';
+                $set_pattern = 'decode((?)::TEXT, \'base64\')';
+            }
+            if ($get ?? null) {
                 if ($g = $meta['get']) {
                     $meta['get'] = function ($_) use ($g, $get) {
                         return $g($get($_));
                     };
+                } else {
+                    $meta['get'] = $get;
                 }
+            }
+            if ($set ?? null) {
                 if ($s = $meta['set']) {
                     $meta['set'] = function ($_) use ($s, $set) {
                         return $set($s($_));
                     };
+                } else {
+                    $meta['set'] = $set;
                 }
-                $meta['get'] = $meta['get'] ?? $get;
-                $meta['set'] = $meta['set'] ?? $set;
+            }
+            if ($get_pattern ?? null) {
+                if ($g = $meta['get_pattern']) {
+                    $meta['get_pattern'] = str_replace('%s', '(' . $g . ')', $get_pattern);
+                } else {
+                    $meta['get_pattern'] = $get_pattern;
+                }
+            }
+            if ($set_pattern ?? null) {
+                if ($s = $meta['set_pattern']) {
+                    $meta['set_pattern'] = str_replace('?', '(' . $set_pattern . ')', $s);
+                } else {
+                    $meta['set_pattern'] = $set_pattern;
+                }
             }
         }
         unset($meta);
@@ -138,43 +169,36 @@ class TableDefinition
                     $value['get'] = function ($_) use ($g, $get) {
                         return $get($g($_));
                     };
+                } else {
+                    $value['get'] = $get;
                 }
-                $value['get'] = $value['get'] ?? $get;
-            }
-            if ($get = $append['get_pattern'] ?? null) {
-                if ($g = $value['get_pattern']) {
-                    $value['get_pattern'] = str_replace('%s', $get, $g);
-                }
-                $value['get_pattern'] = $value['get_pattern'] ?? $get;
             }
             if ($set = $append['set'] ?? null) {
                 if ($s = $value['set']) {
                     $value['set'] = function ($_) use ($s, $set) {
                         return $s($set($_));
                     };
+                } else {
+                    $value['set'] = $set;
                 }
-                $value['set'] = $value['set'] ?? $set;
             }
-            if ($set = $append['set_pattern'] ?? null) {
-                if ($s = $value['set_pattern']) {
-                    $value['set_pattern'] = str_replace('?', $set, $s);
+            if ($get_pattern = $append['get_pattern'] ?? null) {
+                if ($g = $value['get_pattern']) {
+                    $value['get_pattern'] = str_replace('%s', '(' . $g . ')', $get_pattern);
+                } else {
+                    $value['get_pattern'] = $get_pattern;
                 }
-                $value['set_pattern'] = $value['set_pattern'] ?? $set;
+            }
+            if ($set_pattern = $append['set_pattern'] ?? null) {
+                if ($s = $value['set_pattern']) {
+                    $value['set_pattern'] = str_replace('?', '(' . $set_pattern . ')', $s);
+                } else {
+                    $value['set_pattern'] = $set_pattern;
+                }
             }
             $collect[$append['alias'] ?? $key] = $value;
         }
         return $collect;
-        // $values = $collect;
-        // foreach ($this->normalizeFields() as $key => $value) {
-        //     if (array_key_exists('default', $value) && !array_key_exists($key, $values)) {
-        //         if (is_callable($value['default'])) {
-        //             $values[$key]['value'] = $value['default']($values);
-        //         } else {
-        //             $values[$key]['value'] = $value['default'];
-        //         }
-        //     }
-        // }
-        // return $values;
     }
 
     /**

@@ -621,6 +621,35 @@ class DatabasePostgres implements DatabaseInterface
     }
 
     /**
+     * @param TableDefinition $definition
+     * @param int             $id1
+     * @param int             $id2
+     *
+     * @return Promise
+     */
+    public function reidAsync(TableDefinition $definition, int $id1, int $id2): Promise
+    {
+        return \Amp\call(function ($definition, $id1, $id2) {
+            [$cmd, $args] = $this->reidCommand($definition, $id1, $id2);
+            return yield $this->execAsync($cmd, ...$args);
+        }, $definition, $id1, $id2);
+    }
+
+    /**
+     * @param TableDefinition $definition
+     * @param int             $id1
+     *
+     * @return Promise
+     */
+    public function deleteAsync(TableDefinition $definition, int $id): Promise
+    {
+        return \Amp\call(function ($definition, $id) {
+            [$cmd, $args] = $this->deleteCommand($definition, $id);
+            return yield $this->execAsync($cmd, ...$args);
+        }, $definition, $id);
+    }
+
+    /**
      * @return Promise
      */
     private function connect(): Promise
@@ -754,6 +783,7 @@ class DatabasePostgres implements DatabaseInterface
             TableDefinition::TYPE_BLOB => 'BYTEA',
             TableDefinition::TYPE_TEXT => 'TEXT',
             TableDefinition::TYPE_JSON => 'JSONB',
+            TableDefinition::TYPE_FOREIGN_KEY => 'BIGINT',
         ];
         $defaults = [
             TableDefinition::TYPE_INT => '0::INTEGER',
@@ -761,19 +791,6 @@ class DatabasePostgres implements DatabaseInterface
             TableDefinition::TYPE_TEXT => '\'\'::TEXT',
             TableDefinition::TYPE_JSON => '\'{}\'::JSONB',
         ];
-        // $type_append = [
-        //     'timestamp' => '(0) without time zone',
-        // ];
-        // $sql_defaults = [
-        //     'smallint' => '0',
-        //     'integer' => '0',
-        //     'int' => '0',
-        //     'bigint' => '0',
-        //     'text' => '\'\'::text',
-        //     'date' => 'CURRENT_DATE',
-        //     'timestamp' => 'CURRENT_TIMESTAMP',
-        //     TableDefinition::TYPE_BLOB => 'CURRENT_TIMESTAMP',
-        // ];
         $seq = "{$table}_seq";
         $pk_start_with = $definition->getPrimaryKeyStartWith($this->config['shard']);
         $pk_increment_by = $definition->getPrimaryKeyIncrementBy($this->config['shard']);
@@ -795,18 +812,22 @@ class DatabasePostgres implements DatabaseInterface
             nextval('{$seq}'::regclass) NOT NULL
         ";
         $uniques = [];
-        // $indexes = [];
+        $indexes = [];
         foreach ($fields as $field => $meta) {
             [
                 'is_nullable' => $is_nullable,
                 'type' => $type,
                 'default' => $default,
                 'unique' => $unique,
+                'index' => $index,
             ] = $meta;
             foreach ($unique as $_) {
                 @ $uniques[$_][] = $field;
             }
-            $default = $default ?? ($is_nullable ? 'NULL' : $defaults[$type]);
+            foreach ($index as $_) {
+                @ $indexes[$_][] = $field;
+            }
+            $default = $default ?? ($is_nullable ? 'NULL' : ($defaults[$type] ?? null));
             $default = (string) $default;
             // $default = array_key_exists('database_default', $meta) ? $meta['database_default'] : ();
 
@@ -817,6 +838,13 @@ class DatabasePostgres implements DatabaseInterface
             }
             $_field .= ' ' . ($is_nullable ? 'NULL' : 'NOT NULL');
             $_fields[] = $_field;
+            if ($type === TableDefinition::TYPE_FOREIGN_KEY) {
+                $c = $q . $table . '_' . $field . '_fk' . $q;
+                $alters[] = "
+                    ALTER TABLE {$q}{$table}{$q} ADD CONSTRAINT {$c} FOREIGN KEY ({$field})
+                    REFERENCES {$meta['references']} ON DELETE CASCADE ON UPDATE CASCADE
+                ";
+            }
         }
         foreach ($uniques as $unique => $fs) {
             $fs = implode(', ', array_map(function ($f) use ($q) {
@@ -824,12 +852,13 @@ class DatabasePostgres implements DatabaseInterface
             }, $fs));
             $alters[] = "ALTER TABLE {$q}{$table}{$q} ADD CONSTRAINT {$unique} UNIQUE ({$fs})";
         }
-        // foreach ($indexes as $name => [$type, $fs]) {
-        //     $fs = implode(', ', array_map(function ($f) use ($q) {
-        //         return $q . $f . $q;
-        //     }, $fs));
-        //     $alters[] = "CREATE INDEX {$q}{$name}{$q} ON {$q}{$table}{$q} USING {$type} ({$fs})";
-        // }
+        foreach ($indexes as $index => $fs) {
+            $fs = implode(', ', array_map(function ($f) use ($q) {
+                return $q . $f . $q;
+            }, $fs));
+            $rnd = mt_rand();
+            $alters[] = "CREATE INDEX {$q}{$table}_{$rnd}{$q} ON {$q}{$table}{$q} USING BTREE ({$fs})";
+        }
         $_fields = implode(', ', $_fields);
         $commands[] = "CREATE TABLE {$q}{$table}{$q} ({$_fields})";
         // print_r($commands);
@@ -891,6 +920,39 @@ class DatabasePostgres implements DatabaseInterface
 
     /**
      * @param TableDefinition $definition
+     * @param int             $id1
+     * @param int             $id2
+     *
+     * @return array
+     */
+    private function reidCommand(TableDefinition $definition, int $id1, int $id2): array
+    {
+        $q = $this->config['quote'];
+        $table = $definition->getTable();
+        $pk = $definition->getPrimaryKey();
+        $args = [$id2, $id1];
+        $command = "UPDATE {$q}{$table}{$q} SET {$q}{$pk}{$q} = ? WHERE {$q}{$pk}{$q} = ?";
+        return [$command, $args];
+    }
+
+    /**
+     * @param TableDefinition $definition
+     * @param int             $id
+     *
+     * @return array
+     */
+    private function deleteCommand(TableDefinition $definition, int $id): array
+    {
+        $q = $this->config['quote'];
+        $table = $definition->getTable();
+        $pk = $definition->getPrimaryKey();
+        $args = [$id];
+        $command = "DELETE FROM {$q}{$table}{$q} WHERE {$q}{$pk}{$q} = ?";
+        return [$command, $args];
+    }
+
+    /**
+     * @param TableDefinition $definition
      * @param int             $id
      * @param mixed           $fields
      *
@@ -932,79 +994,3 @@ class DatabasePostgres implements DatabaseInterface
         return ['(' . implode(' AND ', $where) . ')', $args];
     }
 }
-
-
-/*
-$_columns = [];
-        $_values = [];
-        $args = [];
-        foreach ($values as $key => $value) {
-            $_columns[] = $q . $key . $q;
-            $_values[] = '?';
-            $args[] = $value;
-        }
-        // ("field") AS "field", 
-        $_columns = implode(', ', $_columns);
-        $_values = implode(', ', $_values);
-        $insert = ($_columns && $_values) ? "({$_columns}) VALUES ({$_values})" : 'DEFAULT VALUES';
-        $command = "INSERT INTO {$q}{$table}{$q} {$insert} RETURNING {$q}{$pk}{$q}";
-        // print_r($command);
-        // print_r($args);
-        return [$command, $args];
-
-        $quote = $this->config['quote'];
-        $table = $definition->getTable();
-        $pk = $definition->getPk();
-        
-        // $fields = $definition->getFields();
-        // $select = is_numeric($select) ? 
-        // $_columns = [];
-        // $_values = [];
-        // $args = [];
-        // $pk = '';
-        // foreach ($fields as $field => $meta) {
-        //     if ($meta['type'] === 'primary') {
-        //         $pk = $field;
-        //         continue;
-        //     }
-        //     $_columns[] = $q . $field . $q;
-        //     if (array_key_exists($field, $values)) {
-        //         $args[] = $values[$field];
-        //         $_values[] = '?';
-        //     } else {
-        //         $_values[] = 'DEFAULT';
-        //     }
-        // }
-        // // $_columns = implode(', ', $_columns);
-        // // $_values = implode(', ', $_values);
-        // // $insert = $_columns && $_values ? "({$_columns}) VALUES ({$_values})" : 'DEFAULT VALUES';
-        // print_r($command);
- */
-// /**
-    //  * @param TableDefinition $definition
-    //  * @param int             $id
-    //  *
-    //  * @return Promise
-    //  */
-    // public function getAsync(TableDefinition $definition, int $id): Promise
-    // {
-    //     $deferred = new Deferred();
-    //     $promise = $deferred->promise();
-    //     Loop::defer(function () use ($deferred, $definition, $id) {
-    //         [$cmd, $args] = $this->getCommand($definition, $id);
-    //         $one = yield $this->oneAsync($cmd, $args);
-    //         $deferred->resolve($one);
-    //     });
-    //     return $promise;
-    // }
-
-    // /**
-    //  * @param TableDefinition $definition
-    //  * @param int             $id
-    //  *
-    //  * @return array
-    //  */
-    // private function getCommand(TableDefinition $definition, int $id): array
-    // {
-    
-    // }

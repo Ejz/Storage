@@ -18,6 +18,7 @@ class TestCaseStorage extends AbstractTestCase
                 'fields' => [
                     'int' => [
                         'type' => TableDefinition::TYPE_INT,
+                        'index' => 'asd',
                     ],
                 ],
                 'get_shards' => function (?int $id, array $values, array $shards) {
@@ -40,9 +41,9 @@ class TestCaseStorage extends AbstractTestCase
         $this->assertEquals(1, $id1);
         $id2 = $table->insert();
         $this->assertEquals(2, $id2);
-        $id3 = $table->insert();
+        $id3 = $table->insert(['int' => 0]);
         $this->assertEquals(3, $id3);
-        $elem = $table->get($id2);
+        $elem = $table->get($id3);
         $this->assertTrue($elem['int'] === 0);
     }
 
@@ -56,14 +57,6 @@ class TestCaseStorage extends AbstractTestCase
                 'fields' => [
                     'blob' => [
                         'type' => TableDefinition::TYPE_BLOB,
-                        'get_pattern' => 'encode(%s, \'base64\')',
-                        'get' => function ($val) {
-                            return base64_decode($val);
-                        },
-                        'set_pattern' => 'decode(?, \'base64\')::BYTEA',
-                        'set' => function ($val) {
-                            return base64_encode($val);
-                        },
                     ],
                 ],
                 'get_shards' => function (?int $id, array $values, array $shards) {
@@ -410,5 +403,103 @@ class TestCaseStorage extends AbstractTestCase
         $this->assertTrue(!isset($json1['a']));
         $elem = $table->get($id, 'json1|ab');
         $this->assertTrue(isset($elem['rnd']['a']));
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_modifiers_3()
+    {
+        $storage = $this->getStorage([
+            'table' => [
+                'fields' => [
+                    'int' => [
+                        'type' => TableDefinition::TYPE_INT,
+                        'set_pattern' => '? * 2',
+                        'get_pattern' => '%s / 2',
+                    ],
+                ],
+                'modifiers' => [
+                    '~^(.*)\|m$~i' => function ($match) {
+                        $append = [
+                            'set_pattern' => '? ^ 5',
+                            'get_pattern' => '%s ^ 0.2',
+                        ];
+                        $append['alias'] = 'rnd';
+                        return [$match[1], $append];
+                    },
+                ],
+            ],
+        ]);
+        $table = $storage->table();
+        $table->create();
+        $id = $table->insert(['int' => 7]);
+        $int = $table->get($id)['int'];
+        $this->assertTrue($int === 7);
+        $id = $table->insert(['int|m' => 8]);
+        $rnd = $table->get($id, 'int|m')['rnd'];
+        $this->assertTrue($rnd == 8);
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_foreign_key()
+    {
+        $storage = $this->getStorage([
+            'parent' => [
+                'fields' => [
+                    'int' => [
+                        'type' => TableDefinition::TYPE_INT,
+                    ],
+                ],
+            ],
+            'child' => [
+                'fields' => [
+                    'int' => [
+                        'type' => TableDefinition::TYPE_INT,
+                    ],
+                    'parent_id' => [
+                        'type' => TableDefinition::TYPE_FOREIGN_KEY,
+                        'references' => '"parent" ("parent_id")',
+                    ],
+                ],
+            ],
+        ]);
+        $parent = $storage->parent();
+        $parent->create();
+        $pid = $parent->insert();
+        $this->assertTrue($pid > 0);
+        $child = $storage->child();
+        $child->create();
+        $cid = $child->insert(['parent_id' => $pid]);
+        $this->assertTrue($cid > 0);
+        $elem = $child->get($cid);
+        $this->assertTrue($elem['parent_id'] === $pid);
+        $this->assertTrue($parent->reid($pid, 70));
+        $elem = $child->get($cid);
+        $this->assertTrue($elem['parent_id'] === 70);
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_delete()
+    {
+        $storage = $this->getStorage([
+            'table' => [
+                'fields' => [
+                    'text' => [
+                    ],
+                ],
+            ],
+        ]);
+        $table = $storage->table();
+        $table->create();
+        $tid = $table->insert();
+        $this->assertTrue($tid > 0);
+        $this->assertTrue(!empty($table->get($tid)));
+        $table->delete($tid);
+        $this->assertTrue(empty($table->get($tid)));
     }
 }

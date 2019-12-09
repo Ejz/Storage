@@ -166,6 +166,64 @@ abstract class AbstractStorageTable
     }
 
     /**
+     * @param int $id1
+     * @param int $id2
+     *
+     * @return Promise
+     */
+    public function reidAsync(int $id1, int $id2): Promise
+    {
+        return \Amp\call(function ($id1, $id2) {
+            $deferred = new Deferred();
+            $pool = $this->getShards($id1);
+            $promises = $pool->reidAsync($this->definition, $id1, $id2);
+            \Amp\Promise\all($promises)->onResolve(function ($err) use ($deferred) {
+                $deferred->resolve(!$err);
+            });
+            return $deferred->promise();
+        }, $id1, $id2);
+    }
+
+    /**
+     * @param int $id1
+     * @param int $id2
+     *
+     * @return int
+     */
+    public function reid(int $id1, int $id2): bool
+    {
+        return \Amp\Promise\wait($this->reidAsync($id1, $id2));
+    }
+
+    /**
+     * @param int $id
+     *
+     * @return Promise
+     */
+    public function deleteAsync(int $id): Promise
+    {
+        return \Amp\call(function ($id) {
+            $deferred = new Deferred();
+            $pool = $this->getShards($id);
+            $promises = $pool->deleteAsync($this->definition, $id);
+            \Amp\Promise\all($promises)->onResolve(function ($err) use ($deferred) {
+                $deferred->resolve(!$err);
+            });
+            return $deferred->promise();
+        }, $id);
+    }
+
+    /**
+     * @param int $id
+     *
+     * @return int
+     */
+    public function delete(int $id): bool
+    {
+        return \Amp\Promise\wait($this->deleteAsync($id));
+    }
+
+    /**
      * @param array $params (optional)
      *
      * @return array
