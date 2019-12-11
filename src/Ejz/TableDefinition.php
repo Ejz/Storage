@@ -20,14 +20,19 @@ class TableDefinition
     /** @var array */
     private $definition;
 
+    /** @var array */
+    private $shards;
+
     /**
      * @param string $table
      * @param array  $definition
      */
-    public function __construct(string $table, array $definition)
+    public function __construct(string $table, array $definition, array $shards)
     {
         $this->table = $table;
         $this->definition = $definition;
+        $this->shards = $shards;
+        $this->shards = $this->getAllShards();
         $this->setDefaults();
         $this->test();
     }
@@ -202,30 +207,98 @@ class TableDefinition
     }
 
     /**
-     * @param ?int  $id
-     * @param array $values (optional)
+     * @return array
+     */
+    public function getAllShards(): array
+    {
+        $get_all_shards = $this->definition['get_all_shards'] ?? null;
+        if ($get_all_shards !== null) {
+            return $get_all_shards($this->shards);
+        }
+        return $this->shards;
+    }
+
+    /**
+     * @param int $id
      *
      * @return array
      */
-    public function getShards(?int $id, array $values = []): array
+    public function getReadShardsById(int $id): array
     {
-        $shards = $this->definition['shards'];
-        if ($this->definition['get_shards'] ?? null) {
-            return $this->definition['get_shards']($id, $values, $shards);
+        $get = $this->definition['get_read_shards_by_id'] ?? null;
+        if ($get !== null) {
+            return $get($id, $this->shards);
         }
-        return $shards;
+        $get = $this->definition['get_shards_by_id'] ?? null;
+        if ($get !== null) {
+            return $get($id, $this->shards);
+        }
+        return $this->shards;
     }
 
     /**
-     * @param ?int  $id
-     * @param array $values (optional)
+     * @param int $id
      *
-     * @return string
+     * @return array
      */
-    public function getShard(?int $id, array $values = []): string
+    public function getWriteShardsById(int $id): array
     {
-        $shards = $this->getShards($id, $values);
-        return $shards[array_rand($shards)];
+        $get = $this->definition['get_write_shards_by_id'] ?? null;
+        if ($get !== null) {
+            return $get($id, $this->shards);
+        }
+        $get = $this->definition['get_shards_by_id'] ?? null;
+        if ($get !== null) {
+            return $get($id, $this->shards);
+        }
+        return $this->shards;
+    }
+
+    /**
+     * @param array $values
+     *
+     * @return array
+     */
+    public function getReadShardsByValues(array $values): array
+    {
+        $get = $this->definition['get_read_shards_by_values'] ?? null;
+        if ($get !== null) {
+            return $get($values, $this->shards);
+        }
+        $get = $this->definition['get_shards_by_values'] ?? null;
+        if ($get !== null) {
+            return $get($values, $this->shards);
+        }
+        return $this->shards;
+    }
+
+    /**
+     * @param array $values
+     *
+     * @return array
+     */
+    public function getWriteShardsByValues(array $values): array
+    {
+        $get = $this->definition['get_write_shards_by_values'] ?? null;
+        if ($get !== null) {
+            return $get($values, $this->shards);
+        }
+        $get = $this->definition['get_shards_by_values'] ?? null;
+        if ($get !== null) {
+            return $get($values, $this->shards);
+        }
+        return $this->shards;
+    }
+
+    /**
+     * @param string $name
+     *
+     * @return int
+     */
+    public function getPrimaryKeyStartWith(string $name): int
+    {
+        $v = $this->definition['primary_key_start_with'] ?? 1;
+        return (int) (is_callable($v) ? $v($name, $this->shards) : $v);
     }
 
     /**
@@ -233,23 +306,10 @@ class TableDefinition
      *
      * @return int
      */
-    public function getPrimaryKeyStartWith(string $shard): int
+    public function getPrimaryKeyIncrementBy(string $name): int
     {
-        $shards = $this->definition['shards'];
-        $val = $this->definition['primary_key_start_with'] ?? 1;
-        return (int) (is_callable($val) ? $val($shard, $shards) : $val);
-    }
-
-    /**
-     * @param string $shard
-     *
-     * @return int
-     */
-    public function getPrimaryKeyIncrementBy(string $shard): int
-    {
-        $shards = $this->definition['shards'];
-        $val = $this->definition['primary_key_increment_by'] ?? 1;
-        return (int) (is_callable($val) ? $val($shard, $shards) : $val);
+        $v = $this->definition['primary_key_increment_by'] ?? 1;
+        return (int) (is_callable($v) ? $v($name, $this->shards) : $v);
     }
 
     /**

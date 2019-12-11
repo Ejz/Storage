@@ -12,6 +12,9 @@ use Amp\Postgres\ConnectionConfig;
 
 class DatabasePostgres implements DatabaseInterface
 {
+    /** @var string */
+    private $name;
+
     /** @var ConnectionConfig */
     private $connectionConfig;
 
@@ -22,19 +25,28 @@ class DatabasePostgres implements DatabaseInterface
     private $connection;
 
     /**
+     * @param string $name
      * @param string $dsn
      * @param array  $config (optional)
      */
-    public function __construct(string $dsn, array $config = [])
+    public function __construct(string $name, string $dsn, array $config = [])
     {
+        $this->name = $name;
         $this->connectionConfig = ConnectionConfig::fromString($dsn);
         $this->config = $config + [
             'quote' => '"',
             'iterator_chunk_size' => 100,
             'rand_iterator_intervals' => 1000,
-            'shard' => '',
         ];
         $this->connection = null;
+    }
+
+    /**
+     * @return string
+     */
+    public function getName(): string
+    {
+        return $this->name;
     }
 
     /**
@@ -49,6 +61,7 @@ class DatabasePostgres implements DatabaseInterface
             if (!$this->connection instanceof Connection) {
                 yield $this->connect();
             }
+            // var_dump($sql, $args);
             if ($args) {
                 $statement = yield $this->connection->prepare($sql);
                 $result = yield $statement->execute($args);
@@ -792,8 +805,8 @@ class DatabasePostgres implements DatabaseInterface
             TableDefinition::TYPE_JSON => '\'{}\'::JSONB',
         ];
         $seq = "{$table}_seq";
-        $pk_start_with = $definition->getPrimaryKeyStartWith($this->config['shard']);
-        $pk_increment_by = $definition->getPrimaryKeyIncrementBy($this->config['shard']);
+        $pk_start_with = $definition->getPrimaryKeyStartWith($this->getName());
+        $pk_increment_by = $definition->getPrimaryKeyIncrementBy($this->getName());
         $commands[] = "DROP SEQUENCE IF EXISTS {$q}{$seq}{$q} CASCADE";
         $commands[] = "
             CREATE SEQUENCE {$q}{$seq}{$q}

@@ -21,9 +21,6 @@ class TestCaseStorage extends AbstractTestCase
                         'index' => 'asd',
                     ],
                 ],
-                'get_shards' => function (?int $id, array $values, array $shards) {
-                    return $shards;
-                },
             ],
         ]);
         $this->assertTrue($storage instanceof Storage);
@@ -59,9 +56,6 @@ class TestCaseStorage extends AbstractTestCase
                         'type' => TableDefinition::TYPE_BLOB,
                     ],
                 ],
-                'get_shards' => function (?int $id, array $values, array $shards) {
-                    return $shards;
-                },
             ],
         ]);
         $table = $storage->table();
@@ -94,9 +88,6 @@ class TestCaseStorage extends AbstractTestCase
                         'type' => TableDefinition::TYPE_JSON,
                     ],
                 ],
-                'get_shards' => function (?int $id, array $values, array $shards) {
-                    return $shards;
-                },
             ],
         ]);
         $table = $storage->table();
@@ -125,9 +116,6 @@ class TestCaseStorage extends AbstractTestCase
                         'unique' => ['u23'],
                     ],
                 ],
-                'get_shards' => function (?int $id, array $values, array $shards) {
-                    return $shards;
-                },
             ],
         ]);
         $table = $storage->table();
@@ -155,9 +143,6 @@ class TestCaseStorage extends AbstractTestCase
                     'text2' => [
                     ],
                 ],
-                'get_shards' => function (?int $id, array $values, array $shards) {
-                    return $shards;
-                },
             ],
         ]);
         $table = $storage->table();
@@ -212,9 +197,6 @@ class TestCaseStorage extends AbstractTestCase
                         ];
                     },
                 ],
-                'get_shards' => function (?int $id, array $values, array $shards) {
-                    return $shards;
-                },
             ],
         ]);
         $table = $storage->table();
@@ -255,11 +237,21 @@ class TestCaseStorage extends AbstractTestCase
                 'fields' => [
                     'text1' => [],
                 ],
-                'get_shards' => function (?int $id, array $values, array $shards) {
+                'get_shards_by_id' => function ($id, $shards) {
+                    $c = count($shards);
+                    $keys = array_keys($shards);
+                    $id %= $c;
+                    $id -= 1;
+                    $id = $id < 0 ? $id + $c : $id;
+                    $key = $keys[$id];
+                    return [$shards[$key]];
+                },
+                'get_write_shards_by_values' => function ($values, $shards) {
                     return [$shards[array_rand($shards)]];
                 },
                 'primary_key_start_with' => function ($shard, $shards) {
-                    return 1 + ((int) $shard);
+                    $index = (int) array_search($shard, $shards);
+                    return 1 + $index;
                 },
                 'primary_key_increment_by' => function ($shard, $shards) {
                     return count($shards);
@@ -291,21 +283,21 @@ class TestCaseStorage extends AbstractTestCase
                 'fields' => [
                     'text1' => [],
                 ],
-                'get_shards' => function (?int $id, array $values, array $shards) {
+                'get_shards_by_id' => function ($id, $shards) {
                     $c = count($shards);
                     $keys = array_keys($shards);
-                    if (!isset($id)) {
-                        $key = $keys[mt_rand(0, $c - 1)];
-                    } else {
-                        $id %= $c;
-                        $id -= 1;
-                        $id = $id < 0 ? $id + $c : $id;
-                        $key = $keys[$id];
-                    }
+                    $id %= $c;
+                    $id -= 1;
+                    $id = $id < 0 ? $id + $c : $id;
+                    $key = $keys[$id];
                     return [$shards[$key]];
                 },
+                'get_write_shards_by_values' => function ($values, $shards) {
+                    return [$shards[array_rand($shards)]];
+                },
                 'primary_key_start_with' => function ($shard, $shards) {
-                    return 1 + ((int) array_search($shard, $shards));
+                    $index = (int) array_search($shard, $shards);
+                    return 1 + $index;
                 },
                 'primary_key_increment_by' => function ($shard, $shards) {
                     return count($shards);

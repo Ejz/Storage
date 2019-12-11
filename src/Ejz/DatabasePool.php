@@ -11,6 +11,8 @@ use RuntimeException;
 class DatabasePool
 {
     const NO_SUCH_DB_ERROR = 'NO_SUCH_DB_ERROR: %s';
+    const INVALID_DB_NAMES = 'INVALID_DB_NAMES';
+    const EMPTY_POOL_ERROR = 'EMPTY_POOL_ERROR';
 
     /** @var DatabaseInterface[] */
     private $dbs;
@@ -20,7 +22,16 @@ class DatabasePool
      */
     public function __construct(array $dbs)
     {
-        $this->dbs = $dbs;
+        $this->dbs = [];
+        foreach ($dbs as $db) {
+            $this->dbs[$db->getName()] = $db;
+        }
+        if (!$this->dbs) {
+            throw new RuntimeException(self::EMPTY_POOL_ERROR);
+        }
+        if (count($this->dbs) != count($dbs)) {
+            throw new RuntimeException(self::INVALID_DB_NAMES);
+        }
     }
 
     /**
@@ -46,6 +57,14 @@ class DatabasePool
         return new self(array_filter($this->dbs, function ($key) use ($filter) {
             return in_array($key, $filter);
         }, ARRAY_FILTER_USE_KEY));
+    }
+
+    /**
+     * @return DatabaseInterface
+     */
+    public function random(): DatabaseInterface
+    {
+        return $this->dbs[array_rand($this->dbs)];
     }
 
     /**

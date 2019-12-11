@@ -7,6 +7,8 @@ use PHPUnit\Framework\TestCase;
 use Ejz\DatabasePostgres;
 use Ejz\DatabasePool;
 use Ejz\Storage;
+use Ejz\RedisCache;
+use Ejz\RedisClient;
 use Ejz\TableDefinition;
 
 abstract class AbstractTestCase extends TestCase
@@ -17,13 +19,17 @@ abstract class AbstractTestCase extends TestCase
     /** DatabasePool */
     protected $pool;
 
+    /** RedisCache */
+    protected $cache;
+
     /**
      * @return void
      */
     protected function setUp(): void
     {
-        $this->database = $this->getDatabasePostgres(0);
+        $this->database = $this->getDatabasePostgres('db0');
         $this->pool = $this->getDatabasePool();
+        $this->cache = $this->getRedisCache('db0');
     }
 
     /**
@@ -39,21 +45,22 @@ abstract class AbstractTestCase extends TestCase
     }
 
     /**
-     * @param int $n
+     * @param string $name
      *
      * @return DatabasePostgres
      */
-    protected function getDatabasePostgres(int $n): DatabasePostgres
+    protected function getDatabasePostgres(string $name): DatabasePostgres
     {
+        $_name = strtoupper($name);
         $dsn = sprintf(
             'host=%s port=%s user=%s password=%s db=%s',
-            getenv("POSTGRES{$n}_HOST"),
-            getenv("POSTGRES{$n}_PORT"),
-            getenv("POSTGRES{$n}_USER"),
-            getenv("POSTGRES{$n}_PASSWORD"),
-            getenv("POSTGRES{$n}_DB")
+            getenv("POSTGRES_{$_name}_HOST"),
+            getenv("POSTGRES_{$_name}_PORT"),
+            getenv("POSTGRES_{$_name}_USER"),
+            getenv("POSTGRES_{$_name}_PASSWORD"),
+            getenv("POSTGRES_{$_name}_DB")
         );
-        return new DatabasePostgres($dsn, ['shard' => $n]);
+        return new DatabasePostgres($name, $dsn);
     }
 
     /**
@@ -62,10 +69,24 @@ abstract class AbstractTestCase extends TestCase
     protected function getDatabasePool(): DatabasePool
     {
         return new DatabasePool([
-            $this->getDatabasePostgres(0),
-            $this->getDatabasePostgres(1),
-            $this->getDatabasePostgres(2),
+            $this->getDatabasePostgres('db0'),
+            $this->getDatabasePostgres('db1'),
+            $this->getDatabasePostgres('db2'),
         ]);
+    }
+
+    /**
+     * @param string $name
+     *
+     * @return RedisCache
+     */
+    protected function getRedisCache(string $name): RedisCache
+    {
+        $_name = strtoupper($name);
+        $host = getenv("REDIS_{$_name}_HOST");
+        $port = getenv("REDIS_{$_name}_PORT");
+        $persistent = false;
+        return new RedisCache(new RedisClient(compact('persistent', 'host', 'port')));
     }
 
     /**
@@ -75,7 +96,7 @@ abstract class AbstractTestCase extends TestCase
      */
     protected function getStorage(array $tables): Storage
     {
-        return new Storage($this->pool, $tables);
+        return new Storage($this->pool, $this->cache, $tables);
     }
 
     /**

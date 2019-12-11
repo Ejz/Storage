@@ -15,7 +15,8 @@
         "phpunit/phpunit": "^8.1",
         "composer/composer": "^1.8",
         "amphp/amp": "^2.2",
-        "amphp/postgres": "^1.0"
+        "amphp/postgres": "^1.0",
+        "ejz/rediscache": "~1.0"
     },
     "require-dev": {
         "vlucas/phpdotenv": "~2.0"
