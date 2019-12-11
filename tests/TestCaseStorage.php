@@ -21,6 +21,7 @@ class TestCaseStorage extends AbstractTestCase
                         'index' => 'asd',
                     ],
                 ],
+                'is_cacheable' => mt_rand() % 2,
             ],
         ]);
         $this->assertTrue($storage instanceof Storage);

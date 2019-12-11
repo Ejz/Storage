@@ -291,6 +291,14 @@ class TableDefinition
     }
 
     /**
+     * @return bool
+     */
+    public function isCacheable(): bool
+    {
+        return !empty($this->definition['is_cacheable']);
+    }
+
+    /**
      * @param string $name
      *
      * @return int

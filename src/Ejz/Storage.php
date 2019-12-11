@@ -138,8 +138,12 @@ class Storage
     {
         return \Amp\call(function () {
             $definition = $this->getTableDefinition();
+            $table = $definition->getTable();
+            if ($definition->isCacheable()) {
+                $this->cache->drop($table);
+            }
             $shards = $this->getAllShards();
-            yield $shards->dropAsync($definition->getTable());
+            yield $shards->dropAsync($table);
         });
     }
 
@@ -158,8 +162,12 @@ class Storage
     {
         return \Amp\call(function () {
             $definition = $this->getTableDefinition();
+            $table = $definition->getTable();
+            if ($definition->isCacheable()) {
+                $this->cache->drop($table);
+            }
             $shards = $this->getAllShards();
-            yield $shards->truncateAsync($definition->getTable());
+            yield $shards->truncateAsync($table);
         });
     }
 
@@ -218,6 +226,10 @@ class Storage
         return \Amp\call(function ($id, $values) {
             $deferred = new Deferred();
             $definition = $this->getTableDefinition();
+            if ($definition->isCacheable()) {
+                $table = $definition->getTable();
+                $this->cache->drop($table . '.' . $id);
+            }
             $values = $definition->normalizeValues($values);
             $shards = $this->getWriteShardsById($id);
             $promises = $shards->updateAsync($definition, $id, $values);
@@ -249,11 +261,25 @@ class Storage
     {
         return \Amp\call(function ($id, $fields) {
             $definition = $this->getTableDefinition();
-            $fields = $fields ?? array_keys($definition->getFields());
-            $fields = array_fill_keys((array) $fields, null);
-            $fields = $definition->normalizeValues($fields);
-            $shards = $this->getReadShardsById($id);
-            return yield $shards->random()->getAsync($definition, $id, $fields);
+            $cacheable = $definition->isCacheable();
+            $value = null;
+            if ($cacheable) {
+                $table = $definition->getTable();
+                $ck = $table . '.' . $id . '.' . md5(serialize($fields));
+                $ct = [$table, $table . '.' . $id];
+                $value = $this->cache->get($ck);
+            }
+            if ($value === null) {
+                $fields = $fields ?? array_keys($definition->getFields());
+                $fields = array_fill_keys((array) $fields, null);
+                $fields = $definition->normalizeValues($fields);
+                $shards = $this->getReadShardsById($id);
+                $value = yield $shards->random()->getAsync($definition, $id, $fields);
+                if ($cacheable) {
+                    $this->cache->set($ck, $value, 3600, $ct);
+                }
+            }
+            return $value;
         }, $id, $fields);
     }
 
@@ -284,6 +310,10 @@ class Storage
             if (array_diff($shards1->names(), $shards2->names())) {
                 throw new RuntimeException(sprintf(self::INVALID_SHARDS_FOR_REID, $id1, $id2));
             }
+            if ($definition->isCacheable()) {
+                $table = $definition->getTable();
+                $this->cache->drop($table . '.' . $id1, $table . '.' . $id2);
+            }
             $promises = $shards1->reidAsync($definition, $id1, $id2);
             \Amp\Promise\all($promises)->onResolve(function ($err) use ($deferred) {
                 $deferred->resolve(!$err);
@@ -313,6 +343,10 @@ class Storage
         return \Amp\call(function ($id) {
             $deferred = new Deferred();
             $definition = $this->getTableDefinition();
+            if ($definition->isCacheable()) {
+                $table = $definition->getTable();
+                $this->cache->drop($table . '.' . $id);
+            }
             $shards = $this->getWriteShardsById($id);
             $promises = $shards->deleteAsync($definition, $id);
             \Amp\Promise\all($promises)->onResolve(function ($err) use ($deferred) {
