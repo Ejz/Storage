@@ -23,6 +23,9 @@ class Storage
     /** @var RedisCache */
     private $cache;
 
+    /** @var Bitmap */
+    private $bitmap;
+
     /** @var array */
     private $tables;
 
@@ -38,6 +41,7 @@ class Storage
     /**
      * @param DatabasePool $pool
      * @param RedisCache   $cache
+     * @param Bitmap       $bitmap
      * @param array        $tables
      * @param ?string      $table  (optional)
      * @param array        $args   (optional)
@@ -45,12 +49,14 @@ class Storage
     public function __construct(
         DatabasePool $pool,
         RedisCache $cache,
+        Bitmap $bitmap,
         array $tables,
         ?string $table = null,
         array $args = []
     ) {
         $this->pool = $pool;
         $this->cache = $cache;
+        $this->bitmap = $bitmap;
         $this->tables = $tables;
         $this->table = $table;
         $this->args = $args;
@@ -70,6 +76,14 @@ class Storage
     public function getCache(): RedisCache
     {
         return $this->cache;
+    }
+
+    /**
+     * @return Bitmap
+     */
+    public function getBitmap(): Bitmap
+    {
+        return $this->bitmap;
     }
 
     /**
@@ -108,7 +122,7 @@ class Storage
     public function __call(string $table, array $args): self
     {
         $class = $this->tables[$table]['class'] ?? self::class;
-        return new $class($this->pool, $this->cache, $this->tables, $table, $args);
+        return new $class($this->pool, $this->cache, $this->bitmap, $this->tables, $table, $args);
     }
 
     /**
@@ -488,32 +502,6 @@ class Storage
         $shards = $definition->getWriteShardsByValues($values);
         return $this->getPool()->dbs($shards);
     }
-
-    // /**
-    //  * @param ?int   $id     (optional)
-    //  * @param ?array $values (optional)
-    //  *
-    //  * @return DatabasePool
-    //  */
-    // public function getReadShards(?int $id = null, ?array $values = null): DatabasePool
-    // {
-    //     $definition = $this->getTableDefinition();
-    //     $shards = $definition->getReadShards($id, $values);
-    //     return $this->getPool()->dbs($shards);
-    // }
-
-    // /**
-    //  * @param ?int   $id     (optional)
-    //  * @param ?array $values (optional)
-    //  *
-    //  * @return DatabasePool
-    //  */
-    // public function getWriteShards(?int $id = null, ?array $values = null): DatabasePool
-    // {
-    //     $definition = $this->getTableDefinition();
-    //     $shards = $definition->getWriteShards($id, $values);
-    //     return $this->getPool()->dbs($shards);
-    // }
 
     /**
      * @param array $iterators

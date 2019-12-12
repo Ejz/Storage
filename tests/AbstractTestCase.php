@@ -10,6 +10,7 @@ use Ejz\Storage;
 use Ejz\RedisCache;
 use Ejz\RedisClient;
 use Ejz\TableDefinition;
+use Ejz\Bitmap;
 
 abstract class AbstractTestCase extends TestCase
 {
@@ -30,6 +31,7 @@ abstract class AbstractTestCase extends TestCase
         $this->database = $this->getDatabasePostgres('db0');
         $this->pool = $this->getDatabasePool();
         $this->cache = $this->getRedisCache('db0');
+        $this->bitmap = $this->getBitmap('db0');
     }
 
     /**
@@ -90,13 +92,27 @@ abstract class AbstractTestCase extends TestCase
     }
 
     /**
+     * @param string $name
+     *
+     * @return Bitmap
+     */
+    protected function getBitmap(string $name): Bitmap
+    {
+        $_name = strtoupper($name);
+        $host = getenv("BITMAP_{$_name}_HOST");
+        $port = getenv("BITMAP_{$_name}_PORT");
+        $persistent = false;
+        return new Bitmap(new RedisClient(compact('persistent', 'host', 'port')));
+    }
+
+    /**
      * @param array $tables
      *
      * @return Storage
      */
     protected function getStorage(array $tables): Storage
     {
-        return new Storage($this->pool, $this->cache, $tables);
+        return new Storage($this->pool, $this->cache, $this->bitmap, $tables);
     }
 
     /**
