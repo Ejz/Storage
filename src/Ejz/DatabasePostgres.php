@@ -613,23 +613,29 @@ class DatabasePostgres implements DatabaseInterface
 
     /**
      * @param TableDefinition $definition
-     * @param int             $id
+     * @param array           $ids
      * @param mixed           $fields
      *
      * @return Promise
      */
-    public function getAsync(TableDefinition $definition, int $id, $fields): Promise
+    public function getAsync(TableDefinition $definition, array $ids, $fields): Promise
     {
-        return \Amp\call(function ($definition, $id, $fields) {
-            [$cmd, $args] = $this->getCommand($definition, $id, $fields);
-            $one = yield $this->oneAsync($cmd, ...$args);
-            foreach ($one as $key => &$value) {
-                $get = $fields[$key]['get'] ?? null;
-                $value = $get === null ? $value : $get($value);
+        return \Amp\call(function ($definition, $ids, $fields) {
+            [$cmd, $args, $pk] = $this->getCommand($definition, $ids, $fields);
+            $all = yield $this->allAsync($cmd, ...$args);
+            $collect = [];
+            foreach ($all as $row) {
+                $id = $row[$pk];
+                unset($row[$pk]);
+                foreach ($row as $k => &$v) {
+                    $get = $fields[$k]['get'] ?? null;
+                    $v = $get === null ? $v : $get($v);
+                }
+                unset($v);
+                $collect[$id] = $row;
             }
-            unset($value);
-            return $one ? [$id => $one] : [];
-        }, $definition, $id, $fields);
+            return $collect;
+        }, $definition, $ids, $fields);
     }
 
     /**
@@ -965,26 +971,28 @@ class DatabasePostgres implements DatabaseInterface
 
     /**
      * @param TableDefinition $definition
-     * @param int             $id
+     * @param array           $ids
      * @param mixed           $fields
      *
      * @return array
      */
-    private function getCommand(TableDefinition $definition, int $id, $fields): array
+    private function getCommand(TableDefinition $definition, array $ids, $fields): array
     {
         $q = $this->config['quote'];
         $table = $definition->getTable();
         $pk = $definition->getPrimaryKey();
-        $args = [$id];
-        $where = "{$q}{$pk}{$q} = ?";
-        $_fields = [];
+        $ids = array_map('intval', $ids);
+        $_ = implode(', ', array_fill(0, count($ids), '?'));
+        $where = "{$q}{$pk}{$q} IN ({$_})";
+        $_pk = '_pk_' . mt_rand();
+        $_fields = ["{$q}{$pk}{$q} AS {$q}{$_pk}{$q}"];
         foreach ($fields as $alias => $field) {
             $f = str_replace('%s', $q . $field['field'] . $q, $field['get_pattern']);
             $_fields[] = $f . ' AS ' . $q . $alias . $q;
         }
         $_fields = implode(', ', $_fields);
-        $command = "SELECT {$_fields} FROM {$q}{$table}{$q} WHERE {$where} LIMIT 1";
-        return [$command, $args];
+        $command = "SELECT {$_fields} FROM {$q}{$table}{$q} WHERE {$where}";
+        return [$command, $ids, $_pk];
     }
 
     /**

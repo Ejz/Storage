@@ -273,7 +273,8 @@ class Storage
      */
     public function getAsync(...$args): Promise
     {
-        return \Amp\call(function ($ids) {
+        return \Amp\call(function ($args) {
+            $ids = $args;
             $fields = null;
             $last = array_pop($ids);
             if (is_numeric($last)) {
@@ -318,9 +319,7 @@ class Storage
             $fields = $definition->normalizeValues($fields);
             $promises = [];
             foreach ($dbs['map'] as $name => $db) {
-                $_ids = $dbs['ids'][$name];
-                $_ids[] = $fields;
-                $promises[] = $db->getAsync($definition, ...$_ids);
+                $promises[] = $db->getAsync($definition, $dbs['ids'][$name], $fields);
             }
             $values = yield $promises;
             foreach (($isCacheable ? $values : []) as $value) {

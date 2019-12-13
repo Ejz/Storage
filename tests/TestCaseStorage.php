@@ -496,4 +496,27 @@ class TestCaseStorage extends AbstractTestCase
         $table->delete($tid);
         $this->assertTrue(empty($table->get($tid)));
     }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_multiple_ids()
+    {
+        $storage = $this->getStorage([
+            'table' => [
+                'fields' => [
+                    'text' => [
+                    ],
+                ],
+                'is_cacheable' => mt_rand() % 2,
+            ],
+        ]);
+        $table = $storage->table();
+        $table->create();
+        $tid1 = $table->insert();
+        $tid2 = $table->insert();
+        $this->assertTrue($tid1 > 0 && $tid2 > 0);
+        $elems = $table->get($tid1, $tid2);
+        $this->assertTrue(isset($elems[$tid1], $elems[$tid2]));
+    }
 }
