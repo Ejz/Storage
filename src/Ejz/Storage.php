@@ -16,6 +16,7 @@ class Storage
     const INVALID_TABLE_ERROR = 'INVALID_TABLE_ERROR: %s';
     const INVALID_INSERTED_IDS = 'INVALID_INSERTED_IDS: %s / %s';
     const INVALID_SHARDS_FOR_REID = 'INVALID_SHARDS_FOR_REID: %s -> %s';
+    const INVALID_ARGUMENT_FORMAT = 'INVALID_ARGUMENT_FORMAT';
 
     /** @var DatabasePool */
     private $pool;
@@ -266,46 +267,80 @@ class Storage
     }
 
     /**
-     * @param int   $id
-     * @param mixed $fields (optional)
+     * @param array ...args
      *
      * @return Promise
      */
-    public function getAsync(int $id, $fields = null): Promise
+    public function getAsync(...$args): Promise
     {
-        return \Amp\call(function ($id, $fields) {
-            $definition = $this->getTableDefinition();
-            $cacheable = $definition->isCacheable();
-            $value = null;
-            if ($cacheable) {
-                $table = $definition->getTable();
-                $ck = $table . '.' . $id . '.' . md5(serialize($fields));
-                $ct = [$table, $table . '.' . $id];
-                $value = $this->cache->get($ck);
+        return \Amp\call(function ($ids) {
+            $fields = null;
+            $last = array_pop($ids);
+            if (is_numeric($last)) {
+                $ids[] = $last;
+            } else {
+                $fields = $last;
             }
-            if ($value === null) {
-                $fields = $fields ?? array_keys($definition->getFields());
-                $fields = array_fill_keys((array) $fields, null);
-                $fields = $definition->normalizeValues($fields);
-                $shards = $this->getReadShardsById($id);
-                $value = yield $shards->random()->getAsync($definition, $id, $fields);
-                if ($cacheable) {
-                    $this->cache->set($ck, $value, 3600, $ct);
+            if (!$ids) {
+                throw new RuntimeException(self::INVALID_ARGUMENT_FORMAT);
+            }
+            $definition = $this->getTableDefinition();
+            $isCacheable = $definition->isCacheable();
+            $table = $definition->getTable();
+            $result = [];
+            $meta = [];
+            $dbs = ['ids' => [], 'map' => []];
+            foreach ($ids as $id) {
+                $v = null;
+                if ($isCacheable) {
+                    $fields_md5 = $fields_md5 ?? md5(serialize($fields));
+                    $ck = $table . '.' . $id . '.' . $fields_md5;
+                    $v = $this->cache->get($ck);
+                    if ($v !== null) {
+                        $result[$id] = $v;
+                    } else {
+                        $ct = [$table, $table . '.' . $id];
+                        $meta[$id] = [$ck, $ct];
+                    }
+                }
+                if ($v === null) {
+                    $db = $this->getReadShardsById($id)->random();
+                    $name = $db->getName();
+                    $dbs['map'][$name] = $db;
+                    $dbs['ids'][$name][] = $id;
                 }
             }
-            return $value;
-        }, $id, $fields);
+            if (!$dbs['map']) {
+                return $result;
+            }
+            $fields = $fields ?? array_keys($definition->getFields());
+            $fields = array_fill_keys((array) $fields, null);
+            $fields = $definition->normalizeValues($fields);
+            $promises = [];
+            foreach ($dbs['map'] as $name => $db) {
+                $_ids = $dbs['ids'][$name];
+                $_ids[] = $fields;
+                $promises[] = $db->getAsync($definition, ...$_ids);
+            }
+            $values = yield $promises;
+            foreach (($isCacheable ? $values : []) as $value) {
+                foreach ($value as $id => $v) {
+                    [$ck, $ct] = $meta[$id];
+                    $this->cache->set($ck, $v, 3600, $ct);
+                }
+            }
+            return array_replace($result, ...$values);
+        }, $args);
     }
 
     /**
-     * @param int   $id
-     * @param mixed $fields (optional)
+     * @param array ...$args
      *
      * @return array
      */
-    public function get(int $id, $fields = null): array
+    public function get(...$args): array
     {
-        return \Amp\Promise\wait($this->getAsync($id, $fields));
+        return \Amp\Promise\wait($this->getAsync(...$args));
     }
 
     /**
@@ -405,15 +440,7 @@ class Storage
      */
     public function iterateAsArray(array $params = []): array
     {
-        return \Amp\Promise\wait(\Amp\call(function ($params) {
-            $iterator = $this->iterate($params);
-            $elems = yield \Amp\Iterator\toArray($iterator);
-            $ret = [];
-            foreach ($elems as [$k, $v]) {
-                $ret[$k] = $v;
-            }
-            return $ret;
-        }, $params));
+        return iterator_to_array($this->iterateAsGenerator($params));
     }
 
     /**

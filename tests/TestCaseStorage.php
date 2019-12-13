@@ -41,7 +41,7 @@ class TestCaseStorage extends AbstractTestCase
         $this->assertEquals(2, $id2);
         $id3 = $table->insert(['int' => 0]);
         $this->assertEquals(3, $id3);
-        $elem = $table->get($id3);
+        $elem = current($table->get($id3));
         $this->assertTrue($elem['int'] === 0);
     }
 
@@ -62,16 +62,16 @@ class TestCaseStorage extends AbstractTestCase
         $table = $storage->table();
         $table->create();
         $id1 = $table->insert(['blob' => chr(0)]);
-        $elem = $table->get($id1);
+        $elem = current($table->get($id1));
         $this->assertTrue($elem['blob'] === chr(0));
         $id2 = $table->insert(['blob' => str_repeat(chr(1), 1E7)]);
-        $elem = $table->get($id2);
+        $elem = current($table->get($id2));
         $this->assertTrue(strlen($elem['blob']) == 1E7);
         $id3 = $table->insert(['blob' => '']);
-        $elem = $table->get($id3);
+        $elem = current($table->get($id3));
         $this->assertTrue($elem['blob'] === '');
         $id4 = $table->insert();
-        $elem = $table->get($id4);
+        $elem = current($table->get($id4));
         $this->assertTrue($elem['blob'] === '');
     }
 
@@ -94,7 +94,7 @@ class TestCaseStorage extends AbstractTestCase
         $table = $storage->table();
         $table->create();
         $id1 = $table->insert(['text' => 'hello', 'json' => ['hi']]);
-        $elem = $table->get($id1);
+        $elem = current($table->get($id1));
         $this->assertTrue($elem['text'] === 'hello');
         $this->assertTrue($elem['json'] === ['hi']);
     }
@@ -127,7 +127,7 @@ class TestCaseStorage extends AbstractTestCase
         $this->assertTrue($id2 === 0);
         $id3 = $table->insert(['u1' => mt_rand(), 'u2' => mt_rand(), 'u3' => mt_rand()]);
         $this->assertTrue($id3 === 3);
-        $elem = $table->get($id1);
+        $elem = current($table->get($id1));
         $this->assertTrue($elem['u1'] === 'foo');
     }
 
@@ -166,13 +166,13 @@ class TestCaseStorage extends AbstractTestCase
         $this->assertTrue(isset($row['text1']));
         $this->assertTrue(isset($row['text2']));
         $this->assertTrue(!isset($row['table_id']));
-        $elem = $table->get($id, 'text2');
+        $elem = current($table->get($id, 'text2'));
         $this->assertTrue(!isset($elem['text1']));
         $this->assertTrue(isset($elem['text2']));
-        $elem = $table->get($id);
+        $elem = current($table->get($id));
         $this->assertTrue(isset($elem['text1']));
         $this->assertTrue(isset($elem['text2']));
-        $elem = $table->get($id, []);
+        $elem = current($table->get($id, []));
         $this->assertTrue(!isset($elem['text1']));
         $this->assertTrue(!isset($elem['text2']));
     }
@@ -310,7 +310,7 @@ class TestCaseStorage extends AbstractTestCase
         $id = $table->insert(['text1' => 'foo']);
         $ok = $table->update($id, ['text1' => 'bar']);
         $this->assertTrue($ok);
-        $this->assertTrue($table->get($id)['text1'] === 'bar');
+        $this->assertTrue(current($table->get($id))['text1'] === 'bar');
     }
 
     /**
@@ -343,12 +343,12 @@ class TestCaseStorage extends AbstractTestCase
         $table = $storage->table();
         $table->create();
         $id = $table->insert(['text1|Trim' => ' foo ']);
-        $this->assertTrue($table->get($id)['text1'] === 'foo');
+        $this->assertTrue(current($table->get($id))['text1'] === 'foo');
         $id = $table->insert(['json1' => ['a' => 1, 'b' => 2]]);
-        $this->assertTrue($table->get($id)['json1']['a'] === 1);
+        $this->assertTrue(current($table->get($id))['json1']['a'] === 1);
         $table->update($id, ['json1{}' => ['c' => 3]]);
-        $this->assertTrue($table->get($id)['json1']['a'] === 1);
-        $this->assertTrue($table->get($id)['json1']['c'] === 3);
+        $this->assertTrue(current($table->get($id))['json1']['a'] === 1);
+        $this->assertTrue(current($table->get($id))['json1']['c'] === 3);
     }
 
     /**
@@ -388,13 +388,13 @@ class TestCaseStorage extends AbstractTestCase
         $table = $storage->table();
         $table->create();
         $id = $table->insert(['json1' => ['m' => 1]]);
-        $json1 = $table->get($id)['json1'];
+        $json1 = current($table->get($id))['json1'];
         $this->assertTrue(isset($json1['x'], $json1['y'], $json1['m']));
         $id = $table->insert(['json1|ab' => ['m' => 2]]);
-        $json1 = $table->get($id)['json1'];
+        $json1 = current($table->get($id))['json1'];
         $this->assertTrue(isset($json1['x'], $json1['b'], $json1['m']));
         $this->assertTrue(!isset($json1['a']));
-        $elem = $table->get($id, 'json1|ab');
+        $elem = current($table->get($id, 'json1|ab'));
         $this->assertTrue(isset($elem['rnd']['a']));
     }
 
@@ -427,10 +427,10 @@ class TestCaseStorage extends AbstractTestCase
         $table = $storage->table();
         $table->create();
         $id = $table->insert(['int' => 7]);
-        $int = $table->get($id)['int'];
+        $int = current($table->get($id))['int'];
         $this->assertTrue($int === 7);
         $id = $table->insert(['int|m' => 8]);
-        $rnd = $table->get($id, 'int|m')['rnd'];
+        $rnd = current($table->get($id, 'int|m'))['rnd'];
         $this->assertTrue($rnd == 8);
     }
 
@@ -468,10 +468,11 @@ class TestCaseStorage extends AbstractTestCase
         $cid = $child->insert(['parent_id' => $pid]);
         $this->assertTrue($cid > 0);
         $elem = $child->get($cid);
-        $this->assertTrue($elem['parent_id'] === $pid);
+        $this->assertTrue(key($elem) === $cid);
+        $this->assertTrue(current($elem)['parent_id'] === $pid);
         $this->assertTrue($parent->reid($pid, 70));
         $elem = $child->get($cid);
-        $this->assertTrue($elem['parent_id'] === 70);
+        $this->assertTrue(current($elem)['parent_id'] === 70);
     }
 
     /**

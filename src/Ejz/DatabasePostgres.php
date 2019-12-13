@@ -624,12 +624,11 @@ class DatabasePostgres implements DatabaseInterface
             [$cmd, $args] = $this->getCommand($definition, $id, $fields);
             $one = yield $this->oneAsync($cmd, ...$args);
             foreach ($one as $key => &$value) {
-                if ($fields[$key]['get'] ?? null) {
-                    $value = $fields[$key]['get']($value);
-                }
+                $get = $fields[$key]['get'] ?? null;
+                $value = $get === null ? $value : $get($value);
             }
             unset($value);
-            return $one;
+            return $one ? [$id => $one] : [];
         }, $definition, $id, $fields);
     }
 
