@@ -2,6 +2,8 @@
 
 namespace Ejz;
 
+use Throwable;
+
 class Bitmap
 {
     /** @var RedisClient */
@@ -29,5 +31,40 @@ class Bitmap
         }, $cmd);
         $c = array_shift($cmd);
         return $this->client->$c(...$cmd);
+    }
+
+    /**
+     * @param  TableDefinition $definition
+     * @param  int             $id
+     * @param  array           $values
+     */
+    public function upsert(TableDefinition $definition, int $id, array $values)
+    {
+        $table = $definition->getTable();
+        $_values = ['', []];
+        $this->execute('ADD ? ?' . $_values[0], $table, $id, ...$_values[1]);
+    }
+
+    /**
+     * @param string $table
+     */
+    public function drop(string $table)
+    {
+        try {
+            $this->execute('DROP ?', $table);
+        } catch (Throwable $e) {
+        }
+    }
+
+    /**
+     * @param TableDefinition $definition
+     */
+    public function create(TableDefinition $definition)
+    {
+        $table = $definition->getTable();
+        $this->drop($table);
+        $fields = $definition->getBitmapFields();
+        $_fields = ['', []];
+        $this->execute('CREATE ?' . $_fields[0], $table, ...$_fields[1]);
     }
 }

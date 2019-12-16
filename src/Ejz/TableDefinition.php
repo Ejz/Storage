@@ -145,7 +145,32 @@ class TableDefinition
      */
     public function getFields(): array
     {
+        return $this->getDatabaseFields();
+    }
+
+    /**
+     * @return array
+     */
+    public function getDatabaseFields(): array
+    {
         return $this->definition['fields'];
+    }
+
+    /**
+     * @return array
+     */
+    public function getBitmapFields(): array
+    {
+        $fields = $this->definition['fields'];
+        return $fields;
+    }
+
+    /**
+     * @return bool
+     */
+    public function hasBitmap(): bool
+    {
+        return !empty($this->definition['bitmap']);
     }
 
     /**

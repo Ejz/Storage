@@ -17,6 +17,7 @@ class Storage
     const INVALID_INSERTED_IDS = 'INVALID_INSERTED_IDS: %s / %s';
     const INVALID_SHARDS_FOR_REID = 'INVALID_SHARDS_FOR_REID: %s -> %s';
     const INVALID_ARGUMENT_FORMAT = 'INVALID_ARGUMENT_FORMAT';
+    const AMBIGUOUS_WHERE_OR_FIELDS = 'AMBIGUOUS_WHERE_OR_FIELDS';
 
     /** @var DatabasePool */
     private $pool;
@@ -61,6 +62,9 @@ class Storage
         $this->tables = $tables;
         $this->table = $table;
         $this->args = $args;
+        if ($this->table !== null) {
+            $this->getTableDefinition();
+        }
     }
 
     /**
@@ -133,6 +137,9 @@ class Storage
     {
         return \Amp\call(function () {
             $definition = $this->getTableDefinition();
+            if ($definition->hasBitmap()) {
+                $this->bitmap->create($definition);
+            }
             $shards = $this->getAllShards();
             yield $shards->createAsync($definition);
         });
@@ -207,13 +214,15 @@ class Storage
             $shards = $this->getWriteShardsByValues($values);
             $values = $definition->normalizeValues($values);
             $promises = $shards->insertAsync($definition, $values);
-            \Amp\Promise\all($promises)->onResolve(function ($err, $res) use ($deferred) {
-                // var_dump($err);
+            \Amp\Promise\all($promises)->onResolve(function ($err, $res) use ($deferred, $definition, $values) {
                 $ids = $err ? [0] : array_values($res);
                 $min = min($ids);
                 $max = max($ids);
                 if ($min !== $max) {
                     throw new RuntimeException(sprintf(self::INVALID_INSERTED_IDS, $min, $max));
+                }
+                if ($definition->hasBitmap()) {
+                    $this->bitmap->upsert($definition, $min, $values);
                 }
                 $deferred->resolve($min);
             });
@@ -416,60 +425,73 @@ class Storage
     }
 
     /**
-     * @param array $params (optional)
-     *
-     * @return array
-     */
-    public function iterate(array $params = []): Producer
-    {
-        $definition = $this->getTableDefinition();
-        $table = $definition->getTable();
-        $fields = $params['fields'] ?? array_keys($definition->getFields());
-        $fields = array_fill_keys((array) $fields, null);
-        $params['fields'] = $definition->normalizeValues($fields);
-        $values = $params['where'] ?? [];
-        $shards = $this->getReadShardsByValues($values);
-        $iterators = $shards->iterate($table, $params);
-        return $this->joinIterators($iterators, $params);
-    }
-
-    /**
-     * @param array $params (optional)
-     *
-     * @return array
-     */
-    public function iterateAsArray(array $params = []): array
-    {
-        return iterator_to_array($this->iterateAsGenerator($params));
-    }
-
-    /**
+     * @param mixed $where  (optional)
+     * @param mixed $fields (optional)
      * @param array $params (optional)
      *
      * @return Generator
      */
-    public function iterateAsGenerator(array $params = []): Generator
+    public function iterate($where = null, $fields = null, array $params = []): Generator
     {
-        $producer = $this->iterate($params);
+        if (isset($params['where']) || isset($params['fields'])) {
+            throw new RuntimeException(self::AMBIGUOUS_WHERE_OR_FIELDS);
+        }
+        $definition = $this->getTableDefinition();
+        $table = $definition->getTable();
+        $fields = $fields ?? array_keys($definition->getFields());
+        $fields = array_fill_keys((array) $fields, null);
+        $fields = $definition->normalizeValues($fields);
+        $shards = $this->getReadShardsByValues(is_string($where) ? [] : ($where ?? []));
+        $params += compact('where', 'fields');
+        $iterators = $shards->iterate($table, $params);
+        $producer = $this->joinIterators($iterators, $params);
         $iterator = function ($producer) {
             if (yield $producer->advance()) {
                 return $producer->getCurrent();
             }
         };
         while ($yield = \Amp\Promise\wait(\Amp\call($iterator, $producer))) {
-            yield $yield[0] => $yield[1];
+            yield from $yield;
         }
     }
 
     /**
-     * @param array $where  (optional)
+     * @param mixed $where  (optional)
      * @param mixed $fields (optional)
+     * @param array $params (optional)
      *
      * @return array
      */
-    public function filter(array $where = [], $fields = null): array
+    public function filter($where = null, $fields = null, array $params = []): array
     {
-        return $this->iterateAsArray(compact('where', 'fields'));
+        return iterator_to_array($this->iterate($where, $fields, $params));
+    }
+
+    /**
+     * @param string $query
+     * @param mixed  $fields (optional)
+     * @param array  $params (optional)
+     *
+     * @return Generator
+     */
+    public function index(string $query, $fields = null, array $params = []): Generator
+    {
+        $params += [
+            'limit' => 100,
+        ];
+        ['limit' => $limit] = $params;
+        $definition = $this->getTableDefinition();
+        $table = $definition->getTable();
+        $ret = $this->bitmap->execute('SEARCH ? ? CURSOR ?', $table, $query, $limit);
+        $size = array_shift($ret);
+        while ($size > 0) {
+            $cursor = $cursor ?? array_shift($ret);
+            $ids = $this->bitmap->execute('CURSOR ?', $cursor);
+            $c = count($ids);
+            $size = $c > 0 ? $size - $c : 0;
+            $ids[] = $fields;
+            yield from $this->get(...$ids);
+        }
     }
 
     /**
@@ -569,7 +591,7 @@ class Storage
                 }
                 while (isset($ids[$id])) {
                     $k = $ids[$id];
-                    yield $emit($values[$k]);
+                    yield $emit([$values[$k][0] => $values[$k][1]]);
                     unset($values[$k]);
                     unset($ids[$id]);
                     $id++;

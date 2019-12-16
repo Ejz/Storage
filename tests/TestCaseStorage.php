@@ -207,7 +207,7 @@ class TestCaseStorage extends AbstractTestCase
             $table->insert($_ = ['text1' => mt_rand() % 5, 'text2' => mt_rand() % 5]);
         }
         $ids = [];
-        foreach ($table->iterateAsGenerator(['fields' => 'text3']) as $id => $row) {
+        foreach ($table->iterate(null, 'text3') as $id => $row) {
             $ids[] = $id;
         }
         $this->assertTrue(isset($row['text3']));
@@ -217,7 +217,7 @@ class TestCaseStorage extends AbstractTestCase
         $this->assertTrue(count($ids) === 2000);
         $all = array_fill_keys($ids, true);
         $ids = [];
-        foreach ($table->iterateAsGenerator(['rand' => true]) as $id => $row) {
+        foreach ($table->iterate(null, null, ['rand' => true]) as $id => $row) {
             $ids[] = $id;
             unset($all[$id]);
         }
@@ -266,7 +266,7 @@ class TestCaseStorage extends AbstractTestCase
             $table->insert($_ = ['text1' => mt_rand() % 5]);
         }
         $ids = [];
-        foreach ($table->iterateAsGenerator() as $id => $row) {
+        foreach ($table->iterate() as $id => $row) {
             $ids[] = $id;
         }
         $this->assertTrue(min($ids) === 1);
@@ -670,5 +670,38 @@ class TestCaseStorage extends AbstractTestCase
         $table->update($tid, ['json{}' => ['a' => 2, 'b' => 3]]);
         $elem = current($table->get($tid));
         $this->assertTrue($elem['json'] === ['a' => 2, 'b' => 3, 'foo' => 'bar']);
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_bitmap()
+    {
+        $storage = $this->getStorage([
+            'table' => [
+                'fields' => [
+                    'text' => [
+                        'type' => TableDefinition::TYPE_TEXT,
+                    ],
+                ],
+                'get_all_shards' => function ($shards) {
+                    return [$shards[0]];
+                },
+                'bitmap' => true,
+            ],
+        ]);
+        $table = $storage->table();
+        $table->create();
+        foreach (range(1, 1000) as $_) {
+            $tid = $table->insert(['text' => 'text' . (mt_rand() % 10)]);
+        }
+        $i = 0;
+        foreach ($table->index('*') as $_) {
+            $i++;
+        }
+        $this->assertTrue($i === 1000);
+        $tables = iterator_to_array($table->index('*'));
+        $this->assertTrue(isset($tables[1]));
+        $this->assertTrue(isset($tables[1000]));
     }
 }

@@ -446,6 +446,7 @@ class DatabasePostgres implements DatabaseInterface
             'rand' => false,
             'min' => null,
             'max' => null,
+            'limit' => 1E9,
         ];
         $params['config'] = ($params['config'] ?? []) + $this->config;
         $emit = function (callable $emit) use ($table, $params) {
@@ -456,6 +457,7 @@ class DatabasePostgres implements DatabaseInterface
                 'rand' => $rand,
                 'min' => $min,
                 'max' => $max,
+                'limit' => $limit,
             ] = $params;
             $pk = $params['_pk'] ?? yield $this->pkAsync($table);
             if (!$pk) {
@@ -531,7 +533,7 @@ class DatabasePostgres implements DatabaseInterface
                 }
             }
             $first_iteration = true;
-            do {
+            while ($limit--) {
                 $f = $quote . $pk . $quote;
                 $op = ($asc ? '>' : '<') . ($first_iteration ? '=' : '');
                 $_where = "({$f} {$op} ?)";
@@ -558,7 +560,7 @@ class DatabasePostgres implements DatabaseInterface
                     $max = $id;
                 }
                 $first_iteration = false;
-            } while (true);
+            }
         };
         return new Producer($emit);
     }
@@ -1018,11 +1020,17 @@ class DatabasePostgres implements DatabaseInterface
             return ['(TRUE)', []];
         }
         $q = $this->config['quote'];
-        foreach ($where as $key => &$value) {
-            $args[] = $value;
-            $value = "({$q}{$key}{$q} = ?)";
+        $collect = [];
+        foreach ($where as $key => $value) {
+            if (is_array($value) && count($value)) {
+                $args = array_merge($args, $value);
+                $_ = implode(', ', array_fill(0, count($value), '?'));
+                $collect[] = "({$q}{$key}{$q} IN ({$_}))";
+            } elseif (!is_array($value)) {
+                $args[] = $value;
+                $collect[] = "({$q}{$key}{$q} = ?)";
+            }
         }
-        unset($value);
-        return ['(' . implode(' AND ', $where) . ')', $args];
+        return ['(' . implode(' AND ', $collect) . ')', $args];
     }
 }
