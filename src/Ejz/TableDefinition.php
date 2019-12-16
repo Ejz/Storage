@@ -6,11 +6,17 @@ use RuntimeException;
 
 class TableDefinition
 {
-    const TYPE_INT = 'int';
-    const TYPE_BLOB = 'blob';
-    const TYPE_TEXT = 'text';
-    const TYPE_JSON = 'json';
-    const TYPE_FOREIGN_KEY = 'foreign';
+    const TYPE_INT = 'INT';
+    const TYPE_FLOAT = 'FLOAT';
+    const TYPE_BLOB = 'BLOB';
+    const TYPE_TEXT = 'TEXT';
+    const TYPE_JSON = 'JSON';
+    const TYPE_BOOL = 'BOOL';
+    const TYPE_DATE = 'DATE';
+    const TYPE_DATETIME = 'DATETIME';
+    const TYPE_INT_ARRAY = 'INT_ARRAY';
+    const TYPE_TEXT_ARRAY = 'TEXT_ARRAY';
+    const TYPE_FOREIGN_KEY = 'FOREIGN_KEY';
 
     const INVALID_FIELD_ERROR = 'INVALID_FIELD_ERROR: %s';
 
@@ -156,7 +162,7 @@ class TableDefinition
             [$field, $append] = [false, []];
             foreach ($modifiers as $regex => $callback) {
                 if (preg_match($regex, $key, $match)) {
-                    [$field, $append] = $callback($match);
+                    [$field, $append, $value] = $callback($match, $value);
                     break;
                 }
             }
@@ -335,9 +341,18 @@ class TableDefinition
     private function getDefaultModifiers(): array
     {
         return [
-            '~^(.*)\{\}$~' => function ($match) {
-                $append = [];
-                return [$match[1], $append];
+            '~^(.*)\[\]$~' => function ($match, $value) {
+                $append = [
+                    'set_pattern' => '%s || ?',
+                ];
+                $value = is_array($value) ? $value : [$value];
+                return [$match[1], $append, $value];
+            },
+            '~^(.*)\{\}$~' => function ($match, $value) {
+                $append = [
+                    'set_pattern' => '%s || ?',
+                ];
+                return [$match[1], $append, $value];
             },
         ];
     }

@@ -208,6 +208,7 @@ class Storage
             $values = $definition->normalizeValues($values);
             $promises = $shards->insertAsync($definition, $values);
             \Amp\Promise\all($promises)->onResolve(function ($err, $res) use ($deferred) {
+                // var_dump($err);
                 $ids = $err ? [0] : array_values($res);
                 $min = min($ids);
                 $max = max($ids);

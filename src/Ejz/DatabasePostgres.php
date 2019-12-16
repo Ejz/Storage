@@ -802,12 +802,24 @@ class DatabasePostgres implements DatabaseInterface
             TableDefinition::TYPE_TEXT => 'TEXT',
             TableDefinition::TYPE_JSON => 'JSONB',
             TableDefinition::TYPE_FOREIGN_KEY => 'BIGINT',
+            TableDefinition::TYPE_BOOL => 'BOOLEAN',
+            TableDefinition::TYPE_FLOAT => 'REAL',
+            TableDefinition::TYPE_DATE => 'DATE',
+            TableDefinition::TYPE_DATETIME => 'TIMESTAMP(0) WITHOUT TIME ZONE',
+            TableDefinition::TYPE_INT_ARRAY => 'INTEGER[]',
+            TableDefinition::TYPE_TEXT_ARRAY => 'TEXT[]',
         ];
         $defaults = [
             TableDefinition::TYPE_INT => '0::INTEGER',
             TableDefinition::TYPE_BLOB => '\'\'::BYTEA',
             TableDefinition::TYPE_TEXT => '\'\'::TEXT',
             TableDefinition::TYPE_JSON => '\'{}\'::JSONB',
+            TableDefinition::TYPE_BOOL => '\'f\'::BOOLEAN',
+            TableDefinition::TYPE_FLOAT => '\'0\'::REAL',
+            TableDefinition::TYPE_DATE => 'CURRENT_DATE',
+            TableDefinition::TYPE_DATETIME => 'CURRENT_TIMESTAMP',
+            TableDefinition::TYPE_INT_ARRAY => '\'{}\'::INTEGER[]',
+            TableDefinition::TYPE_TEXT_ARRAY => '\'{}\'::INTEGER[]',
         ];
         $seq = "{$table}_seq";
         $pk_start_with = $definition->getPrimaryKeyStartWith($this->getName());

@@ -191,10 +191,11 @@ class TestCaseStorage extends AbstractTestCase
                     ],
                 ],
                 'modifiers' => [
-                    '~^text3$~i' => function ($match) {
+                    '~^text3$~i' => function ($match, $value) {
                         return [
                             'text2',
                             ['get_pattern' => 'CONCAT(%s, \'hello\')'],
+                            $value,
                         ];
                     },
                 ],
@@ -327,15 +328,15 @@ class TestCaseStorage extends AbstractTestCase
                     ],
                 ],
                 'modifiers' => [
-                    '~^(.*)\|trim$~i' => function ($match) {
+                    '~^(.*)\|trim$~i' => function ($match, $value) {
                         $append = ['set' => function ($v) { return trim($v); }];
-                        return [$match[1], $append];
+                        return [$match[1], $append, $value];
                     },
-                    '~^(.*)\{\}$~i' => function ($match) {
+                    '~^(.*)\{\}$~i' => function ($match, $value) {
                         $append = [
                             'set_pattern' => '%s || ?',
                         ];
-                        return [$match[1], $append];
+                        return [$match[1], $append, $value];
                     },
                 ],
             ],
@@ -370,7 +371,7 @@ class TestCaseStorage extends AbstractTestCase
                     ],
                 ],
                 'modifiers' => [
-                    '~^(.*)\|ab$~i' => function ($match) {
+                    '~^(.*)\|ab$~i' => function ($match, $value) {
                         $append = [
                             'get' => function ($v) {
                                 return ['a' => 1] + $v;
@@ -380,7 +381,7 @@ class TestCaseStorage extends AbstractTestCase
                             },
                         ];
                         $append['alias'] = 'rnd';
-                        return [$match[1], $append];
+                        return [$match[1], $append, $value];
                     },
                 ],
             ],
@@ -413,13 +414,13 @@ class TestCaseStorage extends AbstractTestCase
                     ],
                 ],
                 'modifiers' => [
-                    '~^(.*)\|m$~i' => function ($match) {
+                    '~^(.*)\|m$~i' => function ($match, $value) {
                         $append = [
                             'set_pattern' => '? ^ 5',
                             'get_pattern' => '%s ^ 0.2',
                         ];
                         $append['alias'] = 'rnd';
-                        return [$match[1], $append];
+                        return [$match[1], $append, $value];
                     },
                 ],
             ],
@@ -518,5 +519,156 @@ class TestCaseStorage extends AbstractTestCase
         $this->assertTrue($tid1 > 0 && $tid2 > 0);
         $elems = $table->get($tid1, $tid2);
         $this->assertTrue(isset($elems[$tid1], $elems[$tid2]));
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_new_types()
+    {
+        $storage = $this->getStorage([
+            'table' => [
+                'fields' => [
+                    'bool' => [
+                        'type' => TableDefinition::TYPE_BOOL,
+                    ],
+                    'float' => [
+                        'type' => TableDefinition::TYPE_FLOAT,
+                    ],
+                    'date' => [
+                        'type' => TableDefinition::TYPE_DATE,
+                    ],
+                    'datetime' => [
+                        'type' => TableDefinition::TYPE_DATETIME,
+                    ],
+                    'int_array' => [
+                        'type' => TableDefinition::TYPE_INT_ARRAY,
+                    ],
+                    'text_array' => [
+                        'type' => TableDefinition::TYPE_TEXT_ARRAY,
+                    ],
+                ],
+            ],
+        ]);
+        $table = $storage->table();
+        $table->create();
+        //
+        $bools = [
+            [null, false, ''],
+            [1, true, true],
+            [0, true, false],
+            [true, true, true],
+            [false, true, false],
+            ['', false, ''],
+            ['1', true, true],
+            ['0', true, false],
+            ['t', true, true],
+            ['f', true, false],
+        ];
+        foreach ($bools as [$v1, $ok, $v2]) {
+            $tid = $table->insert(['bool' => $v1]);
+            $this->assertTrue($ok ? $tid > 0 : !$tid, serialize($v1));
+            if (!$ok) continue;
+            $elem = current($table->get($tid));
+            $this->assertTrue($elem['bool'] === $v2, serialize($v1));
+        }
+        //
+        $floats = [
+            [0, 0],
+            ['0.1', 0.1],
+            [1, 1],
+            ['1.1', 1.1],
+        ];
+        $table = $storage->table();
+        $table->create();
+        foreach ($floats as [$v1, $v2]) {
+            $tid = $table->insert(['float' => $v1]);
+            $this->assertTrue($tid > 0, serialize($v1));
+            $elem = current($table->get($tid));
+            $this->assertTrue($elem['float'] === ((float) $v2), serialize($v1));
+        }
+        //
+        $dates = [
+            ['2012-01-01', '2012-01-01'],
+        ];
+        $table = $storage->table();
+        $table->create();
+        foreach ($dates as [$v1, $v2]) {
+            $tid = $table->insert(['date' => $v1]);
+            $this->assertTrue($tid > 0, serialize($v1));
+            $elem = current($table->get($tid));
+            $this->assertTrue($elem['date'] === $v2, serialize($v1));
+        }
+        //
+        $datetimes = [
+            ['2012-01-01', '2012-01-01 00:00:00'],
+            [$dt = date('Y-m-d H:i:s', time()), $dt],
+        ];
+        $table = $storage->table();
+        $table->create();
+        foreach ($datetimes as [$v1, $v2]) {
+            $tid = $table->insert(['datetime' => $v1]);
+            $this->assertTrue($tid > 0, serialize($v1));
+            $elem = current($table->get($tid));
+            $this->assertTrue($elem['datetime'] === $v2, serialize($v1));
+        }
+        //
+        $int_arrays = [
+            [[1, '2'], [1, 2]],
+            [['1', '2', '0'], [1, 2, 0]],
+        ];
+        $table = $storage->table();
+        $table->create();
+        foreach ($int_arrays as [$v1, $v2]) {
+            $tid = $table->insert(['int_array' => $v1]);
+            $this->assertTrue($tid > 0, serialize($v1));
+            $elem = current($table->get($tid));
+            $this->assertTrue($elem['int_array'] === $v2, serialize($v1));
+        }
+        //
+        $text_arrays = [
+            [[1, '2'], ['1', '2']],
+            [['1', '2', '0'], ['1', '2', '0']],
+            [['foo', 'bar'], ['foo', 'bar']],
+        ];
+        $table = $storage->table();
+        $table->create();
+        foreach ($text_arrays as [$v1, $v2]) {
+            $tid = $table->insert(['text_array' => $v1]);
+            $this->assertTrue($tid > 0, serialize($v1));
+            $elem = current($table->get($tid));
+            $this->assertTrue($elem['text_array'] === $v2, serialize($v1));
+        }
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_jsonb_array_modifiers()
+    {
+        $storage = $this->getStorage([
+            'table' => [
+                'fields' => [
+                    'int_array' => [
+                        'type' => TableDefinition::TYPE_INT_ARRAY,
+                    ],
+                    'json' => [
+                        'type' => TableDefinition::TYPE_JSON,
+                    ],
+                ],
+            ],
+        ]);
+        $table = $storage->table();
+        $table->create();
+        $tid = $table->insert(['int_array' => [1]]);
+        $elem = current($table->get($tid));
+        $table->update($tid, ['int_array[]' => 2]);
+        $table->update($tid, ['int_array[]' => [3, 4]]);
+        $elem = current($table->get($tid));
+        $this->assertTrue($elem['int_array'] === [1, 2, 3, 4]);
+        $tid = $table->insert(['json' => ['foo' => 'bar', 'a' => 1]]);
+        $table->update($tid, ['json{}' => ['a' => 2, 'b' => 3]]);
+        $elem = current($table->get($tid));
+        $this->assertTrue($elem['json'] === ['a' => 2, 'b' => 3, 'foo' => 'bar']);
     }
 }
