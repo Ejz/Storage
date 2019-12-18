@@ -553,7 +553,8 @@ class DatabasePostgres implements DatabaseInterface
                     $id = $row[$_pk];
                     unset($row[$_pk]);
                     yield $emit([$id, $row]);
-                    if (--$limit) {
+                    $limit -= 1;
+                    if (!$limit) {
                         break 2;
                     }
                 }
