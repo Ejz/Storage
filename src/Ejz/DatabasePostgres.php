@@ -533,7 +533,7 @@ class DatabasePostgres implements DatabaseInterface
                 }
             }
             $first_iteration = true;
-            while ($limit--) {
+            while ($limit > 0) {
                 $f = $quote . $pk . $quote;
                 $op = ($asc ? '>' : '<') . ($first_iteration ? '=' : '');
                 $_where = "({$f} {$op} ?)";
@@ -553,6 +553,9 @@ class DatabasePostgres implements DatabaseInterface
                     $id = $row[$_pk];
                     unset($row[$_pk]);
                     yield $emit([$id, $row]);
+                    if (--$limit) {
+                        break 2;
+                    }
                 }
                 if ($asc) {
                     $min = $id;
