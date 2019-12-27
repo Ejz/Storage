@@ -18,6 +18,7 @@ class Storage
     const INVALID_SHARDS_FOR_REID = 'INVALID_SHARDS_FOR_REID: %s -> %s';
     const INVALID_ARGUMENT_FORMAT = 'INVALID_ARGUMENT_FORMAT';
     const AMBIGUOUS_WHERE_OR_FIELDS = 'AMBIGUOUS_WHERE_OR_FIELDS';
+    const ALREADY_TABLE_ERROR = 'ALREADY_TABLE_ERROR: %s -> %s';
 
     /** @var DatabasePool */
     private $pool;
@@ -126,6 +127,9 @@ class Storage
      */
     public function __call(string $table, array $args): self
     {
+        if ($this->table !== null) {
+            throw new RuntimeException(sprintf(self::ALREADY_TABLE_ERROR, $this->table, $table));
+        }
         $class = $this->tables[$table]['class'] ?? self::class;
         return new $class($this->pool, $this->cache, $this->bitmap, $this->tables, $table, $args);
     }
@@ -315,7 +319,9 @@ class Storage
                     }
                 }
                 if ($v === null) {
-                    $db = $this->getReadShardsById($id)->random();
+                    $db = $this->getReadShardsById($id)->filter(function ($name) use ($definition) {
+                        return !$definition->isForeignKeyTable($name);
+                    })->random();
                     $name = $db->getName();
                     $dbs['map'][$name] = $db;
                     $dbs['ids'][$name][] = $id;
@@ -396,6 +402,29 @@ class Storage
      *
      * @return Promise
      */
+    public function scoreAsync(int $id): Promise
+    {
+        return \Amp\call(function ($id) {
+            $values = current(yield $this->getAsync($id));
+            return $this->getTableDefinition()->getScore($values);
+        }, $id);
+    }
+
+    /**
+     * @param int $id
+     *
+     * @return int
+     */
+    public function score(int $id): int
+    {
+        return \Amp\Promise\wait($this->scoreAsync($id));
+    }
+
+    /**
+     * @param int $id
+     *
+     * @return Promise
+     */
     public function deleteAsync(int $id): Promise
     {
         return \Amp\call(function ($id) {
@@ -442,6 +471,9 @@ class Storage
         $fields = array_fill_keys((array) $fields, null);
         $fields = $definition->normalizeValues($fields);
         $shards = $this->getReadShardsByValues(is_string($where) ? [] : ($where ?? []));
+        $shards = $shards->filter(function ($name) use ($definition) {
+            return !$definition->isForeignKeyTable($name);
+        });
         $params += compact('where', 'fields');
         $iterators = $shards->iterate($table, $params);
         $producer = $this->joinIterators($iterators, $params);
@@ -492,6 +524,46 @@ class Storage
             $ids[] = $fields;
             yield from $this->get(...$ids);
         }
+    }
+
+    /**
+     * @return Promise
+     */
+    public function maxAsync(): Promise
+    {
+        return \Amp\call(function () {
+            $shards = $this->getAllShards();
+            $table = $this->getTableDefinition()->getTable();
+            return max($shards->max($table));
+        });
+    }
+
+    /**
+     * @return int
+     */
+    public function max(): int
+    {
+        return \Amp\Promise\wait($this->maxAsync());
+    }
+
+    /**
+     * @return Promise
+     */
+    public function minAsync(): Promise
+    {
+        return \Amp\call(function () {
+            $shards = $this->getAllShards();
+            $table = $this->getTableDefinition()->getTable();
+            return min($shards->min($table));
+        });
+    }
+
+    /**
+     * @return int
+     */
+    public function min(): int
+    {
+        return \Amp\Promise\wait($this->minAsync());
     }
 
     /**

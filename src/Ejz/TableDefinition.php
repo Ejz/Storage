@@ -29,6 +29,9 @@ class TableDefinition
     /** @var array */
     private $shards;
 
+    /** @var array */
+    private $allShards;
+
     /**
      * @param string $table
      * @param array  $definition
@@ -39,6 +42,7 @@ class TableDefinition
         $this->definition = $definition;
         $this->shards = $shards;
         $this->shards = $this->getAllShards();
+        $this->allShards = $this->shards;
         $this->setDefaults();
         $this->test();
     }
@@ -59,7 +63,11 @@ class TableDefinition
     private function setDefaults()
     {
         $fields = $this->definition['fields'] ?? [];
-        foreach ($fields as $field => &$meta) {
+        $collect = [];
+        foreach ($fields as $field => $meta) {
+            if (!is_array($meta)) {
+                $meta = ['type' => $meta];
+            }
             $meta['type'] = $meta['type'] ?? self::TYPE_TEXT;
             $meta['is_nullable'] = !empty($meta['is_nullable']);
             $meta['unique'] = (array) ($meta['unique'] ?? []);
@@ -69,6 +77,7 @@ class TableDefinition
             $meta['get_pattern'] = $meta['get_pattern'] ?? '%s';
             $meta['set'] = $meta['set'] ?? null;
             $meta['set_pattern'] = $meta['set_pattern'] ?? '?';
+            unset($get, $set, $get_pattern, $set_pattern);
             if ($meta['type'] === self::TYPE_JSON) {
                 $get = function ($_) {
                     return json_decode($_, true);
@@ -119,9 +128,9 @@ class TableDefinition
                     $meta['set_pattern'] = $set_pattern;
                 }
             }
+            $collect[$field] = $meta;
         }
-        unset($meta);
-        $this->definition['fields'] = $fields;
+        $this->definition['fields'] = $collect;
     }
 
     /**
@@ -171,6 +180,17 @@ class TableDefinition
     public function hasBitmap(): bool
     {
         return !empty($this->definition['bitmap']);
+    }
+
+    /**
+     * @param array $values
+     *
+     * @return int
+     */
+    public function getScore(array $values): int
+    {
+        $get_score = $this->definition['get_score'] ?? null;
+        return $get_score !== null ? $get_score($values) : 0;
     }
 
     /**
@@ -242,6 +262,9 @@ class TableDefinition
      */
     public function getAllShards(): array
     {
+        if (is_array($this->allShards)) {
+            return $this->allShards;
+        }
         $get_all_shards = $this->definition['get_all_shards'] ?? null;
         if ($get_all_shards !== null) {
             return $get_all_shards($this->shards);
@@ -327,6 +350,17 @@ class TableDefinition
     public function isCacheable(): bool
     {
         return !empty($this->definition['is_cacheable']);
+    }
+
+    /**
+     * @param string $name
+     *
+     * @return bool
+     */
+    public function isForeignKeyTable(string $name): bool
+    {
+        $_ = $this->definition['is_foreign_key_table'] ?? null;
+        return $_ === null ? false : $_($name, $this->shards);
     }
 
     /**

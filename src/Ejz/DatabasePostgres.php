@@ -61,7 +61,7 @@ class DatabasePostgres implements DatabaseInterface
             if (!$this->connection instanceof Connection) {
                 yield $this->connect();
             }
-            // var_dump($sql, $args);
+            // var_dump($this->name, $sql, $args);
             if ($args) {
                 $statement = yield $this->connection->prepare($sql);
                 $result = yield $statement->execute($args);
@@ -798,6 +798,9 @@ class DatabasePostgres implements DatabaseInterface
         $q = $this->config['quote'];
         $table = $definition->getTable();
         $fields = $definition->getFields();
+        if ($definition->isForeignKeyTable($this->getName())) {
+            $fields = [];
+        }
         $pk = $definition->getPrimaryKey();
         $commands = [];
         $alters = [];
@@ -816,18 +819,19 @@ class DatabasePostgres implements DatabaseInterface
             TableDefinition::TYPE_TEXT_ARRAY => 'TEXT[]',
         ];
         $defaults = [
-            TableDefinition::TYPE_INT => '0::INTEGER',
+            TableDefinition::TYPE_INT => '0',
+            TableDefinition::TYPE_FOREIGN_KEY => '0',
             TableDefinition::TYPE_BLOB => '\'\'::BYTEA',
             TableDefinition::TYPE_TEXT => '\'\'::TEXT',
             TableDefinition::TYPE_JSON => '\'{}\'::JSONB',
             TableDefinition::TYPE_BOOL => '\'f\'::BOOLEAN',
-            TableDefinition::TYPE_FLOAT => '\'0\'::REAL',
+            TableDefinition::TYPE_FLOAT => '0',
             TableDefinition::TYPE_DATE => 'CURRENT_DATE',
             TableDefinition::TYPE_DATETIME => 'CURRENT_TIMESTAMP',
             TableDefinition::TYPE_INT_ARRAY => '\'{}\'::INTEGER[]',
-            TableDefinition::TYPE_TEXT_ARRAY => '\'{}\'::INTEGER[]',
+            TableDefinition::TYPE_TEXT_ARRAY => '\'{}\'::TEXT[]',
         ];
-        $seq = "{$table}_seq";
+        $seq = $table . '_seq';
         $pk_start_with = $definition->getPrimaryKeyStartWith($this->getName());
         $pk_increment_by = $definition->getPrimaryKeyIncrementBy($this->getName());
         $commands[] = "DROP SEQUENCE IF EXISTS {$q}{$seq}{$q} CASCADE";
@@ -838,9 +842,10 @@ class DatabasePostgres implements DatabaseInterface
             INCREMENT BY {$pk_increment_by}
             MINVALUE {$pk_start_with}
         ";
+        $rand = mt_rand();
         $alters[] = "
             ALTER TABLE {$q}{$table}{$q}
-            ADD CONSTRAINT {$q}{$table}_{$pk}_pk{$q}
+            ADD CONSTRAINT {$q}{$table}_{$rand}{$q}
             PRIMARY KEY ({$q}{$pk}{$q})
         ";
         $_fields[] = "
@@ -865,9 +870,6 @@ class DatabasePostgres implements DatabaseInterface
             }
             $default = $default ?? ($is_nullable ? 'NULL' : ($defaults[$type] ?? null));
             $default = (string) $default;
-            // $default = array_key_exists('database_default', $meta) ? $meta['database_default'] : ();
-
-            // $ ?? 
             $_field = $q . $field . $q . ' ' . $map[$type];
             if ($default !== '') {
                 $_field .= ' DEFAULT ' . $default;
@@ -875,25 +877,29 @@ class DatabasePostgres implements DatabaseInterface
             $_field .= ' ' . ($is_nullable ? 'NULL' : 'NOT NULL');
             $_fields[] = $_field;
             if ($type === TableDefinition::TYPE_FOREIGN_KEY) {
-                $c = $q . $table . '_' . $field . '_fk' . $q;
+                $c = $table . '_' . mt_rand();
                 $alters[] = "
-                    ALTER TABLE {$q}{$table}{$q} ADD CONSTRAINT {$c} FOREIGN KEY ({$field})
+                    ALTER TABLE {$q}{$table}{$q} ADD CONSTRAINT {$q}{$c}{$q} FOREIGN KEY ({$field})
                     REFERENCES {$meta['references']} ON DELETE CASCADE ON UPDATE CASCADE
                 ";
+                @ $indexes['HASH:' . mt_rand()][] = $field;
             }
         }
         foreach ($uniques as $unique => $fs) {
             $fs = implode(', ', array_map(function ($f) use ($q) {
                 return $q . $f . $q;
             }, $fs));
-            $alters[] = "ALTER TABLE {$q}{$table}{$q} ADD CONSTRAINT {$unique} UNIQUE ({$fs})";
+            $c = $table . '_' . mt_rand();
+            $alters[] = "ALTER TABLE {$q}{$table}{$q} ADD CONSTRAINT {$q}{$c}{$q} UNIQUE ({$fs})";
         }
         foreach ($indexes as $index => $fs) {
+            $index = explode(':', $index);
+            $type = count($index) > 1 ? $index[0] : 'BTREE';
             $fs = implode(', ', array_map(function ($f) use ($q) {
                 return $q . $f . $q;
             }, $fs));
-            $rnd = mt_rand();
-            $alters[] = "CREATE INDEX {$q}{$table}_{$rnd}{$q} ON {$q}{$table}{$q} USING BTREE ({$fs})";
+            $c = $table . '_' . mt_rand();
+            $alters[] = "CREATE INDEX {$q}{$c}{$q} ON {$q}{$table}{$q} USING {$type} ({$fs})";
         }
         $_fields = implode(', ', $_fields);
         $commands[] = "CREATE TABLE {$q}{$table}{$q} ({$_fields})";
@@ -916,6 +922,9 @@ class DatabasePostgres implements DatabaseInterface
         $_columns = [];
         $_values = [];
         $args = [];
+        if ($definition->isForeignKeyTable($this->getName())) {
+            $values = [];
+        }
         foreach ($values as $value) {
             $f = $q . $value['field'] . $q;
             $_columns[] = $f;

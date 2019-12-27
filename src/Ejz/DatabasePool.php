@@ -60,6 +60,19 @@ class DatabasePool
     }
 
     /**
+     * @param callable $filter
+     *
+     * @return DatabasePool
+     */
+    public function filter(callable $filter): DatabasePool
+    {
+        $names = $this->names();
+        return new self(array_filter($this->dbs, function ($key) use ($filter, $names) {
+            return $filter($key, $names);
+        }, ARRAY_FILTER_USE_KEY));
+    }
+
+    /**
      * @return DatabaseInterface
      */
     public function random(): DatabaseInterface
@@ -93,14 +106,14 @@ class DatabasePool
      * @param string $call
      * @param array  $arguments
      *
-     * @return Promise[]
+     * @return array
      */
     public function __call(string $call, array $arguments): array
     {
-        $promises = [];
+        $result = [];
         foreach ($this->dbs as $key => $db) {
-            $promises[$key] = $db->$call(...$arguments);
+            $result[$key] = $db->$call(...$arguments);
         }
-        return $promises;
+        return $result;
     }
 }
