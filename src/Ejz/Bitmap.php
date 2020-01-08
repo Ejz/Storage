@@ -34,14 +34,28 @@ class Bitmap
     }
 
     /**
-     * @param  TableDefinition $definition
-     * @param  int             $id
-     * @param  array           $values
+     * @param TableDefinition $definition
+     * @param int             $id
+     * @param array           $values
      */
     public function upsert(TableDefinition $definition, int $id, array $values)
     {
         $table = $definition->getTable();
-        $_values = ['', []];
+        $fields = $definition->getBitmapFields();
+        $values = array_map(function ($value) {
+            return $value['value'];
+        }, $values);
+        $_values = [[], []];
+        foreach ($values as $field => $value) {
+            $meta = $fields[$field] ?? null;
+            if ($meta !== null) {
+                $getter = $meta['getter'] ?? null;
+                $_values[0][] = '? ?';
+                $_values[1][] = $field;
+                $_values[1][] = $getter === null ? $value : $getter($values);
+            }
+        }
+        $_values[0] = ($_values[0] ? ' VALUES ' : '') . implode(' ', $_values[0]);
         $this->execute('ADD ? ?' . $_values[0], $table, $id, ...$_values[1]);
     }
 
@@ -64,7 +78,18 @@ class Bitmap
         $table = $definition->getTable();
         $this->drop($table);
         $fields = $definition->getBitmapFields();
-        $_fields = ['', []];
+        $_fields = [[], []];
+        foreach ($fields as $field => $meta) {
+            if ($meta['type'] === TableDefinition::TYPE_FOREIGN_KEY) {
+                $_fields[0][] = '? FOREIGNKEY ?';
+                $_fields[1][] = $field;
+                $_fields[1][] = $meta['references'];
+            } elseif ($meta['type'] === TableDefinition::TYPE_BOOL) {
+                $_fields[0][] = '? BOOLEAN';
+                $_fields[1][] = $field;
+            }
+        }
+        $_fields[0] = ($_fields[0] ? ' FIELDS ' : '') . implode(' ', $_fields[0]);
         $this->execute('CREATE ?' . $_fields[0], $table, ...$_fields[1]);
     }
 }

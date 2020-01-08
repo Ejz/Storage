@@ -19,6 +19,7 @@ class Storage
     const INVALID_ARGUMENT_FORMAT = 'INVALID_ARGUMENT_FORMAT';
     const AMBIGUOUS_WHERE_OR_FIELDS = 'AMBIGUOUS_WHERE_OR_FIELDS';
     const ALREADY_TABLE_ERROR = 'ALREADY_TABLE_ERROR: %s -> %s';
+    const SORT_HAS_FAILED = 'SORT_HAS_FAILED';
 
     /** @var DatabasePool */
     private $pool;
@@ -225,7 +226,7 @@ class Storage
                 if ($min !== $max) {
                     throw new RuntimeException(sprintf(self::INVALID_INSERTED_IDS, $min, $max));
                 }
-                if ($definition->hasBitmap()) {
+                if ($definition->hasBitmap() && $min > 0) {
                     $this->bitmap->upsert($definition, $min, $values);
                 }
                 $deferred->resolve($min);
@@ -359,6 +360,40 @@ class Storage
     }
 
     /**
+     * @param array $ids
+     *
+     * @return Promise
+     */
+    public function rotateIdsAsync(...$ids): Promise
+    {
+        return \Amp\call(function ($ids) {
+            if (count($ids) < 2) {
+                return false;
+            }
+            $max = max($ids);
+            $ids[] = -$max;
+            array_unshift($ids, -$max);
+            for ($i = count($ids); $i > 1; $i--) {
+                [$id1, $id2] = [$ids[$i - 2], $ids[$i - 1]];
+                if (!yield $this->reidAsync($id1, $id2)) {
+                    return false;
+                }
+            }
+            return true;
+        }, $ids);
+    }
+
+    /**
+     * @param array ...$args
+     *
+     * @return bool
+     */
+    public function rotateIds(...$args): bool
+    {
+        return \Amp\Promise\wait($this->rotateIdsAsync(...$args));
+    }
+
+    /**
      * @param int $id1
      * @param int $id2
      *
@@ -398,26 +433,24 @@ class Storage
     }
 
     /**
-     * @param int $id
-     *
-     * @return Promise
+     * @param ?callable $score (optional)
      */
-    public function scoreAsync(int $id): Promise
+    public function sort(?callable $score = null)
     {
-        return \Amp\call(function ($id) {
-            $values = current(yield $this->getAsync($id));
-            return $this->getTableDefinition()->getScore($values);
-        }, $id);
-    }
-
-    /**
-     * @param int $id
-     *
-     * @return int
-     */
-    public function score(int $id): int
-    {
-        return \Amp\Promise\wait($this->scoreAsync($id));
+        $shards = $this->getAllShards()->names();
+        $definition = $this->getTableDefinition();
+        foreach ($shards as $shard) {
+            $scores = [];
+            foreach ($this->iterate(null, null, ['shards' => [$shard]]) as $id => $values) {
+                $scores[$id] = $score === null ? $definition->getScore($values) : $score($values);
+            }
+            $chains = $this->getSwapChains($scores);
+            foreach ($chains as $ids) {
+                if (!$this->rotateIds(...$ids)) {
+                    throw new RuntimeException(self::SORT_HAS_FAILED);
+                }
+            }
+        }
     }
 
     /**
@@ -474,6 +507,9 @@ class Storage
         $shards = $shards->filter(function ($name) use ($definition) {
             return !$definition->isForeignKeyTable($name);
         });
+        if (isset($params['shards'])) {
+            $shards = $shards->dbs($params['shards']);
+        }
         $params += compact('where', 'fields');
         $iterators = $shards->iterate($table, $params);
         $producer = $this->joinIterators($iterators, $params);
@@ -524,6 +560,19 @@ class Storage
             $ids[] = $fields;
             yield from $this->get(...$ids);
         }
+    }
+
+    /**
+     * @param string $query
+     *
+     * @return int
+     */
+    public function count(string $query): int
+    {
+        $definition = $this->getTableDefinition();
+        $table = $definition->getTable();
+        $ret = $this->bitmap->execute('SEARCH ? ? LIMIT ?', $table, $query, 0);
+        return (int) array_shift($ret);
     }
 
     /**
@@ -671,5 +720,35 @@ class Storage
             } while ($iterators || $values);
         };
         return new Producer($emit);
+    }
+
+    /**
+     * @param array $scores
+     *
+     * @return array
+     */
+    private function getSwapChains(array $scores): array
+    {
+        $ids1 = array_keys($scores);
+        arsort($scores);
+        $ids2 = array_keys($scores);
+        $ids = array_combine($ids1, $ids2);
+        $ids = array_filter($ids, function ($v, $k) {
+            return $v != $k;
+        }, ARRAY_FILTER_USE_BOTH);
+        $chains = [];
+        while ($ids) {
+            $chain = [];
+            reset($ids);
+            $ex = key($ids);
+            do {
+                $chain[] = $ex;
+                @ $_ = $ids[$ex];
+                unset($ids[$ex]);
+                @ $ex = $_;
+            } while (isset($ids[$ex]));
+            $chains[] = array_reverse($chain);
+        }
+        return $chains;
     }
 }

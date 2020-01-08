@@ -504,6 +504,7 @@ class DatabasePostgres implements DatabaseInterface
             }
             $qpk = $quote . $pk . $quote;
             $order_by = $qpk . ' ' . ($asc ? 'ASC' : 'DESC');
+            $_fields = $fields;
             $fields[$_pk = 'pk_' . md5($pk)] = ['field' => $pk];
             $fields = array_map(function ($_) use ($quote) {
                 [$alias, $field] = $_;
@@ -552,6 +553,11 @@ class DatabasePostgres implements DatabaseInterface
                 foreach ($all as $row) {
                     $id = $row[$_pk];
                     unset($row[$_pk]);
+                    foreach ($row as $k => &$v) {
+                        $get = $_fields[$k]['get'] ?? null;
+                        $v = $get === null ? $v : $get($v);
+                    }
+                    unset($v);
                     yield $emit([$id, $row]);
                     $limit -= 1;
                     if (!$limit) {

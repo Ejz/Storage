@@ -170,8 +170,7 @@ class TableDefinition
      */
     public function getBitmapFields(): array
     {
-        $fields = $this->definition['fields'];
-        return $fields;
+        return $this->definition['bitmap']['fields'] ?? [];
     }
 
     /**
@@ -185,9 +184,9 @@ class TableDefinition
     /**
      * @param array $values
      *
-     * @return int
+     * @return float
      */
-    public function getScore(array $values): int
+    public function getScore(array $values): float
     {
         $get_score = $this->definition['get_score'] ?? null;
         return $get_score !== null ? $get_score($values) : 0;
