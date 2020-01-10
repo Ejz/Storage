@@ -2,71 +2,53 @@
 
 namespace Ejz;
 
-use RuntimeException;
-use Generator;
-use Error;
-use Amp\Loop;
-use Amp\Promise;
-use Amp\Deferred;
-use Amp\Producer;
+// use RuntimeException;
+// use Generator;
+// use Error;
+// use Amp\Loop;
+// use Amp\Promise;
+// use Amp\Deferred;
+// use Amp\Producer;
 
 class Storage
 {
-    const NO_TABLE_ERROR = 'NO_TABLE_ERROR';
-    const INVALID_TABLE_ERROR = 'INVALID_TABLE_ERROR: %s';
-    const INVALID_INSERTED_IDS = 'INVALID_INSERTED_IDS: %s / %s';
-    const INVALID_SHARDS_FOR_REID = 'INVALID_SHARDS_FOR_REID: %s -> %s';
-    const INVALID_ARGUMENT_FORMAT = 'INVALID_ARGUMENT_FORMAT';
-    const AMBIGUOUS_WHERE_OR_FIELDS = 'AMBIGUOUS_WHERE_OR_FIELDS';
-    const ALREADY_TABLE_ERROR = 'ALREADY_TABLE_ERROR: %s -> %s';
-    const SORT_HAS_FAILED = 'SORT_HAS_FAILED';
+    protected const INVALID_REPOSITORY_ERROR = 'INVALID_REPOSITORY_ERROR: %s';
+    // const NO_TABLE_ERROR = 'NO_TABLE_ERROR';
+    // const INVALID_INSERTED_IDS = 'INVALID_INSERTED_IDS: %s / %s';
+    // const INVALID_SHARDS_FOR_REID = 'INVALID_SHARDS_FOR_REID: %s -> %s';
+    // const INVALID_ARGUMENT_FORMAT = 'INVALID_ARGUMENT_FORMAT';
+    // const AMBIGUOUS_WHERE_OR_FIELDS = 'AMBIGUOUS_WHERE_OR_FIELDS';
+    // const ALREADY_TABLE_ERROR = 'ALREADY_TABLE_ERROR: %s -> %s';
+    // const SORT_HAS_FAILED = 'SORT_HAS_FAILED';
 
     /** @var DatabasePool */
-    private $pool;
+    protected $pool;
 
     /** @var RedisCache */
-    private $cache;
+    protected $cache;
 
     /** @var Bitmap */
-    private $bitmap;
+    protected $bitmap;
 
     /** @var array */
-    private $tables;
-
-    /** @var ?string */
-    private $table;
-
-    /** @var array */
-    private $args;
-
-    /** @var ?TableDefinition */
-    private $definition;
+    protected $repositories;
 
     /**
      * @param DatabasePool $pool
      * @param RedisCache   $cache
      * @param Bitmap       $bitmap
-     * @param array        $tables
-     * @param ?string      $table  (optional)
-     * @param array        $args   (optional)
+     * @param array        $repositories
      */
     public function __construct(
         DatabasePool $pool,
         RedisCache $cache,
         Bitmap $bitmap,
-        array $tables,
-        ?string $table = null,
-        array $args = []
+        array $repositories
     ) {
         $this->pool = $pool;
         $this->cache = $cache;
         $this->bitmap = $bitmap;
-        $this->tables = $tables;
-        $this->table = $table;
-        $this->args = $args;
-        if ($this->table !== null) {
-            $this->getTableDefinition();
-        }
+        $this->repositories = $repositories;
     }
 
     /**
@@ -96,44 +78,45 @@ class Storage
     /**
      * @return array
      */
-    public function getTables(): array
+    public function getRepositories(): array
     {
-        return $this->tables;
-    }
-
-    /**
-     * @return TableDefinition
-     */
-    protected function getTableDefinition(): TableDefinition
-    {
-        if ($this->definition !== null) {
-            return $this->definition;
-        }
-        if ($this->table === null) {
-            throw new RuntimeException(self::NO_TABLE_ERROR);
-        }
-        $table = $this->tables[$this->table] ?? null;
-        if ($table === null) {
-            throw new RuntimeException(sprintf(self::INVALID_TABLE_ERROR, $this->table));
-        }
-        $this->definition = new TableDefinition($this->table, $table, $this->getPool()->names());
-        return $this->definition;
+        return $this->repositories;
     }
 
     /**
      * @param string $table
      * @param array  $args
      *
-     * @return self
+     * @return Repository
      */
-    public function __call(string $table, array $args): self
+    public function __call(string $repository): Repository
     {
-        if ($this->table !== null) {
-            throw new RuntimeException(sprintf(self::ALREADY_TABLE_ERROR, $this->table, $table));
+        if (!isset($this->repositories[$repository])) {
+            throw new RuntimeException(sprintf(self::INVALID_REPOSITORY_ERROR, $repository));
         }
-        $class = $this->tables[$table]['class'] ?? self::class;
-        return new $class($this->pool, $this->cache, $this->bitmap, $this->tables, $table, $args);
+        return new Repository($this, $this->repositories[$repository]);
     }
+
+    // /**
+    //  * @return TableDefinition
+    //  */
+    // protected function getTableDefinition(): TableDefinition
+    // {
+    //     if ($this->definition !== null) {
+    //         return $this->definition;
+    //     }
+    //     if ($this->table === null) {
+    //         throw new RuntimeException(self::NO_TABLE_ERROR);
+    //     }
+    //     $table = $this->tables[$this->table] ?? null;
+    //     if ($table === null) {
+    //         throw new RuntimeException(sprintf(self::INVALID_TABLE_ERROR, $this->table));
+    //     }
+    //     $this->definition = new TableDefinition($this->table, $table, $this->getPool()->names());
+    //     return $this->definition;
+    // }
+
+    
 
     /**
      * @return Promise
@@ -303,6 +286,7 @@ class Storage
             $definition = $this->getTableDefinition();
             $isCacheable = $definition->isCacheable();
             $table = $definition->getTable();
+            $bean = $definition->getBean();
             $result = [];
             $meta = [];
             $dbs = ['ids' => [], 'map' => []];
@@ -329,7 +313,7 @@ class Storage
                 }
             }
             if (!$dbs['map']) {
-                return $result;
+                return $bean === null ? $result : $this->toBeans($bean, $result);
             }
             $fields = $fields ?? array_keys($definition->getFields());
             $fields = array_fill_keys((array) $fields, null);
@@ -345,7 +329,8 @@ class Storage
                     $this->cache->set($ck, $v, 3600, $ct);
                 }
             }
-            return array_replace($result, ...$values);
+            $result = array_replace($result, ...$values);
+            return $bean === null ? $result : $this->toBeans($bean, $result);
         }, $args);
     }
 
@@ -430,6 +415,21 @@ class Storage
     public function reid(int $id1, int $id2): bool
     {
         return \Amp\Promise\wait($this->reidAsync($id1, $id2));
+    }
+
+    /**
+     * @param string $bean
+     * @param array  $result
+     *
+     * @return array
+     */
+    public function toBeans(string $bean, array $result): array
+    {
+        $beans = [];
+        foreach ($result as $id => $row) {
+            $beans[$id] = new $bean($this, $id, $row);
+        }
+        return $beans;
     }
 
     /**
@@ -561,6 +561,40 @@ class Storage
             yield from $this->get(...$ids);
         }
     }
+
+    /**
+     * @param string $query
+     *
+     * @return array
+     */
+    public function getCursor(string $query): array
+    {
+        $definition = $this->getTableDefinition();
+        $table = $definition->getTable();
+        return $this->bitmap->execute('SEARCH ? ? WITHCURSOR', $table, $query);
+    }
+
+    /**
+     * @param string $query
+     *
+     * @return array
+     */
+    public function nextCursor(string $cursor, $limit, $fields = null): array
+    {
+        if ($limit <= 0) {
+            return [];
+        }
+        $ids = $this->bitmap->execute('CURSOR ? LIMIT ?', $cursor, $limit);
+        $ids[] = $fields;
+        return $this->get(...$ids);
+    }
+    // $size = array_shift($ret);
+    // $cursor = null;
+    // if ($size > 0) {
+    //     $cursor = array_shift($ret);
+    //     $cursor = new BitmapCursor($this, $cursor, $fields);
+    // }
+    // return [$size, $cursor];
 
     /**
      * @param string $query

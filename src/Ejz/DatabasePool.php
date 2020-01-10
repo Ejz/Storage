@@ -2,23 +2,19 @@
 
 namespace Ejz;
 
-use Generator;
-use Amp\Loop;
-use Amp\Promise;
-use Amp\Producer;
 use RuntimeException;
 
 class DatabasePool
 {
-    const NO_SUCH_DB_ERROR = 'NO_SUCH_DB_ERROR: %s';
-    const INVALID_DB_NAMES = 'INVALID_DB_NAMES';
-    const EMPTY_POOL_ERROR = 'EMPTY_POOL_ERROR';
+    private const NO_SUCH_DB_ERROR = 'NO_SUCH_DB_ERROR: %s';
+    private const INVALID_DB_NAMES = 'INVALID_DB_NAMES';
+    private const EMPTY_POOL_ERROR = 'EMPTY_POOL_ERROR';
 
-    /** @var DatabaseInterface[] */
+    /** @var array */
     private $dbs;
 
     /**
-     * @param DatabaseInterface[] $dbs
+     * @param array $dbs
      */
     public function __construct(array $dbs)
     {
@@ -48,24 +44,18 @@ class DatabasePool
     }
 
     /**
-     * @param array $filter
+     * @param mixed $filter
      *
      * @return DatabasePool
      */
-    public function dbs(array $filter): DatabasePool
+    public function filter($filter): DatabasePool
     {
-        return new self(array_filter($this->dbs, function ($key) use ($filter) {
-            return in_array($key, $filter);
-        }, ARRAY_FILTER_USE_KEY));
-    }
-
-    /**
-     * @param callable $filter
-     *
-     * @return DatabasePool
-     */
-    public function filter(callable $filter): DatabasePool
-    {
+        if (!is_callable($filter)) {
+            $f = (array) $filter;
+            $filter = function ($name) use ($f) {
+                return in_array($name, $f, true);
+            };
+        }
         $names = $this->names();
         return new self(array_filter($this->dbs, function ($key) use ($filter, $names) {
             return $filter($key, $names);

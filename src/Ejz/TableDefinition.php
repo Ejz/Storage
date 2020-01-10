@@ -150,6 +150,14 @@ class TableDefinition
     }
 
     /**
+     * @return string
+     */
+    public function getPk(): string
+    {
+        return $this->getPrimaryKey();
+    }
+
+    /**
      * @return array
      */
     public function getFields(): array
@@ -190,6 +198,14 @@ class TableDefinition
     {
         $get_score = $this->definition['get_score'] ?? null;
         return $get_score !== null ? $get_score($values) : 0;
+    }
+
+    /**
+     * @return string
+     */
+    public function getBean(): string
+    {
+        return $this->definition['bean'] ?? Bean::class;
     }
 
     /**

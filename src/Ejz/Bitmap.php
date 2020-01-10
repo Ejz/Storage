@@ -34,6 +34,17 @@ class Bitmap
     }
 
     /**
+     * @param string $method
+     * @param array  $args
+     *
+     * @return mixed
+     */
+    public function __call(string $method, array $args)
+    {
+        return $this->client->$method(...$args);
+    }
+
+    /**
      * @param TableDefinition $definition
      * @param int             $id
      * @param array           $values
@@ -62,10 +73,10 @@ class Bitmap
     /**
      * @param string $table
      */
-    public function drop(string $table)
+    public function DROP(string $table)
     {
         try {
-            $this->execute('DROP ?', $table);
+            $this->client->DROP($table);
         } catch (Throwable $e) {
         }
     }

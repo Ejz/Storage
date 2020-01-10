@@ -4,7 +4,6 @@ namespace Ejz;
 
 use Generator;
 use Amp\Promise;
-use Amp\Producer;
 
 interface DatabaseInterface
 {
@@ -149,14 +148,14 @@ interface DatabaseInterface
      *
      * @return Promise
      */
-    public function pkAsync(string $table): Promise;
+    public function pksAsync(string $table): Promise;
 
     /**
      * @param string $table
      *
-     * @return string
+     * @return ?array
      */
-    public function pk(string $table): string;
+    public function pks(string $table): ?array;
 
     /**
      * @param string $table
@@ -168,9 +167,9 @@ interface DatabaseInterface
     /**
      * @param string $table
      *
-     * @return int
+     * @return ?int
      */
-    public function min(string $table): int;
+    public function min(string $table): ?int;
 
     /**
      * @param string $table
@@ -182,9 +181,9 @@ interface DatabaseInterface
     /**
      * @param string $table
      *
-     * @return int
+     * @return ?int
      */
-    public function max(string $table): int;
+    public function max(string $table): ?int;
 
     /**
      * @param string $table
@@ -209,8 +208,10 @@ interface DatabaseInterface
 
     /**
      * @param string $table
+     *
+     * @return bool
      */
-    public function drop(string $table);
+    public function drop(string $table): bool;
 
     /**
      * @param string $table
@@ -218,20 +219,5 @@ interface DatabaseInterface
      *
      * @return Generator
      */
-    public function iterate(string $table, array $params = []): Producer;
-
-    /**
-     * @param TableDefinition $definition
-     *
-     * @return Promise
-     */
-    public function createAsync(TableDefinition $definition): Promise;
-
-    /**
-     * @param TableDefinition $definition
-     * @param array           $values
-     *
-     * @return Promise
-     */
-    public function insertAsync(TableDefinition $definition, array $values): Promise;
+    public function iterate(string $table, array $params = []): Generator;
 }
