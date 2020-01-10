@@ -167,9 +167,9 @@ interface DatabaseInterface
     /**
      * @param string $table
      *
-     * @return ?int
+     * @return mixed
      */
-    public function min(string $table): ?int;
+    public function min(string $table);
 
     /**
      * @param string $table
@@ -181,9 +181,9 @@ interface DatabaseInterface
     /**
      * @param string $table
      *
-     * @return ?int
+     * @return mixed
      */
-    public function max(string $table): ?int;
+    public function max(string $table);
 
     /**
      * @param string $table
