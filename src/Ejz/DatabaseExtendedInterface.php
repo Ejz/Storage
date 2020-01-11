@@ -3,10 +3,16 @@
 namespace Ejz;
 
 use Generator;
-use Amp\Promise;
 
 interface DatabaseExtendedInterface
 {
+    /**
+     * @param string $table
+     * @param array  $params (optional)
+     *
+     * @return Generator
+     */
+    public function iterate(string $table, array $params = []): Generator;
 }
     /**
      * @param string $sql

@@ -34,7 +34,7 @@ abstract class AbstractTestCase extends TestCase
      */
     protected function tearDown(): void
     {
-        $this->pool->forEach(function ($db) {
+        $this->pool->each(function ($db) {
             foreach ($db->tables() as $table) {
                 $this->bitmap->drop($table);
                 $this->cache->clear();

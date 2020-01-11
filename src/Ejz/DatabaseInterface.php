@@ -139,23 +139,23 @@ interface DatabaseInterface
     /**
      * @param string $table
      *
-     * @return array
+     * @return ?array
      */
-    public function fields(string $table): array;
+    public function fields(string $table): ?array;
 
     /**
      * @param string $table
      *
      * @return Promise
      */
-    public function pksAsync(string $table): Promise;
+    public function pkAsync(string $table): Promise;
 
     /**
      * @param string $table
      *
      * @return ?array
      */
-    public function pks(string $table): ?array;
+    public function pk(string $table): ?array;
 
     /**
      * @param string $table
@@ -167,9 +167,9 @@ interface DatabaseInterface
     /**
      * @param string $table
      *
-     * @return mixed
+     * @return ?array
      */
-    public function min(string $table);
+    public function min(string $table): ?array;
 
     /**
      * @param string $table
@@ -181,9 +181,9 @@ interface DatabaseInterface
     /**
      * @param string $table
      *
-     * @return mixed
+     * @return ?array
      */
-    public function max(string $table);
+    public function max(string $table): ?array;
 
     /**
      * @param string $table
@@ -212,12 +212,4 @@ interface DatabaseInterface
      * @return bool
      */
     public function drop(string $table): bool;
-
-    /**
-     * @param string $table
-     * @param array  $params (optional)
-     *
-     * @return Generator
-     */
-    public function iterate(string $table, array $params = []): Generator;
 }

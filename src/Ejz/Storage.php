@@ -118,52 +118,9 @@ class Storage
 
     
 
-    /**
-     * @return Promise
-     */
-    public function createAsync(): Promise
-    {
-        return \Amp\call(function () {
-            $definition = $this->getTableDefinition();
-            if ($definition->hasBitmap()) {
-                $this->bitmap->create($definition);
-            }
-            $shards = $this->getAllShards();
-            yield $shards->createAsync($definition);
-        });
-    }
+    
 
-    /**
-     *
-     */
-    public function create()
-    {
-        \Amp\Promise\wait($this->createAsync());
-    }
-
-    /**
-     * @return Promise
-     */
-    public function dropAsync(): Promise
-    {
-        return \Amp\call(function () {
-            $definition = $this->getTableDefinition();
-            $table = $definition->getTable();
-            if ($definition->isCacheable()) {
-                $this->cache->drop($table);
-            }
-            $shards = $this->getAllShards();
-            yield $shards->dropAsync($table);
-        });
-    }
-
-    /**
-     *
-     */
-    public function drop()
-    {
-        \Amp\Promise\wait($this->dropAsync());
-    }
+    
 
     /**
      * @return Promise

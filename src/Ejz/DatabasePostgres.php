@@ -24,11 +24,6 @@ class DatabasePostgres implements DatabaseInterface
     /** @var ?Connection */
     private $connection;
 
-    /* -- */
-    public const INVALID_PRIMARY_KEY = 'INVALID_PRIMARY_KEY: %s';
-    public const INVALID_TABLE_FIELD = 'INVALID_TABLE_FIELD: %s -> %s';
-    /* -- */
-
     /**
      * @param string $name
      * @param string $dsn
@@ -278,6 +273,9 @@ class DatabasePostgres implements DatabaseInterface
     public function fieldsAsync(string $table): Promise
     {
         return \Amp\call(function ($table) {
+            if (!in_array($table, yield $this->tablesAsync())) {
+                return null;
+            }
             $sql = '
                 SELECT column_name FROM information_schema.columns
                 WHERE table_schema = ? AND table_name = ?
@@ -289,9 +287,9 @@ class DatabasePostgres implements DatabaseInterface
     /**
      * @param string $table
      *
-     * @return array
+     * @return ?array
      */
-    public function fields(string $table): array
+    public function fields(string $table): ?array
     {
         return \Amp\Promise\wait($this->fieldsAsync($table));
     }
@@ -301,9 +299,12 @@ class DatabasePostgres implements DatabaseInterface
      *
      * @return Promise
      */
-    public function pksAsync(string $table): Promise
+    public function pkAsync(string $table): Promise
     {
         return \Amp\call(function ($table) {
+            if (!in_array($table, yield $this->tablesAsync())) {
+                return null;
+            }
             $sql = '
                 SELECT pg_attribute.attname
                 FROM pg_index, pg_class, pg_attribute, pg_namespace
@@ -316,9 +317,6 @@ class DatabasePostgres implements DatabaseInterface
                     pg_attribute.attnum = ANY(pg_index.indkey) AND
                     indisprimary
             ';
-            if (!in_array($table, yield $this->tablesAsync())) {
-                return null;
-            }
             return yield $this->colAsync($sql, $table, 'public');
         }, $table);
     }
@@ -328,9 +326,9 @@ class DatabasePostgres implements DatabaseInterface
      *
      * @return ?array
      */
-    public function pks(string $table): ?array
+    public function pk(string $table): ?array
     {
-        return \Amp\Promise\wait($this->pksAsync($table));
+        return \Amp\Promise\wait($this->pkAsync($table));
     }
 
     /**
@@ -346,9 +344,9 @@ class DatabasePostgres implements DatabaseInterface
     /**
      * @param string $table
      *
-     * @return mixed
+     * @return ?array
      */
-    public function min(string $table)
+    public function min(string $table): ?array
     {
         return \Amp\Promise\wait($this->minAsync($table));
     }
@@ -366,9 +364,9 @@ class DatabasePostgres implements DatabaseInterface
     /**
      * @param string $table
      *
-     * @return mixed
+     * @return ?array
      */
-    public function max(string $table)
+    public function max(string $table): ?array
     {
         return \Amp\Promise\wait($this->maxAsync($table));
     }
@@ -383,20 +381,26 @@ class DatabasePostgres implements DatabaseInterface
     {
         return \Amp\call(function ($table, $asc) {
             $quote = $this->config['quote'];
-            $pks = yield $this->pksAsync($table);
-            if ($pks === null || count($pks) !== 1) {
-                return null;
+            $pk = yield $this->pkAsync($table);
+            if ($pk === null || $pk === []) {
+                return $pk ?? null;
             }
-            [$pk] = $pks;
-            $pk = $quote . $pk . $quote;
+            $asc = $asc ? 'ASC' : 'DESC';
+            [$select, $order] = [[], []];
+            foreach ($pk as $field) {
+                $q = $quote . $field . $quote;
+                $select[] = $q;
+                $order[] = $q . ' ' . $asc;
+            }
             $sql = 'SELECT %s FROM %s ORDER BY %s LIMIT 1';
             $sql = sprintf(
                 $sql,
-                $pk,
+                implode(', ', $select),
                 $quote . $table . $quote,
-                $pk . ' ' . ($asc ? 'ASC' : 'DESC')
+                implode(', ', $order)
             );
-            return yield $this->valAsync($sql);
+            $one = yield $this->oneAsync($sql);
+            return $one ? array_values($one) : array_fill(0, count($pk), null);
         }, $table, $asc);
     }
 
@@ -454,129 +458,6 @@ class DatabasePostgres implements DatabaseInterface
     public function drop(string $table): bool
     {
         return \Amp\Promise\wait($this->dropAsync($table));
-    }
-
-    /**
-     * @param string $table
-     * @param array  $params (optional)
-     *
-     * @return Generator
-     */
-    public function iterate(string $table, array $params = []): Generator
-    {
-        $params += [
-            'fields' => null,
-            '_fields' => null,
-            'asc' => true,
-            'rand' => false,
-            'min' => null,
-            'max' => null,
-            'limit' => 1E9,
-            'pk' => null,
-        ];
-        $params['config'] = ($params['config'] ?? []) + $this->config;
-        [
-            'fields' => $fields,
-            '_fields' => $_fields,
-            'asc' => $asc,
-            'rand' => $rand,
-            'min' => $min,
-            'max' => $max,
-            'limit' => $limit,
-            'pk' => $pk,
-            'quote' => $quote,
-            'iterator_chunk_size' => $iterator_chunk_size,
-            'rand_iterator_intervals' => $rand_iterator_intervals,
-        ] = $params;
-        if (!isset($pk)) {
-            $pks = $this->pks($table);
-            if ($pks === null || count($pks) !== 1) {
-                return;
-            }
-            [$pk] = $pks;
-        }
-        $qpk = $quote . $pk . $quote;
-        $_fields = $_fields ?? $this->fields($table);
-        $fields = $fields ?? $_fields;
-        if (count($_ = array_diff($fields, $_fields))) {
-            throw new RuntimeException(sprintf(self::INVALID_TABLE_FIELD, $table, $_[0]));
-        }
-        if ($rand) {
-            $min = $min ?? $this->min($table);
-            $max = $max ?? $this->max($table);
-            if (!isset($min, $max)) {
-                return;
-            }
-            $rand = false;
-            $params = compact('fields', '_fields', 'pk', 'rand') + $params;
-            if (is_int($min) && is_int($max)) {
-                $rand_iterator_intervals = min($rand_iterator_intervals, $max - $min + 1);
-                $intervals = $this->getIntervalsForRandIterator($min, $max, $rand_iterator_intervals);
-            } else {
-                $intervals = [[$min, $max]];
-            }
-            $c = count($intervals);
-            while ($c) {
-                $key = array_rand($intervals);
-                if (!$intervals[$key] instanceof Generator) {
-                    [$min, $max] = $intervals[$key];
-                    $asc = (bool) mt_rand(0, 1);
-                    $params = compact('asc', 'min', 'max') + $params;
-                    $intervals[$key] = $this->iterate($table, $params);
-                }
-                if ($intervals[$key]->valid()) {
-                    $k = $intervals[$key]->key();
-                    $v = $intervals[$key]->current();
-                    yield $k => $v;
-                    $intervals[$key]->next();
-                } else {
-                    unset($intervals[$key]);
-                    $c--;
-                }
-            }
-            return;
-        }
-        $fields = array_map(function ($field) use ($quote) {
-            return $quote . $field . $quote;
-        }, $fields);
-        $_pk = 'pk_' . md5($pk);
-        $fields[] = $qpk . ' AS ' . $quote . $_pk . $quote;
-        $order_by = $qpk . ' ' . ($asc ? 'ASC' : 'DESC');
-        $template = sprintf(
-            'SELECT %s FROM %s %%s ORDER BY %s LIMIT %%s',
-            implode(', ', $fields),
-            $quote . $table . $quote,
-            $order_by
-        );
-        [$op1, $op2] = $asc ? ['>', '<='] : ['<', '>='];
-        // $min = $min ?? ($asc ? 1 : null);
-        // $max = $max ?? ($asc ? null : 1E9);
-        while ($limit > 0) {
-            $first = $first ?? true;
-            $where = [];
-            if (($asc && $min) || (!$asc && $max)) {
-                $where[] = '(' . $qpk . ' ' . $op1 . ($first ? '=' : '') . ' ?)';
-                $args[] = $asc ? $min : $max;
-            }
-            if (($asc && $max) || (!$asc && $min)) {
-                $where[] = '(' . $qpk . ' ' . $op2 . ' ?)';
-                $args[] = $asc ? $max : $min;
-            }
-            $where = ($where ? 'WHERE ' : '') . implode(' AND ', $where);
-            $sql = sprintf($template, $where, min($limit, $iterator_chunk_size));
-            $all = $this->all($sql, ...$args);
-            if (!$all) {
-                break;
-            }
-            foreach ($all as $row) {
-                $id = $row[$_pk];
-                unset($row[$_pk]);
-                yield $id => $row;
-            }
-            $limit -= count($all);
-            ${$asc ? 'min' : 'max'} = $id;
-            $first = false;
-        }
     }
 
     /**
@@ -643,28 +524,5 @@ class DatabasePostgres implements DatabaseInterface
             $return[$val] = $row;
         }
         return $return;
-    }
-
-    /**
-     * @param int $min
-     * @param int $max
-     * @param int $n
-     *
-     * @return array
-     */
-    private function getIntervalsForRandIterator(int $min, int $max, int $n): array
-    {
-        $inc = ($max - $min + 1) / $n;
-        $intervals = [];
-        for ($i = 0; $i < $n; $i++) {
-            $one = (int) floor($min);
-            $two = (int) floor($min + $inc - 1E-6);
-            $one = $i > 0 && $one === $extwo ? $one + 1 : $one;
-            $one = $one > $two ? $one - 1 : $one;
-            $intervals[] = [$one, $two];
-            $min += $inc;
-            $extwo = $two;
-        }
-        return $intervals;
     }
 }
