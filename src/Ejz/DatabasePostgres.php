@@ -13,16 +13,16 @@ use RuntimeException;
 class DatabasePostgres implements DatabaseInterface
 {
     /** @var string */
-    private $name;
+    protected $name;
 
     /** @var ConnectionConfig */
-    private $connectionConfig;
+    protected $connectionConfig;
 
     /** @var array */
-    private $config;
+    protected $config;
 
     /** @var ?Connection */
-    private $connection;
+    protected $connection;
 
     /**
      * @param string $name

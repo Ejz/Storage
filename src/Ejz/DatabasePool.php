@@ -95,8 +95,8 @@ class DatabasePool
      */
     public function __call(string $call, array $arguments): array
     {
-        return array_map(function ($db) use ($call, $arguments) {
+        return $this->each(function ($db) use ($call, $arguments) {
             return $db->$call(...$arguments);
-        }, $this->dbs);
+        });
     }
 }

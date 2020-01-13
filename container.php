@@ -64,14 +64,14 @@ function getDatabasePool(): object
 }
 
 /**
- * @param array $tables
+ * @param array $repositories
  *
  * @return object
  */
-function getStorage(array $tables): object
+function getStorage(array $repositories): object
 {
     $pool = getDatabasePool();
     $cache = getCache();
     $bitmap = getBitmap();
-    return new \Ejz\Storage($pool, $cache, $bitmap, $tables);
+    return new \Ejz\Storage($pool, $cache, $bitmap, $repositories);
 }

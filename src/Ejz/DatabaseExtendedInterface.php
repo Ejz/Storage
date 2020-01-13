@@ -3,6 +3,7 @@
 namespace Ejz;
 
 use Generator;
+use Amp\Promise;
 
 interface DatabaseExtendedInterface
 {
@@ -13,6 +14,22 @@ interface DatabaseExtendedInterface
      * @return Generator
      */
     public function iterate(string $table, array $params = []): Generator;
+
+    /**
+     * @param string $table
+     * @param array  $ids
+     * @param array  $params (optional)
+     *
+     * @return Generator
+     */
+    public function get(string $table, array $ids, array $params = []): Generator;
+
+    /**
+     * @param Repository $repository
+     *
+     * @return Promise
+     */
+    public function createAsync(Repository $definition): Promise;
 }
     /**
      * @param string $sql
@@ -22,12 +39,7 @@ interface DatabaseExtendedInterface
      */
     // public function execAsync(string $sql, ...$args): Promise;
 
-// /**
-    //  * @param TableDefinition $definition
-    //  *
-    //  * @return Promise
-    //  */
-    // public function createAsync(TableDefinition $definition): Promise;
+
 
     // *
     //  * @param TableDefinition $definition

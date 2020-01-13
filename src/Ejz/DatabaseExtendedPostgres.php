@@ -3,6 +3,7 @@
 namespace Ejz;
 
 use Generator;
+use Amp\Promise;
 
 class DatabaseExtendedPostgres extends DatabasePostgres implements DatabaseExtendedInterface
 {
@@ -16,25 +17,26 @@ class DatabaseExtendedPostgres extends DatabasePostgres implements DatabaseExten
     {
         $params += [
             'fields' => null,
-            // '_fields' => null,
             'asc' => true,
             'rand' => false,
             'min' => null,
             'max' => null,
             'limit' => 1E9,
             'pk' => null,
+            'order' => true,
+            'where' => [],
             'config' => [],
         ];
-        $params['config'] = ($params['config'] ?? []) + $this->config;
         [
             'fields' => $fields,
-            // '_fields' => $_fields,
             'asc' => $asc,
             'rand' => $rand,
             'min' => $min,
             'max' => $max,
             'limit' => $limit,
             'pk' => $pk,
+            'order' => $order,
+            'where' => $where,
             'config' => $config,
         ] = $params;
         $config += $this->config;
@@ -43,24 +45,19 @@ class DatabaseExtendedPostgres extends DatabasePostgres implements DatabaseExten
             'iterator_chunk_size' => $iterator_chunk_size,
             'rand_iterator_intervals' => $rand_iterator_intervals,
         ] = $config;
-        if ($pk === null) {
-            $pk = $this->pk($table);
-            if ($pk === null || count($pk) !== 1) {
-                return;
-            }
-            // @todo: work with compound pk
-            [$pk] = $pk;
+        $pk = $pk ?? $this->pk($table);
+        if ($pk === null || count($pk) !== 1) {
+            return;
         }
-        $qpk = $quote . $pk . $quote;
         $fields = $fields ?? $this->fields($table);
         if ($rand) {
-            $min = $min ?? $this->min($table);
-            $max = $max ?? $this->max($table);
+            $min = $min ?? $this->min($table)[0];
+            $max = $max ?? $this->max($table)[0];
             if (!isset($min, $max)) {
                 return;
             }
             $rand = false;
-            $params = compact('fields', '_fields', 'pk', 'rand') + $params;
+            $params = compact('fields', 'pk', 'rand') + $params;
             if (is_int($min) && is_int($max)) {
                 $rand_iterator_intervals = min($rand_iterator_intervals, $max - $min + 1);
                 $intervals = $this->getIntervalsForRandIterator($min, $max, $rand_iterator_intervals);
@@ -88,41 +85,44 @@ class DatabaseExtendedPostgres extends DatabasePostgres implements DatabaseExten
             }
             return;
         }
+        [$pk] = $pk;
+        $qpk = $quote . $pk . $quote;
         $collect = [];
         foreach ($fields as $field) {
-            if (!$field instanceof DatabaseField) {
-                $field = new DatabaseField($field);
+            if (!$field instanceof Field) {
+                $field = new Field($field);
             }
             $collect[$field->getAlias()] = $field;
         }
         $fields = $collect;
         $select = array_map(function ($field) use ($quote) {
-            return $field->stringify($quote);
+            return $field->getSelectString($quote);
         }, $fields);
         $_pk = 'pk_' . md5($pk);
         $select[] = $qpk . ' AS ' . $quote . $_pk . $quote;
-        $order = $qpk . ' ' . ($asc ? 'ASC' : 'DESC');
+        $order = $order ? $qpk . ' ' . ($asc ? 'ASC' : 'DESC') : '';
+        $order = $order ? 'ORDER BY ' . $order : '';
         $template = sprintf(
-            'SELECT %s FROM %s %%s ORDER BY %s LIMIT %%s',
+            'SELECT %s FROM %s %%s %s LIMIT %%s',
             implode(', ', $select),
             $quote . $table . $quote,
             $order
         );
         [$op1, $op2] = $asc ? ['>', '<='] : ['<', '>='];
+        $where = $where instanceof Condition ? $where : new Condition($where);
         while ($limit > 0) {
-            $where = [];
+            $where->resetPushed();
             if (($asc && $min !== null) || (!$asc && $max !== null)) {
                 $first = $first ?? true;
-                $where[] = '(' . $qpk . ' ' . $op1 . ($first ? '=' : '') . ' ?)';
-                $args[] = $asc ? $min : $max;
+                $where->push($pk, $op1 . ($first ? '=' : ''), $asc ? $min : $max);
             }
             if (($asc && $max !== null) || (!$asc && $min !== null)) {
-                $where[] = '(' . $qpk . ' ' . $op2 . ' ?)';
-                $args[] = $asc ? $max : $min;
+                $where->push($pk, $op2, $asc ? $max : $min);
             }
-            $where = ($where ? 'WHERE ' : '') . implode(' AND ', $where);
-            $sql = sprintf($template, $where, min($limit, $iterator_chunk_size));
-            $all = $this->all($sql, ...$args);
+            [$_where, $_args] = $where->stringify($quote);
+            $_where = $_where ? 'WHERE ' . $_where : '';
+            $sql = sprintf($template, $_where, min($limit, $iterator_chunk_size));
+            $all = $this->all($sql, ...$_args);
             if (!$all) {
                 break;
             }
@@ -130,7 +130,7 @@ class DatabaseExtendedPostgres extends DatabasePostgres implements DatabaseExten
                 $id = $row[$_pk];
                 unset($row[$_pk]);
                 foreach ($row as $k => &$v) {
-                    $v = $fields[$k]->get($v);
+                    $v = $fields[$k]->getSelectValue($v);
                 }
                 unset($v);
                 yield $id => $row;
@@ -139,6 +139,147 @@ class DatabaseExtendedPostgres extends DatabasePostgres implements DatabaseExten
             ${$asc ? 'min' : 'max'} = $id;
             $first = false;
         }
+    }
+
+    /**
+     * @param string $table
+     * @param array  $ids
+     * @param array  $params (optional)
+     *
+     * @return Generator
+     */
+    public function get(string $table, array $ids, array $params = []): Generator
+    {
+        $params += [
+            'pk' => null,
+            'fields' => null,
+            'config' => [],
+        ];
+        [
+            'pk' => $pk,
+            'fields' => $fields,
+            'config' => $config,
+        ] = $params;
+        $config += $this->config;
+        [
+            'iterator_chunk_size' => $iterator_chunk_size,
+        ] = $config;
+        $pk = $pk ?? $this->pk($table);
+        if ($pk === null || count($pk) !== 1) {
+            return;
+        }
+        [$pk] = $pk;
+        foreach (array_chunk($ids, $iterator_chunk_size) as $chunk) {
+            yield from $this->iterate($table, [
+                'where' => new Condition([$pk => $chunk]),
+                'fields' => $fields,
+                'limit' => $iterator_chunk_size,
+                'config' => compact('iterator_chunk_size'),
+                'order' => false,
+            ]);
+        }
+    }
+
+    /**
+     * @param Repository $repository
+     *
+     * @return Promise
+     */
+    public function createAsync(Repository $repository): Promise
+    {
+        return \Amp\call(function ($repository) {
+            $commands = $this->getCreateCommands($repository);
+            foreach ($commands as $command) {
+                yield $this->execAsync($command);
+            }
+        }, $repository);
+    }
+
+    /**
+     * @param Repository $repository
+     *
+     * @return array
+     */
+    private function getCreateCommands(Repository $repository): array
+    {
+        $q = $this->config['quote'];
+        $rand = function () {
+            return mt_rand();
+        };
+        $enq = function ($fields) use ($q) {
+            return implode(', ', array_map(function ($field) use ($q) {
+                return $q . $field . $q;
+            }, $fields));
+        };
+        $table = $repository->getTable();
+        [$fields, $indexes] = [[], []];
+        if (!$repository->isForeignKeyTable($this->getName())) {
+            $fields = $repository->getFields();
+            $indexes = $repository->getIndexes();
+            $foreignKeys = $repository->getForeignKeys();
+        }
+        $pk = $repository->getPk();
+        $pkStartWith = $repository->getPkStartWith($this->getName());
+        $pkIncrementBy = $repository->getPkIncrementBy($this->getName());
+        $seq = $table . '_seq';
+        $commands = [];
+        // CREATE TABLE
+        $commands[] = "CREATE TABLE {$q}{$table}{$q}()";
+        // CREATE SEQUENCE
+        $commands[] = "DROP SEQUENCE IF EXISTS {$q}{$seq}{$q} CASCADE";
+        $commands[] = "
+            CREATE SEQUENCE {$q}{$seq}{$q}
+            AS BIGINT
+            START WITH {$pkStartWith}
+            INCREMENT BY {$pkIncrementBy}
+            MINVALUE {$pkStartWith}
+        ";
+        // ADD PRIMARY KEY
+        $commands[] = "
+            ALTER TABLE {$q}{$table}{$q}
+            ADD COLUMN {$q}{$pk}{$q} BIGINT DEFAULT
+            nextval('{$seq}'::regclass) NOT NULL
+        ";
+        $commands[] = "
+            ALTER TABLE {$q}{$table}{$q}
+            ADD CONSTRAINT {$q}{$table}_{$rand()}{$q}
+            PRIMARY KEY ({$q}{$pk}{$q})
+        ";
+        // FIELDS
+        foreach ($fields as $field) {
+            $type = $field->getType();
+            $null = $type->isNullable() ? 'NULL' : 'NOT NULL';
+            $default = !$type->isNullable() ? $this->getDefault($type) : '';
+            $default = $default ? 'DEFAULT ' . $default : '';
+            $type = $this->getType($type);
+            $commands[] = "
+                ALTER TABLE {$q}{$table}{$q}
+                ADD COLUMN {$q}{$field}{$q}
+                {$type} {$null} {$default}
+            ";
+        }
+        // INDEXES
+        foreach ($indexes as $index) {
+            $f = $index->getFields();
+            $t = $index->getType();
+            $commands[] = "
+                CREATE INDEX {$q}{$table}_{$rand()}{$q} ON {$q}{$table}{$q}
+                USING {$t} ($enq($f))
+            ";
+        }
+        // FOREIGN KEYS
+        foreach ($foreignKeys as $foreignKey) {
+            $pt = $foreignKey->getParentTable();
+            $cf = $foreignKey->getChildFields();
+            $pf = $foreignKey->getParentFields();
+            $commands[] = "
+                ALTER TABLE {$q}{$table}{$q} ADD CONSTRAINT {$q}{$table}_{$rand()}{$q}
+                FOREIGN KEY ({$enq($cf)}) REFERENCES {$q}{$pt}{$q} ({$enq($pf)})
+                ON DELETE CASCADE ON UPDATE CASCADE
+            ";
+        }
+        $commands = array_map('trim', $commands);
+        return $commands;
     }
 
     /**
@@ -164,6 +305,66 @@ class DatabaseExtendedPostgres extends DatabasePostgres implements DatabaseExten
         return $intervals;
     }
 
+    /**
+     * @param AbstractType $type
+     *
+     * @return string
+     */
+    private function getType(AbstractType $type): string
+    {
+        static $map;
+        if ($map === null) {
+            $map = [
+                (string) Type::string() => 'TEXT',
+            ];
+        }
+        return $map[(string) $type];
+    }
+
+    /**
+     * @param AbstractType $type
+     *
+     * @return string
+     */
+    private function getDefault(AbstractType $type): string
+    {
+        static $map;
+        if ($map === null) {
+            $map = [
+                (string) Type::string() => "''::TEXT",
+            ];
+        }
+        return $map[(string) $type];
+    }
+
+        // $alters = [];
+        // $_fields = [];
+        // $map = [
+        //     TableDefinition::TYPE_INT => 'INTEGER',
+        //     TableDefinition::TYPE_BLOB => 'BYTEA',
+        //     TableDefinition::TYPE_TEXT => 'TEXT',
+        //     TableDefinition::TYPE_JSON => 'JSONB',
+        //     TableDefinition::TYPE_FOREIGN_KEY => 'BIGINT',
+        //     TableDefinition::TYPE_BOOL => 'BOOLEAN',
+        //     TableDefinition::TYPE_FLOAT => 'REAL',
+        //     TableDefinition::TYPE_DATE => 'DATE',
+        //     TableDefinition::TYPE_DATETIME => 'TIMESTAMP(0) WITHOUT TIME ZONE',
+        //     TableDefinition::TYPE_INT_ARRAY => 'INTEGER[]',
+        //     TableDefinition::TYPE_TEXT_ARRAY => 'TEXT[]',
+        // ];
+        // $defaults = [
+        //     TableDefinition::TYPE_INT => '0',
+        //     TableDefinition::TYPE_FOREIGN_KEY => '0',
+        //     TableDefinition::TYPE_BLOB => '\'\'::BYTEA',
+        //     TableDefinition::TYPE_TEXT => ,
+        //     TableDefinition::TYPE_JSON => '\'{}\'::JSONB',
+        //     TableDefinition::TYPE_BOOL => '\'f\'::BOOLEAN',
+        //     TableDefinition::TYPE_FLOAT => '0',
+        //     TableDefinition::TYPE_DATE => 'CURRENT_DATE',
+        //     TableDefinition::TYPE_DATETIME => 'CURRENT_TIMESTAMP',
+        //     TableDefinition::TYPE_INT_ARRAY => '\'{}\'::INTEGER[]',
+        //     TableDefinition::TYPE_TEXT_ARRAY => '\'{}\'::TEXT[]',
+        // ];
     // /**
     //  * @param TableDefinition $definition
     //  *
@@ -268,125 +469,7 @@ class DatabaseExtendedPostgres extends DatabasePostgres implements DatabaseExten
     //     }, $definition, $id);
     // }
 
-    // /**
-    //  * @param TableDefinition $definition
-    //  *
-    //  * @return array
-    //  */
-    // private function createCommands(TableDefinition $definition): array
-    // {
-    //     $q = $this->config['quote'];
-    //     $table = $definition->getTable();
-    //     $fields = $definition->getFields();
-    //     if ($definition->isForeignKeyTable($this->getName())) {
-    //         $fields = [];
-    //     }
-    //     $pk = $definition->getPrimaryKey();
-    //     $commands = [];
-    //     $alters = [];
-    //     $_fields = [];
-    //     $map = [
-    //         TableDefinition::TYPE_INT => 'INTEGER',
-    //         TableDefinition::TYPE_BLOB => 'BYTEA',
-    //         TableDefinition::TYPE_TEXT => 'TEXT',
-    //         TableDefinition::TYPE_JSON => 'JSONB',
-    //         TableDefinition::TYPE_FOREIGN_KEY => 'BIGINT',
-    //         TableDefinition::TYPE_BOOL => 'BOOLEAN',
-    //         TableDefinition::TYPE_FLOAT => 'REAL',
-    //         TableDefinition::TYPE_DATE => 'DATE',
-    //         TableDefinition::TYPE_DATETIME => 'TIMESTAMP(0) WITHOUT TIME ZONE',
-    //         TableDefinition::TYPE_INT_ARRAY => 'INTEGER[]',
-    //         TableDefinition::TYPE_TEXT_ARRAY => 'TEXT[]',
-    //     ];
-    //     $defaults = [
-    //         TableDefinition::TYPE_INT => '0',
-    //         TableDefinition::TYPE_FOREIGN_KEY => '0',
-    //         TableDefinition::TYPE_BLOB => '\'\'::BYTEA',
-    //         TableDefinition::TYPE_TEXT => '\'\'::TEXT',
-    //         TableDefinition::TYPE_JSON => '\'{}\'::JSONB',
-    //         TableDefinition::TYPE_BOOL => '\'f\'::BOOLEAN',
-    //         TableDefinition::TYPE_FLOAT => '0',
-    //         TableDefinition::TYPE_DATE => 'CURRENT_DATE',
-    //         TableDefinition::TYPE_DATETIME => 'CURRENT_TIMESTAMP',
-    //         TableDefinition::TYPE_INT_ARRAY => '\'{}\'::INTEGER[]',
-    //         TableDefinition::TYPE_TEXT_ARRAY => '\'{}\'::TEXT[]',
-    //     ];
-    //     $seq = $table . '_seq';
-    //     $pk_start_with = $definition->getPrimaryKeyStartWith($this->getName());
-    //     $pk_increment_by = $definition->getPrimaryKeyIncrementBy($this->getName());
-    //     $commands[] = "DROP SEQUENCE IF EXISTS {$q}{$seq}{$q} CASCADE";
-    //     $commands[] = "
-    //         CREATE SEQUENCE {$q}{$seq}{$q}
-    //         AS BIGINT
-    //         START WITH {$pk_start_with}
-    //         INCREMENT BY {$pk_increment_by}
-    //         MINVALUE {$pk_start_with}
-    //     ";
-    //     $rand = mt_rand();
-    //     $alters[] = "
-    //         ALTER TABLE {$q}{$table}{$q}
-    //         ADD CONSTRAINT {$q}{$table}_{$rand}{$q}
-    //         PRIMARY KEY ({$q}{$pk}{$q})
-    //     ";
-    //     $_fields[] = "
-    //         {$q}{$pk}{$q} BIGINT DEFAULT
-    //         nextval('{$seq}'::regclass) NOT NULL
-    //     ";
-    //     $uniques = [];
-    //     $indexes = [];
-    //     foreach ($fields as $field => $meta) {
-    //         [
-    //             'is_nullable' => $is_nullable,
-    //             'type' => $type,
-    //             'default' => $default,
-    //             'unique' => $unique,
-    //             'index' => $index,
-    //         ] = $meta;
-    //         foreach ($unique as $_) {
-    //             @ $uniques[$_][] = $field;
-    //         }
-    //         foreach ($index as $_) {
-    //             @ $indexes[$_][] = $field;
-    //         }
-    //         $default = $default ?? ($is_nullable ? 'NULL' : ($defaults[$type] ?? null));
-    //         $default = (string) $default;
-    //         $_field = $q . $field . $q . ' ' . $map[$type];
-    //         if ($default !== '') {
-    //             $_field .= ' DEFAULT ' . $default;
-    //         }
-    //         $_field .= ' ' . ($is_nullable ? 'NULL' : 'NOT NULL');
-    //         $_fields[] = $_field;
-    //         if ($type === TableDefinition::TYPE_FOREIGN_KEY) {
-    //             $c = $table . '_' . mt_rand();
-    //             $alters[] = "
-    //                 ALTER TABLE {$q}{$table}{$q} ADD CONSTRAINT {$q}{$c}{$q} FOREIGN KEY ({$field})
-    //                 REFERENCES {$meta['references']} ON DELETE CASCADE ON UPDATE CASCADE
-    //             ";
-    //             @ $indexes['HASH:' . mt_rand()][] = $field;
-    //         }
-    //     }
-    //     foreach ($uniques as $unique => $fs) {
-    //         $fs = implode(', ', array_map(function ($f) use ($q) {
-    //             return $q . $f . $q;
-    //         }, $fs));
-    //         $c = $table . '_' . mt_rand();
-    //         $alters[] = "ALTER TABLE {$q}{$table}{$q} ADD CONSTRAINT {$q}{$c}{$q} UNIQUE ({$fs})";
-    //     }
-    //     foreach ($indexes as $index => $fs) {
-    //         $index = explode(':', $index);
-    //         $type = count($index) > 1 ? $index[0] : 'BTREE';
-    //         $fs = implode(', ', array_map(function ($f) use ($q) {
-    //             return $q . $f . $q;
-    //         }, $fs));
-    //         $c = $table . '_' . mt_rand();
-    //         $alters[] = "CREATE INDEX {$q}{$c}{$q} ON {$q}{$table}{$q} USING {$type} ({$fs})";
-    //     }
-    //     $_fields = implode(', ', $_fields);
-    //     $commands[] = "CREATE TABLE {$q}{$table}{$q} ({$_fields})";
-    //     // print_r($commands);
-    //     // print_r($alters);
-    //     return array_merge($commands, $alters);
-    // }
+    
 
     // /**
     //  * @param TableDefinition $definition

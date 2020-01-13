@@ -3,50 +3,45 @@
 namespace Tests;
 
 use Throwable;
+use Ejz\Type;
 use Ejz\Storage;
 use Ejz\TableDefinition;
 
 class TestCaseStorage extends AbstractTestCase
 {
-    public function test_case_storage_common() {
-        $this->assertTrue(true);
+    /**
+     * @test
+     */
+    public function test_case_storage_crud()
+    {
+        $storage = \Container\getStorage([
+            'table' => [
+                'fields' => [
+                    'field' => Type::string(),
+                ],
+            ],
+        ]);
+        $this->assertTrue($storage instanceof Storage);
+        $table = $storage->table();
+        $table->create();
+        return;
+        foreach ($storage->getPool() as $db) {
+            $fields = $db->fields('table');
+            $this->assertTrue(count($fields) === 2);
+            $this->assertTrue(isset($fields['int']));
+            $this->assertTrue($fields['int']['type'] === 'integer');
+            $this->assertTrue($fields['table_id']['type'] === 'bigint');
+            $this->assertTrue($fields['table_id']['is_primary']);
+        }
+        $id1 = $table->insert();
+        $this->assertEquals(1, $id1);
+        $id2 = $table->insert();
+        $this->assertEquals(2, $id2);
+        $id3 = $table->insert(['int' => 0]);
+        $this->assertEquals(3, $id3);
+        $elem = current($table->get($id3));
+        $this->assertTrue($elem['int'] === 0);
     }
-    // /**
-    //  * @test
-    //  */
-    // public function test_case_storage_common()
-    // {
-    //     $storage = $this->getStorage([
-    //         'table' => [
-    //             'fields' => [
-    //                 'int' => [
-    //                     'type' => TableDefinition::TYPE_INT,
-    //                     'index' => 'asd',
-    //                 ],
-    //             ],
-    //             'is_cacheable' => mt_rand() % 2,
-    //         ],
-    //     ]);
-    //     $this->assertTrue($storage instanceof Storage);
-    //     $table = $storage->table();
-    //     $table->create();
-    //     foreach ($storage->getPool() as $db) {
-    //         $fields = $db->fields('table');
-    //         $this->assertTrue(count($fields) === 2);
-    //         $this->assertTrue(isset($fields['int']));
-    //         $this->assertTrue($fields['int']['type'] === 'integer');
-    //         $this->assertTrue($fields['table_id']['type'] === 'bigint');
-    //         $this->assertTrue($fields['table_id']['is_primary']);
-    //     }
-    //     $id1 = $table->insert();
-    //     $this->assertEquals(1, $id1);
-    //     $id2 = $table->insert();
-    //     $this->assertEquals(2, $id2);
-    //     $id3 = $table->insert(['int' => 0]);
-    //     $this->assertEquals(3, $id3);
-    //     $elem = current($table->get($id3));
-    //     $this->assertTrue($elem['int'] === 0);
-    // }
 
     // /**
     //  * @test
