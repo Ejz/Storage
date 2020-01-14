@@ -18,6 +18,16 @@ class AbstractType
     }
 
     /**
+     * @param mixed $value
+     *
+     * @return mixed
+     */
+    public function cast($value)
+    {
+        return $value;
+    }
+
+    /**
      * @return bool
      */
     public function isNullable(): bool
@@ -39,6 +49,46 @@ class AbstractType
      * @return Closure
      */
     public function getSelectValueHandler(): Closure
+    {
+        return function ($value) {
+            return $value;
+        };
+    }
+
+    /**
+     * @return Closure
+     */
+    public function getInsertStringHandler(): Closure
+    {
+        return function () {
+            return '%s';
+        };
+    }
+
+    /**
+     * @return Closure
+     */
+    public function getInsertValueHandler(): Closure
+    {
+        return function ($value) {
+            return $value;
+        };
+    }
+
+    /**
+     * @return Closure
+     */
+    public function getUpdateStringHandler(): Closure
+    {
+        return function () {
+            return '%s';
+        };
+    }
+
+    /**
+     * @return Closure
+     */
+    public function getUpdateValueHandler(): Closure
     {
         return function ($value) {
             return $value;

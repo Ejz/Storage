@@ -8,6 +8,8 @@ use Ejz\DatabasePool;
 use Ejz\RedisCache;
 use Ejz\Bitmap;
 
+use function Amp\Promise\wait;
+
 abstract class AbstractTestCase extends TestCase
 {
     /** DatabasePool */
@@ -35,10 +37,8 @@ abstract class AbstractTestCase extends TestCase
     protected function tearDown(): void
     {
         $this->pool->each(function ($db) {
-            foreach ($db->tables() as $table) {
-                $this->bitmap->drop($table);
-                $this->cache->clear();
-                $db->drop($table);
+            foreach (wait($db->tables()) as $table) {
+                wait($db->drop($table));
             }
         });
     }
