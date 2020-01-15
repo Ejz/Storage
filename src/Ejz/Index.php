@@ -10,8 +10,16 @@ class Index
     /** @var array */
     private $fields;
 
-    /** @var ?string */
+    /** @var string */
     private $type;
+
+    /* -- -- -- */
+    public const INDEX_TYPE_HASH = 'INDEX_TYPE_HASH';
+    public const INDEX_TYPE_BTREE = 'INDEX_TYPE_BTREE';
+    public const INDEX_TYPE_GIST = 'INDEX_TYPE_GIST';
+    public const INDEX_TYPE_GIN = 'INDEX_TYPE_GIN';
+    public const INDEX_TYPE_UNIQUE = 'INDEX_TYPE_UNIQUE';
+    /* -- -- -- */
 
     /**
      * @param string  $name
@@ -22,7 +30,7 @@ class Index
     {
         $this->name = $name;
         $this->fields = $fields;
-        $this->type = $type;
+        $this->type = $type ?? self::INDEX_TYPE_BTREE;
     }
 
     /**
@@ -34,11 +42,19 @@ class Index
     }
 
     /**
-     * @return ?string
+     * @return string
      */
-    public function getType(): ?string
+    public function getType(): string
     {
         return $this->type;
+    }
+
+    /**
+     * @return bool
+     */
+    public function isUnique(): bool
+    {
+        return $this->type === self::INDEX_TYPE_UNIQUE;
     }
 
     /**

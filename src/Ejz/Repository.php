@@ -32,9 +32,6 @@ class Repository
         $this->name = $name;
         $this->config = $config;
         $this->normalize();
-        // $this->fields = $this->getNormalizedFields();
-        // $this->indexes = $this->getNormalizedIndexes();
-        // unset($this->config['fields'], $this->config['indexes']);
     }
 
     /**
@@ -190,10 +187,20 @@ class Repository
      */
     private function normalize()
     {
+        $is_assoc = function ($array) {
+            if (!is_array($array)) {
+                return false;
+            }
+            $count0 = count($array);
+            $count1 = count(array_filter(array_keys($array), 'is_string'));
+            return $count0 === $count1;
+        };
         $fields = $this->config['fields'] ?? [];
         $indexes = $this->config['indexes'] ?? [];
+        $foreignKeys = $this->config['foreignKeys'] ?? [];
         unset($this->config['fields']);
         unset($this->config['indexes']);
+        unset($this->config['foreignKeys']);
         $collect = [];
         foreach ($fields as $name => $field) {
             if ($field instanceof AbstractType) {
@@ -204,13 +211,67 @@ class Repository
         $this->fields = $collect;
         $collect = [];
         foreach ($indexes as $name => $index) {
-            if ($this->isAssocArray($index)) {
+            if (!$is_assoc($index)) {
                 $index = ['fields' => $index];
             }
             $type = $index['type'] ?? null;
             $collect[$name] = new Index($name, $index['fields'], $type);
         }
         $this->indexes = $collect;
+        $collect = [];
+        foreach ($foreignKeys as $name => $foreignKey) {
+            if (is_string($foreignKey)) {
+                [$t, $f] = explode('.', $foreignKey);
+                $foreignKey = [
+                    'childFields' => explode(',', $f),
+                    'parentFields' => explode(',', $f),
+                    'parentTable' => $t,
+                ];
+            }
+            $collect[$name] = new ForeignKey(
+                $name,
+                (array) $foreignKey['childFields'],
+                $foreignKey['parentTable'],
+                (array) $foreignKey['parentFields']
+            );
+        }
+        $this->foreignKeys = $collect;
+    }
+
+    /**
+     * @return string
+     */
+    public function getPk(): string
+    {
+        $pk = $this->config['pk'] ?? null;
+        return $pk ?? $this->getTable() . '_id';
+    }
+
+    /**
+     * @param ?array $fields (optional)
+     *
+     * @return array
+     */
+    public function getFields(?array $fields = null): array
+    {
+        return $this->fields;
+        return $fields === null ? $this->fields : [];
+    }
+
+    /**
+     * @return array
+     */
+    public function getIndexes(): array
+    {
+        return $this->indexes;
+    }
+
+    /**
+     * @return array
+     */
+    public function getForeignKeys(): array
+    {
+        return $this->foreignKeys;
     }
 
     // /**
@@ -329,53 +390,5 @@ class Repository
 
     
 
-    /**
-     * @return string
-     */
-    public function getPk(): string
-    {
-        $pk = $this->config['pk'] ?? null;
-        return $pk ?? $this->getTable() . '_id';
-    }
-
-    /**
-     * @param ?array $fields (optional)
-     *
-     * @return array
-     */
-    public function getFields(?array $fields = null): array
-    {
-        return $fields === null ? $this->fields : [];
-    }
-
-    /**
-     * @return array
-     */
-    public function getIndexes(): array
-    {
-        return $this->indexes;
-    }
-
-    /**
-     * @return array
-     */
-    public function getForeignKeys(): array
-    {
-        return [];
-    }
-
-    /**
-     * @param mixed $array
-     *
-     * @return bool
-     */
-    private function isAssocArray($array): bool
-    {
-        if (!is_array($array)) {
-            return false;
-        }
-        $count0 = count($array);
-        $count1 = count(array_filter(array_keys($array), 'is_string'));
-        return $count0 === $count1;
-    }
+    
 }

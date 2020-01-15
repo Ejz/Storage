@@ -120,6 +120,14 @@ class Field
         return $this->getName();
     }
 
+    // /**
+    //  * @return bool
+    //  */
+    // public function isForeignKey(): bool
+    // {
+    //     return $this->type->getName() === Type::foreignKey()->getName();
+    // }
+
     // $f1 = str_replace('%s', '%s', $quote . $this->name . $quote);
     // $f2 = $quote . $this->alias . $quote;
     // return $f1 . ' AS ' . $f2;

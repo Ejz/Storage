@@ -635,16 +635,16 @@ class DatabasePostgres implements DatabaseInterface
         ";
         $commands[] = "
             ALTER TABLE {$q}{$table}{$q}
-            ADD CONSTRAINT {$q}{$table}_{$rand()}{$q}
+            ADD CONSTRAINT {$q}{$table}_pk{$q}
             PRIMARY KEY ({$q}{$pk}{$q})
         ";
         // FIELDS
         foreach ($fields as $field) {
             $type = $field->getType();
             $null = $type->isNullable() ? 'NULL' : 'NOT NULL';
-            $default = !$type->isNullable() ? $this->getDefault($type) : '';
+            $default = !$type->isNullable() ? $this->getFieldTypeDefault($type) : '';
             $default = $default ? 'DEFAULT ' . $default : '';
-            $type = $this->getType($type);
+            $type = $this->getFieldTypeString($type);
             $commands[] = "
                 ALTER TABLE {$q}{$table}{$q}
                 ADD COLUMN {$q}{$field}{$q}
@@ -654,22 +654,24 @@ class DatabasePostgres implements DatabaseInterface
         // INDEXES
         foreach ($indexes as $index) {
             $f = $index->getFields();
-            $t = $index->getType();
+            $t = $this->getIndexTypeString($index->getType());
+            $u = $index->isUnique() ? 'UNIQUE' : '';
             $commands[] = "
-                CREATE INDEX {$q}{$table}_{$rand()}{$q} ON {$q}{$table}{$q}
-                USING {$t} ($enq($f))
+                CREATE {$u} INDEX {$q}{$table}_{$index}{$q} ON {$q}{$table}{$q}
+                USING {$t} ({$enq($f)})
             ";
         }
         // FOREIGN KEYS
         foreach ($foreignKeys as $foreignKey) {
-        //     $pt = $foreignKey->getParentTable();
-        //     $cf = $foreignKey->getChildFields();
-        //     $pf = $foreignKey->getParentFields();
-        //     $commands[] = "
-        //         ALTER TABLE {$q}{$table}{$q} ADD CONSTRAINT {$q}{$table}_{$rand()}{$q}
-        //         FOREIGN KEY ({$enq($cf)}) REFERENCES {$q}{$pt}{$q} ({$enq($pf)})
-        //         ON DELETE CASCADE ON UPDATE CASCADE
-        //     ";
+            $parentTable = $foreignKey->getParentTable();
+            $parentFields = $foreignKey->getParentFields();
+            $childFields = $foreignKey->getChildFields();
+            $commands[] = "
+                ALTER TABLE {$q}{$table}{$q} ADD CONSTRAINT {$q}{$table}_{$foreignKey}{$q}
+                FOREIGN KEY ({$enq($childFields)})
+                REFERENCES {$q}{$parentTable}{$q} ({$enq($parentFields)})
+                ON DELETE CASCADE ON UPDATE CASCADE
+            ";
         }
         $commands = array_map('trim', $commands);
         return $commands;
@@ -680,7 +682,7 @@ class DatabasePostgres implements DatabaseInterface
      *
      * @return string
      */
-    private function getType(AbstractType $type): string
+    private function getFieldTypeString(AbstractType $type): string
     {
         static $map;
         if ($map === null) {
@@ -692,7 +694,7 @@ class DatabasePostgres implements DatabaseInterface
                 (string) Type::date() => 'DATE',
                 (string) Type::dateTime() => 'TIMESTAMP(0) WITHOUT TIME ZONE',
                 (string) Type::json() => 'JSONB',
-                (string) Type::foreignKey() => 'BIGINT',
+                (string) Type::bigInt() => 'BIGINT',
                 (string) Type::intArray() => 'INTEGER[]',
                 (string) Type::stringArray() => 'TEXT[]',
                 (string) Type::binary() => 'BYTEA',
@@ -706,7 +708,7 @@ class DatabasePostgres implements DatabaseInterface
      *
      * @return string
      */
-    private function getDefault(AbstractType $type): string
+    private function getFieldTypeDefault(AbstractType $type): string
     {
         static $map;
         if ($map === null) {
@@ -718,13 +720,33 @@ class DatabasePostgres implements DatabaseInterface
                 (string) Type::date() => 'CURRENT_DATE',
                 (string) Type::dateTime() => 'CURRENT_TIMESTAMP',
                 (string) Type::json() => "'{}'",
-                (string) Type::foreignKey() => '0',
+                (string) Type::bigInt() => '0',
                 (string) Type::intArray() => "'{}'",
                 (string) Type::stringArray() => "'{}'",
                 (string) Type::binary() => "''::BYTEA",
             ];
         }
         return $map[(string) $type];
+    }
+
+    /**
+     * @param string $type
+     *
+     * @return string
+     */
+    private function getIndexTypeString(string $type): string
+    {
+        static $map;
+        if ($map === null) {
+            $map = [
+                Index::INDEX_TYPE_BTREE => 'BTREE',
+                Index::INDEX_TYPE_HASH => 'HASH',
+                Index::INDEX_TYPE_GIST => 'GIST',
+                Index::INDEX_TYPE_GIN => 'GIN',
+                Index::INDEX_TYPE_UNIQUE => 'BTREE',
+            ];
+        }
+        return $map[$type];
     }
 
     // /**

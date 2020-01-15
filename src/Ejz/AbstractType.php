@@ -50,7 +50,7 @@ class AbstractType
      */
     public function getName(): string
     {
-        return preg_replace('~^.*([A-Z][a-z]+)$~', '$1', get_class($this));
+        return preg_replace('~^.*?type(\w+)$~i', '$1', get_class($this));
     }
 
     /**

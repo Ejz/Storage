@@ -4,6 +4,6 @@ namespace Ejz\Type;
 
 use Ejz\AbstractType;
 
-class TypeForeignKey extends TypeInt
+class TypeBigInt extends TypeInt
 {
 }

@@ -87,9 +87,9 @@ class Type
      *
      * @return AbstractType
      */
-    public static function foreignKey(bool $nullable = false): AbstractType
+    public static function bigInt(bool $nullable = false): AbstractType
     {
-        return new Type\TypeJson($nullable);
+        return new Type\TypeBigInt($nullable);
     }
 
     /**
