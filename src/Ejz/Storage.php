@@ -224,75 +224,7 @@ class Storage
     //     return \Amp\Promise\wait($this->updateAsync($id, $values));
     // }
 
-    // /**
-    //  * @param array ...args
-    //  *
-    //  * @return Promise
-    //  */
-    // public function getAsync(...$args): Promise
-    // {
-    //     return \Amp\call(function ($args) {
-    //         $ids = $args;
-    //         $fields = null;
-    //         $last = array_pop($ids);
-    //         if (is_numeric($last)) {
-    //             $ids[] = $last;
-    //         } else {
-    //             $fields = $last;
-    //         }
-    //         if (!$ids) {
-    //             throw new RuntimeException(self::INVALID_ARGUMENT_FORMAT);
-    //         }
-    //         $definition = $this->getTableDefinition();
-    //         $isCacheable = $definition->isCacheable();
-    //         $table = $definition->getTable();
-    //         $bean = $definition->getBean();
-    //         $result = [];
-    //         $meta = [];
-    //         $dbs = ['ids' => [], 'map' => []];
-    //         foreach ($ids as $id) {
-    //             $v = null;
-    //             if ($isCacheable) {
-    //                 $fields_md5 = $fields_md5 ?? md5(serialize($fields));
-    //                 $ck = $table . '.' . $id . '.' . $fields_md5;
-    //                 $v = $this->cache->get($ck);
-    //                 if ($v !== null) {
-    //                     $result[$id] = $v;
-    //                 } else {
-    //                     $ct = [$table, $table . '.' . $id];
-    //                     $meta[$id] = [$ck, $ct];
-    //                 }
-    //             }
-    //             if ($v === null) {
-    //                 $db = $this->getReadShardsById($id)->filter(function ($name) use ($definition) {
-    //                     return !$definition->isForeignKeyTable($name);
-    //                 })->random();
-    //                 $name = $db->getName();
-    //                 $dbs['map'][$name] = $db;
-    //                 $dbs['ids'][$name][] = $id;
-    //             }
-    //         }
-    //         if (!$dbs['map']) {
-    //             return $bean === null ? $result : $this->toBeans($bean, $result);
-    //         }
-    //         $fields = $fields ?? array_keys($definition->getFields());
-    //         $fields = array_fill_keys((array) $fields, null);
-    //         $fields = $definition->normalizeValues($fields);
-    //         $promises = [];
-    //         foreach ($dbs['map'] as $name => $db) {
-    //             $promises[] = $db->getAsync($definition, $dbs['ids'][$name], $fields);
-    //         }
-    //         $values = yield $promises;
-    //         foreach (($isCacheable ? $values : []) as $value) {
-    //             foreach ($value as $id => $v) {
-    //                 [$ck, $ct] = $meta[$id];
-    //                 $this->cache->set($ck, $v, 3600, $ct);
-    //             }
-    //         }
-    //         $result = array_replace($result, ...$values);
-    //         return $bean === null ? $result : $this->toBeans($bean, $result);
-    //     }, $args);
-    // }
+    
 
     // /**
     //  * @param array ...$args

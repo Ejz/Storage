@@ -22,9 +22,6 @@ class Repository
     /** @var array */
     protected $indexes;
 
-    /** @var array */
-    protected $foreignKeys;
-
     /**
      * @param Storage $storage
      * @param string  $name
@@ -34,57 +31,229 @@ class Repository
         $this->storage = $storage;
         $this->name = $name;
         $this->config = $config;
-        $this->fields = $this->getNormalizedFields();
-        $this->indexes = $this->getNormalizedIndexes();
-        $this->foreignKeys = $this->getNormalizedForeignKeys();
-        unset(
-            $this->config['fields'],
-            $this->config['indexes'],
-            $this->config['foreignKeys']
-        );
+        $this->normalize();
+        // $this->fields = $this->getNormalizedFields();
+        // $this->indexes = $this->getNormalizedIndexes();
+        // unset($this->config['fields'], $this->config['indexes']);
     }
 
     /**
-     * @param array $values (optional)
+     * @param string $name
      *
-     * @return Promise
+     * @return bool
      */
-    public function insertAsync(array $values = []): Promise
+    public function isForeignKeyTable(string $name): bool
     {
-        return \Amp\call(function ($values) {
-            $deferred = new Deferred();
-            $promises = $this->getWritablePool()->insertAsync($this, $values);
-            \Amp\Promise\all($promises)->onResolve(function ($err, $res) use ($deferred) {
-                $ids = $err ? [0] : array_values($res);
-                $min = min($ids);
-                $max = max($ids);
-                $deferred->resolve($min === $max ? $min : 0);
-            });
-            return $deferred->promise();
-        }, $values);
+        $callable = $this->config['isForeignKeyTable'] ?? null;
+        if ($callable === null) {
+            return false;
+        }
+        $names = $this->getPool()->names();
+        return (bool) $callable($name, $names);
     }
 
     /**
-     * @param int    $id
-     * @param ?array $fields (optional)
+     * @param string $name
      *
+     * @return int
+     */
+    public function getPkIncrementBy(string $name): int
+    {
+        $callable = $this->config['getPkIncrementBy'] ?? null;
+        if ($callable === null) {
+            return 1;
+        }
+        $names = $this->getPool()->names();
+        return (int) $callable($name, $names);
+    }
+
+    /**
+     * @param string $name
+     *
+     * @return int
+     */
+    public function getPkStartWith(string $name): int
+    {
+        $callable = $this->config['getPkStartWith'] ?? null;
+        if ($callable === null) {
+            return 1;
+        }
+        $names = $this->getPool()->names();
+        return (int) $callable($name, $names);
+    }
+
+    /**
+     * @return DatabasePool
+     */
+    private function getWritablePool(): DatabasePool
+    {
+        $pool = $this->getPool();
+        $callable = $this->config['getWritablePool'] ?? null;
+        if ($callable === null) {
+            return $pool;
+        }
+        return $pool->filter($callable);
+    }
+
+    /**
+     * @return DatabasePool
+     */
+    private function getReadablePool(): DatabasePool
+    {
+        $pool = $this->getPool();
+        $callable = $this->config['getReadablePool'] ?? null;
+        if ($callable === null) {
+            return $pool;
+        }
+        return $pool->filter($callable);
+    }
+
+    /**
+     * @return DatabasePool
+     */
+    public function getPool(): DatabasePool
+    {
+        $pool = $this->storage->getPool();
+        $callable = $this->config['getPool'] ?? null;
+        if ($callable === null) {
+            return $pool;
+        }
+        return $pool->filter($callable);
+    }
+
+    /**
+     * @return Storage
+     */
+    public function getStorage(): Storage
+    {
+        return $this->storage;
+    }
+
+    /**
+     * @return string
+     */
+    public function getName(): string
+    {
+        return $this->name;
+    }
+
+    /**
+     * @return string
+     */
+    public function __toString(): string
+    {
+        return $this->getName();
+    }
+
+    /**
+     * @return array
+     */
+    public function getConfig(): array
+    {
+        return $this->config;
+    }
+
+    /**
+     * @return string
+     */
+    public function getTable(): string
+    {
+        $table = $this->config['table'] ?? null;
+        return $table ?? strtolower($this->name);
+    }
+
+    /**
      * @return Promise
      */
-    public function getAsync(int $id, ?array $fields = null): Promise
+    public function create(): Promise
     {
-        return \Amp\call(function ($id, $fields) {
-            $table = $this->getTable();
-            $db = $this->getReadablePool()->random();
-            $params = ['fields' => $this->getFields($fields)];
-            $all = iterator_to_array($db->get($table, [$id], $params));
-            if (!$all) {
-                return null;
+        return Promise\all($this->getPool()->create($this));
+    }
+
+    /**
+     * @return Promise
+     */
+    public function drop(): Promise
+    {
+        return Promise\all($this->getPool()->drop($this->getTable()));
+    }
+
+    /**
+     * @return Promise
+     */
+    public function truncate(): Promise
+    {
+        return Promise\all($this->getPool()->truncate($this->getTable()));
+    }
+
+    /**
+     */
+    private function normalize()
+    {
+        $fields = $this->config['fields'] ?? [];
+        $indexes = $this->config['indexes'] ?? [];
+        unset($this->config['fields']);
+        unset($this->config['indexes']);
+        $collect = [];
+        foreach ($fields as $name => $field) {
+            if ($field instanceof AbstractType) {
+                $field = ['type' => $field];
             }
-            $row = current($all);
-            
-            return $deferred->promise();
-        }, $id, $fields);
+            $collect[$name] = new Field($name, $field['type']);
+        }
+        $this->fields = $collect;
+        $collect = [];
+        foreach ($indexes as $name => $index) {
+            if ($this->isAssocArray($index)) {
+                $index = ['fields' => $index];
+            }
+            $type = $index['type'] ?? null;
+            $collect[$name] = new Index($name, $index['fields'], $type);
+        }
+        $this->indexes = $collect;
     }
+
+    // /**
+    //  * @param array $values (optional)
+    //  *
+    //  * @return Promise
+    //  */
+    // public function insertAsync(array $values = []): Promise
+    // {
+    //     return \Amp\call(function ($values) {
+    //         $deferred = new Deferred();
+    //         $promises = $this->getWritablePool()->insertAsync($this, $values);
+    //         \Amp\Promise\all($promises)->onResolve(function ($err, $res) use ($deferred) {
+    //             $ids = $err ? [0] : array_values($res);
+    //             $min = min($ids);
+    //             $max = max($ids);
+    //             $deferred->resolve($min === $max ? $min : 0);
+    //         });
+    //         return $deferred->promise();
+    //     }, $values);
+    // }
+
+    // /**
+    //  * @param int    $id
+    //  * @param ?array $fields (optional)
+    //  *
+    //  * @return Promise
+    //  */
+    // public function getAsync(int $id, ?array $fields = null): Promise
+    // {
+    //     return \Amp\call(function ($id, $fields) {
+    //         $table = $this->getTable();
+    //         $db = $this->getReadablePool()->random();
+    //         $params = ['fields' => $this->getFields($fields)];
+    //         $all = iterator_to_array($db->get($table, [$id], $params));
+    //         if (!$all) {
+    //             return null;
+    //         }
+    //         $row = current($all);
+            
+    //         return $deferred->promise();
+    //     }, $id, $fields);
+    // }
 
     // /**
     //  * @param array ...args
@@ -156,93 +325,9 @@ class Repository
     //     }, $args);
     // }
 
-    /**
-     * @return array
-     */
-    private function getNormalizedFields(): array
-    {
-        $fields = $this->config['fields'] ?? [];
-        $collect = [];
-        foreach ($fields as $name => $field) {
-            if ($field instanceof AbstractType) {
-                $field = ['type' => $field];
-            }
-            $collect[$name] = new Field($name, $field['type']);
-        }
-        return $collect;
-    }
+    
 
-    /**
-     * @return array
-     */
-    private function getNormalizedIndexes(): array
-    {
-        $indexes = $this->config['indexes'] ?? [];
-        $collect = [];
-        foreach ($indexes as $index) {
-        }
-        return $collect;
-    }
-
-    /**
-     * @return array
-     */
-    private function getNormalizedForeignKeys(): array
-    {
-        $foreignKeys = $this->config['foreignKeys'] ?? [];
-        $collect = [];
-        foreach ($foreignKeys as $foreignKey) {
-        }
-        return $collect;
-    }
-
-    /**
-     * @return DatabasePool
-     */
-    private function getWritablePool(): DatabasePool
-    {
-        $filter = $this->config['writablePoolFilter'] ?? null;
-        $pool = $this->getPool();
-        return $filter === null ? $pool : $pool->filter($filter);
-    }
-
-    /**
-     * @return DatabasePool
-     */
-    private function getReadablePool(): DatabasePool
-    {
-        $filter = $this->config['readablePoolFilter'] ?? null;
-        $pool = $this->getPool();
-        return $filter === null ? $pool : $pool->filter($filter);
-    }
-
-    /**
-     * @return DatabasePool
-     */
-    public function getPool(): DatabasePool
-    {
-        $filter = $this->config['poolFilter'] ?? null;
-        $pool = $this->storage->getPool();
-        return $filter === null ? $pool : $pool->filter($filter);
-    }
-
-    /**
-     * @return int
-     */
-    public function getPkIncrementBy(): int
-    {
-        $pkIncrementBy = $this->config['pkIncrementBy'] ?? null;
-        return $pkIncrementBy ?? 1;
-    }
-
-    /**
-     * @return int
-     */
-    public function getPkStartWith(): int
-    {
-        $pkStartWith = $this->config['pkStartWith'] ?? null;
-        return $pkStartWith ?? 1;
-    }
+    
 
     /**
      * @return string
@@ -276,111 +361,21 @@ class Repository
      */
     public function getForeignKeys(): array
     {
-        return $this->foreignKeys;
+        return [];
     }
 
     /**
-     * @param string $name
+     * @param mixed $array
      *
      * @return bool
      */
-    public function isForeignKeyTable(string $name): bool
+    private function isAssocArray($array): bool
     {
-        $_ = $this->config['isForeignKeyTable'] ?? null;
-        return $_ === null ? false : $_($name, $this->getPool()->names());
-    }
-
-    /**
-     * @return Storage
-     */
-    public function getStorage(): Storage
-    {
-        return $this->storage;
-    }
-
-    /**
-     * @return string
-     */
-    public function getName(): string
-    {
-        return $this->name;
-    }
-
-    /**
-     * @return array
-     */
-    public function getConfig(): array
-    {
-        return $this->config;
-    }
-
-    /**
-     * @return string
-     */
-    public function getTable(): string
-    {
-        $table = $this->config['table'] ?? null;
-        return $table ?? strtolower($this->name);
-    }
-
-    /**
-     * @return Promise
-     */
-    public function createAsync(): Promise
-    {
-        return \Amp\call(function () {
-            yield $this->getPool()->createAsync($this);
-        });
-    }
-
-    /**
-     */
-    public function create()
-    {
-        \Amp\Promise\wait($this->createAsync());
-    }
-
-    /**
-     * @return Promise
-     */
-    public function dropAsync(): Promise
-    {
-        return \Amp\call(function () {
-            yield $this->getPool()->dropAsync($this->getTable());
-        });
-    }
-
-    /**
-     */
-    public function drop()
-    {
-        \Amp\Promise\wait($this->dropAsync());
-    }
-
-    /**
-     * @return Promise
-     */
-    public function truncateAsync(): Promise
-    {
-        return \Amp\call(function () {
-            yield $this->getPool()->truncateAsync($this->getTable());
-        });
-    }
-
-    /**
-     */
-    public function truncate()
-    {
-        \Amp\Promise\wait($this->truncateAsync());
-    }
-
-    /**
-     * @param array $values (optional)
-     *
-     * @return int
-     */
-    public function insert(array $values = []): int
-    {
-        return \Amp\Promise\wait($this->insertAsync($values));
+        if (!is_array($array)) {
+            return false;
+        }
+        $count0 = count($array);
+        $count1 = count(array_filter(array_keys($array), 'is_string'));
+        return $count0 === $count1;
     }
 }

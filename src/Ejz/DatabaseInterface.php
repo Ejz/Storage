@@ -64,6 +64,13 @@ interface DatabaseInterface
      *
      * @return Promise
      */
+    public function indexes(string $table): Promise;
+
+    /**
+     * @param string $table
+     *
+     * @return Promise
+     */
     public function pk(string $table): Promise;
 
     /**
@@ -116,7 +123,7 @@ interface DatabaseInterface
      *
      * @return Promise
      */
-    // public function create(Repository $repository): Promise;
+    public function create(Repository $repository): Promise;
 
     /**
      * @param Repository $repository

@@ -161,6 +161,44 @@ class DatabasePostgres implements DatabaseInterface
      *
      * @return Promise
      */
+    public function indexes(string $table): Promise
+    {
+        return \Amp\call(function ($table) {
+            if (!yield $this->tableExists($table)) {
+                return null;
+            }
+            $sql = '
+                SELECT i.relname AS i, a.attname AS c
+                FROM
+                    pg_class t,
+                    pg_class i,
+                    pg_index ix,
+                    pg_attribute a,
+                    pg_namespace
+                WHERE
+                    t.oid = ix.indrelid AND
+                    i.oid = ix.indexrelid AND
+                    a.attrelid = t.oid AND
+                    a.attnum = ANY(ix.indkey) AND
+                    t.relkind = ? AND
+                    t.relname = ? AND
+                    nspname = ? AND
+                    NOT indisprimary
+            ';
+            $all = yield $this->all($sql, 'r', $table, 'public');
+            $indexes = [];
+            foreach ($all as ['i' => $i, 'c' => $c]) {
+                @ $indexes[$i][] = $c;
+            }
+            return $indexes;
+        }, $table);
+    }
+
+    /**
+     * @param string $table
+     *
+     * @return Promise
+     */
     public function pk(string $table): Promise
     {
         return \Amp\call(function ($table) {
@@ -535,109 +573,159 @@ class DatabasePostgres implements DatabaseInterface
         return $intervals;
     }
 
+    /**
+     * @param Repository $repository
+     *
+     * @return Promise
+     */
+    public function create(Repository $repository): Promise
+    {
+        return \Amp\call(function ($repository) {
+            $commands = $this->getCreateCommands($repository);
+            foreach ($commands as $command) {
+                yield $this->exec($command);
+            }
+        }, $repository);
+    }
     
+    /**
+     * @param Repository $repository
+     *
+     * @return array
+     */
+    private function getCreateCommands(Repository $repository): array
+    {
+        $q = $this->config['quote'];
+        $rand = function () {
+            return mt_rand();
+        };
+        $enq = function ($fields) use ($q) {
+            return implode(', ', array_map(function ($field) use ($q) {
+                return $q . $field . $q;
+            }, $fields));
+        };
+        $table = $repository->getTable();
+        [$fields, $indexes, $foreignKeys] = [[], [], []];
+        if (!$repository->isForeignKeyTable($this->getName())) {
+            $fields = $repository->getFields();
+            $indexes = $repository->getIndexes();
+            $foreignKeys = $repository->getForeignKeys();
+        }
+        $pk = $repository->getPk();
+        $pkStartWith = $repository->getPkStartWith($this->getName());
+        $pkIncrementBy = $repository->getPkIncrementBy($this->getName());
+        $seq = $table . '_seq';
+        $commands = [];
+        // CREATE TABLE
+        $commands[] = "CREATE TABLE {$q}{$table}{$q}()";
+        // CREATE SEQUENCE
+        $commands[] = "DROP SEQUENCE IF EXISTS {$q}{$seq}{$q} CASCADE";
+        $commands[] = "
+            CREATE SEQUENCE {$q}{$seq}{$q}
+            AS BIGINT
+            START WITH {$pkStartWith}
+            INCREMENT BY {$pkIncrementBy}
+            MINVALUE {$pkStartWith}
+        ";
+        // ADD PRIMARY KEY
+        $commands[] = "
+            ALTER TABLE {$q}{$table}{$q}
+            ADD COLUMN {$q}{$pk}{$q} BIGINT DEFAULT
+            nextval('{$seq}'::regclass) NOT NULL
+        ";
+        $commands[] = "
+            ALTER TABLE {$q}{$table}{$q}
+            ADD CONSTRAINT {$q}{$table}_{$rand()}{$q}
+            PRIMARY KEY ({$q}{$pk}{$q})
+        ";
+        // FIELDS
+        foreach ($fields as $field) {
+            $type = $field->getType();
+            $null = $type->isNullable() ? 'NULL' : 'NOT NULL';
+            $default = !$type->isNullable() ? $this->getDefault($type) : '';
+            $default = $default ? 'DEFAULT ' . $default : '';
+            $type = $this->getType($type);
+            $commands[] = "
+                ALTER TABLE {$q}{$table}{$q}
+                ADD COLUMN {$q}{$field}{$q}
+                {$type} {$null} {$default}
+            ";
+        }
+        // INDEXES
+        foreach ($indexes as $index) {
+            $f = $index->getFields();
+            $t = $index->getType();
+            $commands[] = "
+                CREATE INDEX {$q}{$table}_{$rand()}{$q} ON {$q}{$table}{$q}
+                USING {$t} ($enq($f))
+            ";
+        }
+        // FOREIGN KEYS
+        foreach ($foreignKeys as $foreignKey) {
+        //     $pt = $foreignKey->getParentTable();
+        //     $cf = $foreignKey->getChildFields();
+        //     $pf = $foreignKey->getParentFields();
+        //     $commands[] = "
+        //         ALTER TABLE {$q}{$table}{$q} ADD CONSTRAINT {$q}{$table}_{$rand()}{$q}
+        //         FOREIGN KEY ({$enq($cf)}) REFERENCES {$q}{$pt}{$q} ({$enq($pf)})
+        //         ON DELETE CASCADE ON UPDATE CASCADE
+        //     ";
+        }
+        $commands = array_map('trim', $commands);
+        return $commands;
+    }
 
-    // /**
-    //  * @param Repository $repository
-    //  *
-    //  * @return Promise
-    //  */
-    // public function createAsync(Repository $repository): Promise
-    // {
-    //     return \Amp\call(function ($repository) {
-    //         $commands = $this->getCreateCommands($repository);
-    //         foreach ($commands as $command) {
-    //             yield $this->execAsync($command);
-    //         }
-    //     }, $repository);
-    // }
+    /**
+     * @param AbstractType $type
+     *
+     * @return string
+     */
+    private function getType(AbstractType $type): string
+    {
+        static $map;
+        if ($map === null) {
+            $map = [
+                (string) Type::string() => 'TEXT',
+                (string) Type::int() => 'INTEGER',
+                (string) Type::float() => 'REAL',
+                (string) Type::bool() => 'BOOLEAN',
+                (string) Type::date() => 'DATE',
+                (string) Type::dateTime() => 'TIMESTAMP(0) WITHOUT TIME ZONE',
+                (string) Type::json() => 'JSONB',
+                (string) Type::foreignKey() => 'BIGINT',
+                (string) Type::intArray() => 'INTEGER[]',
+                (string) Type::stringArray() => 'TEXT[]',
+                (string) Type::binary() => 'BYTEA',
+            ];
+        }
+        return $map[(string) $type];
+    }
 
-    // /**
-    //  * @param Repository $repository
-    //  *
-    //  * @return array
-    //  */
-    // private function getCreateCommands(Repository $repository): array
-    // {
-    //     $q = $this->config['quote'];
-    //     $rand = function () {
-    //         return mt_rand();
-    //     };
-    //     $enq = function ($fields) use ($q) {
-    //         return implode(', ', array_map(function ($field) use ($q) {
-    //             return $q . $field . $q;
-    //         }, $fields));
-    //     };
-    //     $table = $repository->getTable();
-    //     [$fields, $indexes] = [[], []];
-    //     if (!$repository->isForeignKeyTable($this->getName())) {
-    //         $fields = $repository->getFields();
-    //         $indexes = $repository->getIndexes();
-    //         $foreignKeys = $repository->getForeignKeys();
-    //     }
-    //     $pk = $repository->getPk();
-    //     $pkStartWith = $repository->getPkStartWith($this->getName());
-    //     $pkIncrementBy = $repository->getPkIncrementBy($this->getName());
-    //     $seq = $table . '_seq';
-    //     $commands = [];
-    //     // CREATE TABLE
-    //     $commands[] = "CREATE TABLE {$q}{$table}{$q}()";
-    //     // CREATE SEQUENCE
-    //     $commands[] = "DROP SEQUENCE IF EXISTS {$q}{$seq}{$q} CASCADE";
-    //     $commands[] = "
-    //         CREATE SEQUENCE {$q}{$seq}{$q}
-    //         AS BIGINT
-    //         START WITH {$pkStartWith}
-    //         INCREMENT BY {$pkIncrementBy}
-    //         MINVALUE {$pkStartWith}
-    //     ";
-    //     // ADD PRIMARY KEY
-    //     $commands[] = "
-    //         ALTER TABLE {$q}{$table}{$q}
-    //         ADD COLUMN {$q}{$pk}{$q} BIGINT DEFAULT
-    //         nextval('{$seq}'::regclass) NOT NULL
-    //     ";
-    //     $commands[] = "
-    //         ALTER TABLE {$q}{$table}{$q}
-    //         ADD CONSTRAINT {$q}{$table}_{$rand()}{$q}
-    //         PRIMARY KEY ({$q}{$pk}{$q})
-    //     ";
-    //     // FIELDS
-    //     foreach ($fields as $field) {
-    //         $type = $field->getType();
-    //         $null = $type->isNullable() ? 'NULL' : 'NOT NULL';
-    //         $default = !$type->isNullable() ? $this->getDefault($type) : '';
-    //         $default = $default ? 'DEFAULT ' . $default : '';
-    //         $type = $this->getType($type);
-    //         $commands[] = "
-    //             ALTER TABLE {$q}{$table}{$q}
-    //             ADD COLUMN {$q}{$field}{$q}
-    //             {$type} {$null} {$default}
-    //         ";
-    //     }
-    //     // INDEXES
-    //     foreach ($indexes as $index) {
-    //         $f = $index->getFields();
-    //         $t = $index->getType();
-    //         $commands[] = "
-    //             CREATE INDEX {$q}{$table}_{$rand()}{$q} ON {$q}{$table}{$q}
-    //             USING {$t} ($enq($f))
-    //         ";
-    //     }
-    //     // FOREIGN KEYS
-    //     foreach ($foreignKeys as $foreignKey) {
-    //         $pt = $foreignKey->getParentTable();
-    //         $cf = $foreignKey->getChildFields();
-    //         $pf = $foreignKey->getParentFields();
-    //         $commands[] = "
-    //             ALTER TABLE {$q}{$table}{$q} ADD CONSTRAINT {$q}{$table}_{$rand()}{$q}
-    //             FOREIGN KEY ({$enq($cf)}) REFERENCES {$q}{$pt}{$q} ({$enq($pf)})
-    //             ON DELETE CASCADE ON UPDATE CASCADE
-    //         ";
-    //     }
-    //     $commands = array_map('trim', $commands);
-    //     return $commands;
-    // }
+    /**
+     * @param AbstractType $type
+     *
+     * @return string
+     */
+    private function getDefault(AbstractType $type): string
+    {
+        static $map;
+        if ($map === null) {
+            $map = [
+                (string) Type::string() => "''::TEXT",
+                (string) Type::int() => '0',
+                (string) Type::float() => '0',
+                (string) Type::bool() => "'f'",
+                (string) Type::date() => 'CURRENT_DATE',
+                (string) Type::dateTime() => 'CURRENT_TIMESTAMP',
+                (string) Type::json() => "'{}'",
+                (string) Type::foreignKey() => '0',
+                (string) Type::intArray() => "'{}'",
+                (string) Type::stringArray() => "'{}'",
+                (string) Type::binary() => "''::BYTEA",
+            ];
+        }
+        return $map[(string) $type];
+    }
 
     // /**
     //  * @param Repository $repository
@@ -688,57 +776,7 @@ class DatabasePostgres implements DatabaseInterface
 
     
 
-    // /**
-    //  * @param AbstractType $type
-    //  *
-    //  * @return string
-    //  */
-    // private function getType(AbstractType $type): string
-    // {
-    //     static $map;
-    //     if ($map === null) {
-    //         $map = [
-    //             (string) Type::string() => 'TEXT',
-    //             (string) Type::int() => 'INTEGER',
-    //             (string) Type::float() => 'REAL',
-    //             (string) Type::bool() => 'BOOLEAN',
-    //             (string) Type::date() => 'DATE',
-    //             (string) Type::dateTime() => 'TIMESTAMP(0) WITHOUT TIME ZONE',
-    //             (string) Type::json() => 'JSONB',
-    //             (string) Type::foreignKey() => 'BIGINT',
-    //             (string) Type::intArray() => 'INTEGER[]',
-    //             (string) Type::stringArray() => 'TEXT[]',
-    //             (string) Type::binary() => 'BYTEA',
-    //         ];
-    //     }
-    //     return $map[(string) $type];
-    // }
-
-    // /**
-    //  * @param AbstractType $type
-    //  *
-    //  * @return string
-    //  */
-    // private function getDefault(AbstractType $type): string
-    // {
-    //     static $map;
-    //     if ($map === null) {
-    //         $map = [
-    //             (string) Type::string() => "''::TEXT",
-    //             (string) Type::int() => '0',
-    //             (string) Type::float() => '0',
-    //             (string) Type::bool() => "'f'",
-    //             (string) Type::date() => 'CURRENT_DATE',
-    //             (string) Type::dateTime() => 'CURRENT_TIMESTAMP',
-    //             (string) Type::json() => "'{}'",
-    //             (string) Type::foreignKey() => '0',
-    //             (string) Type::intArray() => "'{}'",
-    //             (string) Type::stringArray() => "'{}'",
-    //             (string) Type::binary() => "''::BYTEA",
-    //         ];
-    //     }
-    //     return $map[(string) $type];
-    // }
+    
 
     //     // $alters = [];
     //     // $_fields = [];

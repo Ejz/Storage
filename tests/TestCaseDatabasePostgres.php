@@ -133,6 +133,29 @@ class TestCaseDatabasePostgres extends AbstractTestCase
     /**
      * @test
      */
+    public function test_case_database_postgres_indexes()
+    {
+        $db = $this->pool->random();
+        wait($db->exec('CREATE TABLE t1 (t1_field TEXT, t2_field INT NOT NULL)'));
+        wait($db->exec('CREATE TABLE t2 (t2 TEXT)'));
+        wait($db->exec('CREATE TABLE t3 ()'));
+        // CREATE INDEX {$q}{$table}_{$rand()}{$q} ON {$q}{$table}{$q}
+        wait($db->exec('ALTER TABLE ONLY t1 ADD CONSTRAINT pk1_pkey PRIMARY KEY (t2_field)'));
+        wait($db->exec('CREATE INDEX t1_index1 ON t1 (t1_field)'));
+        wait($db->exec('CREATE INDEX t1_index2 ON t1 (t1_field, t2_field)'));
+        wait($db->exec('CREATE INDEX t1_index3 ON t1 (t2_field)'));
+        $this->assertEquals(null, wait($db->indexes('unknown')));
+        $this->assertEquals(null, wait($db->indexes('')));
+        $indexes = wait($db->indexes('t1'));
+        $this->assertTrue($indexes['t1_index1'] === ['t1_field']);
+        $this->assertTrue($indexes['t1_index2'] === ['t1_field', 't2_field']);
+        $this->assertTrue($indexes['t1_index3'] === ['t2_field']);
+        $this->assertTrue(!isset($indexes['pk1_pkey']));
+    }
+
+    /**
+     * @test
+     */
     public function test_case_database_postgres_pk()
     {
         $db = $this->pool->random();
