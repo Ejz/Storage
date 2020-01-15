@@ -100,54 +100,9 @@ class Storage
         return $this->cached[$name];
     }
 
-    // /**
-    //  * @return TableDefinition
-    //  */
-    // protected function getTableDefinition(): TableDefinition
-    // {
-    //     if ($this->definition !== null) {
-    //         return $this->definition;
-    //     }
-    //     if ($this->table === null) {
-    //         throw new RuntimeException(self::NO_TABLE_ERROR);
-    //     }
-    //     $table = $this->tables[$this->table] ?? null;
-    //     if ($table === null) {
-    //         throw new RuntimeException(sprintf(self::INVALID_TABLE_ERROR, $this->table));
-    //     }
-    //     $this->definition = new TableDefinition($this->table, $table, $this->getPool()->names());
-    //     return $this->definition;
-    // }
-
     
 
     
-
-    
-
-    // /**
-    //  * @return Promise
-    //  */
-    // public function truncateAsync(): Promise
-    // {
-    //     return \Amp\call(function () {
-    //         $definition = $this->getTableDefinition();
-    //         $table = $definition->getTable();
-    //         if ($definition->isCacheable()) {
-    //             $this->cache->drop($table);
-    //         }
-    //         $shards = $this->getAllShards();
-    //         yield $shards->truncateAsync($table);
-    //     });
-    // }
-
-    // /**
-    //  *
-    //  */
-    // public function truncate()
-    // {
-    //     \Amp\Promise\wait($this->truncateAsync());
-    // }
 
     // /**
     //  * @param array $values (optional)

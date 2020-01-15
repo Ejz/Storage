@@ -4,7 +4,7 @@ namespace Ejz;
 
 use Generator;
 
-trait GeneratorTrait
+trait SimpleGeneratorTrait
 {
     /**
      * @return Generator
@@ -17,7 +17,7 @@ trait GeneratorTrait
             }
         };
         while (($yield = \Amp\Promise\wait(\Amp\call($iterator, $this))) !== null) {
-            yield $yield[0] => $yield[1];
+            yield $yield;
         }
     }
 }

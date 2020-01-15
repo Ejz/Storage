@@ -131,7 +131,7 @@ interface DatabaseInterface
      *
      * @return Promise
      */
-    // public function insert(Repository $repository, array $values): Promise;
+    public function insert(Repository $repository, array $fields): Promise;
 
     /**
      * @param Repository $repository

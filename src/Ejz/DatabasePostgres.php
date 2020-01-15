@@ -375,6 +375,7 @@ class DatabasePostgres implements DatabaseInterface
         $emit = function ($emit) use ($table, $params) {
             $params += [
                 'fields' => null,
+                'returnFields' => false,
                 'asc' => true,
                 'rand' => false,
                 'min' => null,
@@ -387,6 +388,7 @@ class DatabasePostgres implements DatabaseInterface
             ];
             [
                 'fields' => $fields,
+                'returnFields' => $returnFields,
                 'asc' => $asc,
                 'rand' => $rand,
                 'min' => $min,
@@ -487,7 +489,7 @@ class DatabasePostgres implements DatabaseInterface
                     foreach ($row as $k => &$v) {
                         $f = $fields[$k];
                         $f->importValue($v);
-                        $v = $f->getValue();
+                        $v = $returnFields ? $f : $f->getValue();
                     }
                     unset($v);
                     yield $emit([$id, $row]);
@@ -515,11 +517,13 @@ class DatabasePostgres implements DatabaseInterface
             $params += [
                 'pk' => null,
                 'fields' => null,
+                'returnFields' => false,
                 'config' => [],
             ];
             [
                 'pk' => $pk,
                 'fields' => $fields,
+                'returnFields' => $returnFields,
                 'config' => $config,
             ] = $params;
             $config += $this->config;
@@ -536,6 +540,7 @@ class DatabasePostgres implements DatabaseInterface
                 $iterator = $this->iterate($table, [
                     'where' => new Condition([$pk => $chunk]),
                     'fields' => $fields,
+                    'returnFields' => $returnFields,
                     'limit' => $iterator_chunk_size,
                     'config' => compact('iterator_chunk_size'),
                     'order' => false,
@@ -643,7 +648,7 @@ class DatabasePostgres implements DatabaseInterface
             $type = $field->getType();
             $null = $type->isNullable() ? 'NULL' : 'NOT NULL';
             $default = !$type->isNullable() ? $this->getFieldTypeDefault($type) : '';
-            $default = $default ? 'DEFAULT ' . $default : '';
+            $default = $default !== '' ? 'DEFAULT ' . $default : '';
             $type = $this->getFieldTypeString($type);
             $commands[] = "
                 ALTER TABLE {$q}{$table}{$q}
@@ -675,6 +680,47 @@ class DatabasePostgres implements DatabaseInterface
         }
         $commands = array_map('trim', $commands);
         return $commands;
+    }
+
+    /**
+     * @param Repository $repository
+     * @param array      $fields
+     *
+     * @return Promise
+     */
+    public function insert(Repository $repository, array $fields): Promise
+    {
+        return \Amp\call(function ($repository, $fields) {
+            [$cmd, $args] = $this->getInsertCommand($repository, $fields);
+            return yield $this->val($cmd, ...$args);
+        }, $repository, $fields);
+    }
+
+    /**
+     * @param Repository $repository
+     * @param array      $fields
+     *
+     * @return array
+     */
+    private function getInsertCommand(Repository $repository, array $fields): array
+    {
+        $q = $this->config['quote'];
+        $table = $repository->getTable();
+        $pk = $repository->getPk();
+        if ($repository->isForeignKeyTable($this->getName())) {
+            $fields = [];
+        }
+        [$columns, $values, $args] = [[], [], []];
+        foreach ($fields as $field) {
+            $columns[] = $q . $field->getName() . $q;
+            $values[] = $field->getInsertString();
+            $args[] = $field->exportValue();
+        }
+        $columns = implode(', ', $columns);
+        $values = implode(', ', $values);
+        $insert = ($columns && $values) ? "({$columns}) VALUES ({$values})" : 'DEFAULT VALUES';
+        $command = "INSERT INTO {$q}{$table}{$q} {$insert} RETURNING {$q}{$pk}{$q}";
+        return [$command, $args];
     }
 
     /**
@@ -748,53 +794,6 @@ class DatabasePostgres implements DatabaseInterface
         }
         return $map[$type];
     }
-
-    // /**
-    //  * @param Repository $repository
-    //  * @param array      $values
-    //  *
-    //  * @return Promise
-    //  */
-    // public function insertAsync(Repository $repository, array $values): Promise
-    // {
-    //     return \Amp\call(function ($repository, $values) {
-    //         [$cmd, $args] = $this->getInsertCommand($repository, $values);
-    //         return yield $this->valAsync($cmd, ...$args);
-    //     }, $repository, $values);
-    // }
-
-    // /**
-    //  * @param Repository $repository
-    //  * @param array      $fields
-    //  *
-    //  * @return array
-    //  */
-    // private function getInsertCommand(Repository $repository, array $fields): array
-    // {
-    //     $q = $this->config['quote'];
-    //     $table = $repository->getTable();
-    //     $pk = $repository->getPk();
-    //     if ($repository->isForeignKeyTable($this->getName())) {
-    //         $fields = [];
-    //     }
-    //     [$columns, $values, $args] = [[], [], []];
-    //     foreach ($fields as $field) {
-    //         $columns[] = $q . ((string) $field) . $q;
-    //         $values[] = $field->getInsertString($q);
-    //         $args[] = $field->getValue();
-    //         // $f = $q . $value['field'] . $q;
-    //         // $_values[] = str_replace('%s', $f, $value['set_pattern']);
-    //         // $args[] = $value['set'] ? $value['set']($value['value']) : $value['value'];
-    //     }
-    //     $columns = implode(', ', $columns);
-    //     $values = implode(', ', $values);
-    //     $insert = ($columns && $values) ? "({$columns}) VALUES ({$values})" : 'DEFAULT VALUES';
-    //     $command = "INSERT INTO {$q}{$table}{$q} {$insert} RETURNING {$q}{$pk}{$q}";
-    //     return [$command, $args];
-    //     // $_columns = [];
-    //     // $_values = [];
-    //     // $args = [];
-    // }
 
     
 

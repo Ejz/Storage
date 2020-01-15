@@ -46,6 +46,16 @@ class AbstractType
     }
 
     /**
+     * @param mixed $value
+     *
+     * @return mixed
+     */
+    public function export($value)
+    {
+        return $value;
+    }
+
+    /**
      * @return string
      */
     public function getName(): string
@@ -67,6 +77,14 @@ class AbstractType
     public function getSelectString(): string
     {
         return '%s';
+    }
+
+    /**
+     * @return string
+     */
+    public function getInsertString(): string
+    {
+        return '?';
     }
 
     // /**

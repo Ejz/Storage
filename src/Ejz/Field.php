@@ -13,9 +13,6 @@ class Field
     /** @var string */
     private $alias;
 
-    /** @var bool */
-    private $hasValue;
-
     /** @var mixed */
     private $value;
 
@@ -29,7 +26,7 @@ class Field
         $this->name = $name;
         $this->type = $type ?? Type::default(true);
         $this->alias = $alias ?? $this->name;
-        $this->unsetValue();
+        $this->setValue(null);
     }
 
     /**
@@ -46,12 +43,28 @@ class Field
     }
 
     /**
+     * @return string
+     */
+    public function getInsertString(): string
+    {
+        return $this->type->getInsertString();
+    }
+
+    /**
      * @param mixed $value
      */
     public function importValue($value)
     {
         $value = $this->type->import($value);
         $this->setValue($value);
+    }
+
+    /**
+     * @return mixed
+     */
+    public function exportValue()
+    {
+        return $this->type->export($this->value);
     }
 
     /**
@@ -79,21 +92,11 @@ class Field
     }
 
     /**
-     */
-    public function unsetValue()
-    {
-        $this->value = null;
-        $this->hasValue = false;
-    }
-
-    /**
      * @param mixed $value
      */
     public function setValue($value)
     {
-        $value = $this->type->set($value);
-        $this->value = $value;
-        $this->hasValue = true;
+        $this->value = $this->type->set($value);
     }
 
     /**

@@ -4,17 +4,31 @@ namespace Ejz;
 
 class Bean
 {
+    /** @var Repository */
+    private $repository;
+
+    /** @var ?int */
+    private $id;
+
+    /** @var array */
+    private $fields;
+
+    /** @var array */
+    private $changed;
+
     /**
      * @param Repository $repository
-     * @param int        $id
-     * @param array      $row
+     * @param ?int       $id
+     * @param array      $values
+     * @param array      $fields
      */
-    public function __construct(Repository $repository, int $id, array $row)
+    public function __construct(Repository $repository, ?int $id, array $fields)
     {
         $this->repository = $repository;
         $this->id = $id;
-        $this->row = $row;
+        $this->fields = $fields;
         $this->changed = [];
+        $this->cloneFields();
     }
 
     /**
@@ -28,9 +42,29 @@ class Bean
     /**
      * @return int
      */
-    public function getId(): int
+    public function getId(): ?int
     {
         return $this->id;
+    }
+
+    /**
+     * @return array
+     */
+    public function getFields(): array
+    {
+        return $this->fields;
+    }
+
+    /**
+     * @return array
+     */
+    public function getValues(): array
+    {
+        $values = [];
+        foreach ($this->fields as $name => $field) {
+            $values[$name] = $field->getValue();
+        }
+        return $values;
     }
 
     /**
@@ -42,23 +76,13 @@ class Bean
     }
 
     /**
-     * @return string
      */
-    public function getName(): string
+    private function cloneFields()
     {
-        return $this->repository->getName();
-    }
-
-    public function __set($name, $value)
-    {
-
-    }
-
-    public function update($force = false) {
-
-    }
-
-    public function delete() {
-        
+        $fields = [];
+        foreach ($this->fields as $key => $field) {
+            $fields[$key] = clone $field;
+        }
+        $this->fields = $fields;
     }
 }

@@ -4,6 +4,7 @@ namespace Ejz;
 
 use Amp\Promise;
 use Amp\Deferred;
+use Amp\Iterator;
 
 class Repository
 {
@@ -215,7 +216,7 @@ class Repository
                 $index = ['fields' => $index];
             }
             $type = $index['type'] ?? null;
-            $collect[$name] = new Index($name, $index['fields'], $type);
+            $collect[] = new Index($name, $index['fields'], $type);
         }
         $this->indexes = $collect;
         $collect = [];
@@ -228,7 +229,7 @@ class Repository
                     'parentTable' => $t,
                 ];
             }
-            $collect[$name] = new ForeignKey(
+            $collect[] = new ForeignKey(
                 $name,
                 (array) $foreignKey['childFields'],
                 $foreignKey['parentTable'],
@@ -248,14 +249,16 @@ class Repository
     }
 
     /**
-     * @param ?array $fields (optional)
+     * @param ?array $filter (optional)
      *
      * @return array
      */
-    public function getFields(?array $fields = null): array
+    public function getFields(?array $filter = null): array
     {
-        return $this->fields;
-        return $fields === null ? $this->fields : [];
+        if ($filter === null) {
+            return $this->fields;
+        }
+        return array_intersect_key($this->fields, array_flip((array) $filter));
     }
 
     /**
@@ -274,121 +277,75 @@ class Repository
         return $this->foreignKeys;
     }
 
-    // /**
-    //  * @param array $values (optional)
-    //  *
-    //  * @return Promise
-    //  */
-    // public function insertAsync(array $values = []): Promise
-    // {
-    //     return \Amp\call(function ($values) {
-    //         $deferred = new Deferred();
-    //         $promises = $this->getWritablePool()->insertAsync($this, $values);
-    //         \Amp\Promise\all($promises)->onResolve(function ($err, $res) use ($deferred) {
-    //             $ids = $err ? [0] : array_values($res);
-    //             $min = min($ids);
-    //             $max = max($ids);
-    //             $deferred->resolve($min === $max ? $min : 0);
-    //         });
-    //         return $deferred->promise();
-    //     }, $values);
-    // }
+    /**
+     * @param Bean|array $values (optional)
+     *
+     * @return Promise
+     */
+    public function insert($values = []): Promise
+    {
+        return \Amp\call(function ($values) {
+            $deferred = new Deferred();
+            $bean = is_array($values) ? $this->convertValuesToBean($values) : $values;
+            $promises = $this->getWritablePool()->insert($this, $bean->getFields());
+            \Amp\Promise\all($promises)->onResolve(function ($err, $res) use ($deferred) {
+                $ids = $err ? [0] : array_values($res);
+                $min = min($ids);
+                $max = max($ids);
+                $deferred->resolve($min === $max ? $min : 0);
+            });
+            return $deferred->promise();
+        }, $values);
+    }
 
-    // /**
-    //  * @param int    $id
-    //  * @param ?array $fields (optional)
-    //  *
-    //  * @return Promise
-    //  */
-    // public function getAsync(int $id, ?array $fields = null): Promise
-    // {
-    //     return \Amp\call(function ($id, $fields) {
-    //         $table = $this->getTable();
-    //         $db = $this->getReadablePool()->random();
-    //         $params = ['fields' => $this->getFields($fields)];
-    //         $all = iterator_to_array($db->get($table, [$id], $params));
-    //         if (!$all) {
-    //             return null;
-    //         }
-    //         $row = current($all);
-            
-    //         return $deferred->promise();
-    //     }, $id, $fields);
-    // }
+    /**
+     * @param array  $ids
+     * @param ?array $fields (optional)
+     *
+     * @return Iterator
+     */
+    public function get(array $ids, ?array $fields = null): Iterator
+    {
+        $emit = function ($emit) use ($ids, $fields) {
+            $table = $this->getTable();
+            $db = $this->getReadablePool()->random();
+            $fields = array_values($this->getFields($fields));
+            $params = ['fields' => $fields, 'returnFields' => true];
+            $iterator = $db->get($table, $ids, $params);
+            while (yield $iterator->advance()) {
+                [$id, $fields] = $iterator->getCurrent();
+                $bean = $this->getBean($id, $fields);
+                yield $emit($bean);
+            }
+        };
+        return new class($emit) extends Producer {
+            use SimpleGeneratorTrait;
+        };
+    }
 
-    // /**
-    //  * @param array ...args
-    //  *
-    //  * @return Promise
-    //  */
-    // public function getAsync(...$args): Promise
-    // {
-    //     return \Amp\call(function ($args) {
-    //         $ids = $args;
-    //         $fields = null;
-    //         $last = array_pop($ids);
-    //         if (is_numeric($last)) {
-    //             $ids[] = $last;
-    //         } else {
-    //             $fields = $last;
-    //         }
-    //         if (!$ids) {
-    //             throw new RuntimeException(self::INVALID_ARGUMENT_FORMAT);
-    //         }
-    //         $definition = $this->getTableDefinition();
-    //         $isCacheable = $definition->isCacheable();
-    //         $table = $definition->getTable();
-    //         $bean = $definition->getBean();
-    //         $result = [];
-    //         $meta = [];
-    //         $dbs = ['ids' => [], 'map' => []];
-    //         foreach ($ids as $id) {
-    //             $v = null;
-    //             if ($isCacheable) {
-    //                 $fields_md5 = $fields_md5 ?? md5(serialize($fields));
-    //                 $ck = $table . '.' . $id . '.' . $fields_md5;
-    //                 $v = $this->cache->get($ck);
-    //                 if ($v !== null) {
-    //                     $result[$id] = $v;
-    //                 } else {
-    //                     $ct = [$table, $table . '.' . $id];
-    //                     $meta[$id] = [$ck, $ct];
-    //                 }
-    //             }
-    //             if ($v === null) {
-    //                 $db = $this->getReadShardsById($id)->filter(function ($name) use ($definition) {
-    //                     return !$definition->isForeignKeyTable($name);
-    //                 })->random();
-    //                 $name = $db->getName();
-    //                 $dbs['map'][$name] = $db;
-    //                 $dbs['ids'][$name][] = $id;
-    //             }
-    //         }
-    //         if (!$dbs['map']) {
-    //             return $bean === null ? $result : $this->toBeans($bean, $result);
-    //         }
-    //         $fields = $fields ?? array_keys($definition->getFields());
-    //         $fields = array_fill_keys((array) $fields, null);
-    //         $fields = $definition->normalizeValues($fields);
-    //         $promises = [];
-    //         foreach ($dbs['map'] as $name => $db) {
-    //             $promises[] = $db->getAsync($definition, $dbs['ids'][$name], $fields);
-    //         }
-    //         $values = yield $promises;
-    //         foreach (($isCacheable ? $values : []) as $value) {
-    //             foreach ($value as $id => $v) {
-    //                 [$ck, $ct] = $meta[$id];
-    //                 $this->cache->set($ck, $v, 3600, $ct);
-    //             }
-    //         }
-    //         $result = array_replace($result, ...$values);
-    //         return $bean === null ? $result : $this->toBeans($bean, $result);
-    //     }, $args);
-    // }
+    /**
+     * @param ?int  $id
+     * @param array $fields
+     *
+     * @return Bean
+     */
+    public function getBean(?int $id, array $fields): Bean
+    {
+        $bean = $this->config['bean'] ?? Bean::class;
+        return new $bean($this, $id, $fields);
+    }
 
-    
-
-    
-
-    
+    /**
+     * @param array $values
+     *
+     * @return Bean
+     */
+    private function convertValuesToBean(array $values): Bean
+    {
+        $fields = $this->getFields();
+        foreach ($values as $key => $value) {
+            $fields[$key]->setValue($value);
+        }
+        return $this->getBean(null, $fields);
+    }
 }
