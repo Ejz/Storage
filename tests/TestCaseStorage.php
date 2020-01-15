@@ -4,6 +4,7 @@ namespace Tests;
 
 use Ejz\Type;
 use Ejz\Storage;
+use Ejz\Index;
 
 use function Amp\Promise\wait;
 use function Container\getStorage;
@@ -25,7 +26,7 @@ class TestCaseStorage extends AbstractTestCase
                     'date' => Type::date(),
                     'datetime' => Type::dateTime(),
                     'json' => Type::json(),
-                    'foreignkey' => Type::foreignKey(),
+                    'bigint' => Type::bigInt(),
                     'intarray' => Type::intArray(),
                     'stringarray' => Type::stringArray(),
                     'binary' => Type::binary(),
@@ -101,9 +102,90 @@ class TestCaseStorage extends AbstractTestCase
         wait($table->create());
         $db = $table->getPool()->random();
         $indexes = wait($db->indexes('table'));
-        var_dump($indexes);
-        // $this->assertTrue($storage instanceof Storage);
-        // $this->assertTrue($fields === ['foo']);
+        $indexes = array_map(function ($fields) {
+            return implode(',', $fields);
+        }, $indexes);
+        $indexes = array_flip($indexes);
+        $this->assertTrue(isset($indexes['f1']));
+        $this->assertTrue(isset($indexes['f1,f2']));
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_create_5()
+    {
+        $storage = getStorage([
+            'Table' => [
+                'table' => 't',
+                'fields' => [
+                    'f1' => Type::string(),
+                ],
+                'indexes' => [
+                    'f1' => [
+                        'fields' => ['f1'],
+                        'type' => Index::INDEX_TYPE_UNIQUE,
+                    ],
+                ],
+            ],
+        ]);
+        $table = $storage->Table();
+        wait($table->create());
+        $db = $table->getPool()->random();
+        $indexes = wait($db->indexes('t'));
+        $indexes = array_map(function ($fields) {
+            return implode(',', $fields);
+        }, $indexes);
+        $indexes = array_flip($indexes);
+        $this->assertTrue(isset($indexes['f1']));
+        wait($db->exec('INSERT INTO t (f1) VALUES (1)'));
+        wait(\Amp\Promise\any([$db->exec('INSERT INTO t (f1) VALUES (1)')]));
+        $c = count(wait($db->all('SELECT * FROM t')));
+        $this->assertTrue($c === 1);
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_create_6()
+    {
+        $storage = getStorage([
+            'parent' => [
+                'pk' => 'parent_id',
+                'fields' => [
+                    'text' => Type::string(true),
+                ],
+            ],
+            'child' => [
+                'pk' => 'id',
+                'fields' => [
+                    'parent_id' => Type::bigInt(),
+                ],
+                'foreignKeys' => [
+                    'parent_id' => 'parent.parent_id',
+                ],
+            ],
+        ]);
+        $parent = $storage->parent();
+        wait($parent->create());
+        $child = $storage->child();
+        wait($child->create());
+        $db = $storage->getPool()->random();
+        wait($db->exec('INSERT INTO "parent" DEFAULT VALUES'));
+        wait($db->exec('INSERT INTO "parent" DEFAULT VALUES'));
+        wait($db->exec('INSERT INTO "child" ("parent_id") VALUES (1), (2), (2)'));
+        //
+        wait(\Amp\Promise\any([$db->exec('INSERT INTO "child" ("parent_id") VALUES (3)')]));
+        $c = count(wait($db->all('SELECT * FROM "child"')));
+        $this->assertTrue($c === 3);
+        //
+        wait(\Amp\Promise\any([$db->exec('UPDATE "child" SET "parent_id" = 3 WHERE "parent_id" = 2')]));
+        $c = count(wait($db->all('SELECT * FROM "child" WHERE "parent_id" = 3')));
+        $this->assertTrue($c === 0);
+        //
+        wait($db->exec('UPDATE "parent" SET "parent_id" = 3 WHERE "parent_id" = 2'));
+        $c = count(wait($db->all('SELECT * FROM "child" WHERE "parent_id" = 3')));
+        $this->assertTrue($c === 2);
     }
 
     /**
@@ -111,20 +193,20 @@ class TestCaseStorage extends AbstractTestCase
      */
     public function test_case_storage_crud_1()
     {
-        $storage = \Container\getStorage([
+        $storage = getStorage([
             'table' => [
                 'fields' => [
                     'field' => Type::string(),
                 ],
             ],
         ]);
-        $this->assertTrue($storage instanceof Storage);
         $table = $storage->table();
-        $table->create();
-        $id = $table->insert();
-        $this->assertTrue($id > 0);
-        var_dump($this->get($id));
+        wait($table->create());
         return;
+        $id = wait($table->insert());
+        $this->assertTrue($id > 0);
+        return;
+        var_dump($this->get($id));
         foreach ($storage->getPool() as $db) {
             $fields = $db->fields('table');
             $this->assertTrue(count($fields) === 2);

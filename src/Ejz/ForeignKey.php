@@ -2,7 +2,7 @@
 
 namespace Ejz;
 
-class Index
+class ForeignKey
 {
     /** @var string */
     private $name;
