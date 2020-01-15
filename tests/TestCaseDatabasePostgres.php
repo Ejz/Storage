@@ -2,6 +2,9 @@
 
 namespace Tests;
 
+use Ejz\Type;
+use Ejz\Field;
+
 use function Amp\Promise\wait;
 
 class TestCaseDatabasePostgres extends AbstractTestCase
@@ -204,107 +207,163 @@ class TestCaseDatabasePostgres extends AbstractTestCase
         $this->assertEquals([28, 30], $intervals[count($intervals) - 1]);
     }
 
-    // /**
-    //  * @test
-    //  */
-    // public function test_case_database_postgres_iterate_1()
-    // {
-    //     $db = $this->pool->random();
-    //     $db->exec('CREATE TABLE t1 (pk1 INT NOT NULL)');
-    //     $db->exec('ALTER TABLE ONLY t1 ADD CONSTRAINT pk_pkey PRIMARY KEY (pk1)');
-    //     $ids = [];
-    //     foreach (range(40, 50) as $id) {
-    //         $db->exec('INSERT INTO t1 (pk1) VALUES (?)', $id);
-    //         $ids[] = $id;
-    //     }
-    //     $_ids = $ids;
-    //     $asc = (bool) mt_rand(0, 1);
-    //     $params = ['asc' => $asc, 'config' => ['iterator_chunk_size' => mt_rand(1, 4)]];
-    //     foreach ($db->iterate('t1', $params) as $key => $value) {
-    //         $k = array_search($key, $_ids);
-    //         $this->assertTrue(count($value) === 1);
-    //         $this->assertTrue($k !== false);
-    //         unset($_ids[$k]);
-    //     }
-    //     $this->assertTrue($_ids === []);
-    //     $this->assertEquals(11, count(iterator_to_array($db->iterate('t1'))));
-    //     $this->assertEquals(11, count(iterator_to_array($db->iterate('t1', $params))));
-    //     $_params = ['max' => 49] + $params;
-    //     $this->assertEquals(10, count(iterator_to_array($db->iterate('t1', $_params))));
-    //     $_params = ['min' => 42] + $params;
-    //     $this->assertEquals(9, count(iterator_to_array($db->iterate('t1', $_params))));
-    //     $_params = ['min' => 42, 'max' => 47] + $params;
-    //     $this->assertEquals(6, count(iterator_to_array($db->iterate('t1', $_params))));
-    //     $_params = ['min' => 42, 'max' => 47, 'limit' => 3] + $params;
-    //     $this->assertEquals(3, count(iterator_to_array($db->iterate('t1', $_params))));
-    //     $_params = ['fields' => []] + $params;
-    //     $_ = iterator_to_array($db->iterate('t1', $_params));
-    //     $this->assertEquals([], current($_));
-    //     $this->assertEquals($asc ? 40 : 50, key($_));
-    //     $_params = ['asc' => !$asc] + $params;
-    //     $_ = iterator_to_array($db->iterate('t1', $_params));
-    //     $this->assertEquals($asc ? 50 : 40, key($_));
-    // }
+    /**
+     * @test
+     */
+    public function test_case_database_postgres_iterate_trait()
+    {
+        $db = $this->pool->random();
+        wait($db->exec('CREATE TABLE t1 (pk1 INT NOT NULL)'));
+        wait($db->exec('ALTER TABLE ONLY t1 ADD CONSTRAINT pk_pkey PRIMARY KEY (pk1)'));
+        $ids = [];
+        foreach ([1, 2, 3, 4] as $id) {
+            wait($db->exec('INSERT INTO t1 (pk1) VALUES (?)', $id));
+            $ids[] = $id;
+        }
+        $result = [];
+        $params = ['config' => ['iterator_chunk_size' => mt_rand(1, 4)]];
+        $iterator = $db->iterate('t1', $params);
+        \Amp\Loop::run(function () use ($iterator, &$result) {
+            yield $iterator->advance();
+            $result[] = $iterator->getCurrent()[0];
+            yield $iterator->advance();
+            $result[] = $iterator->getCurrent()[0];
+        });
+        $this->assertTrue($result === [1, 2]);
+        $result = [];
+        foreach ($iterator->generator() as $id => $row) {
+            $result[] = $id;
+        }
+        $this->assertTrue($result === [3, 4]);
+    }
 
-    // /**
-    //  * @test
-    //  */
-    // public function test_case_database_postgres_iterate_2()
-    // {
-    //     $db = $this->pool->random();
-    //     $db->exec('CREATE TABLE t1 (pk1 INT NOT NULL)');
-    //     $db->exec('ALTER TABLE ONLY t1 ADD CONSTRAINT pk_pkey PRIMARY KEY (pk1)');
-    //     $ids = [];
-    //     foreach (range(10, 100) as $id) {
-    //         $db->exec('INSERT INTO t1 (pk1) VALUES (?)', $id);
-    //         $ids[] = $id;
-    //     }
-    //     $params = ['config' => [
-    //         'iterator_chunk_size' => mt_rand(1, 100),
-    //         'rand_iterator_intervals' => mt_rand(1, 100),
-    //     ]];
-    //     $ids = array_keys(iterator_to_array($db->iterate('t1', ['rand' => true])));
-    //     $this->assertFalse($ids[0] === 10 && $ids[count($ids) - 1] === 100);
-    //     $this->assertFalse($ids[0] === 100 && $ids[count($ids) - 1] === 10);
-    // }
+    /**
+     * @test
+     */
+    public function test_case_database_postgres_iterate_1()
+    {
+        $db = $this->pool->random();
+        wait($db->exec('CREATE TABLE t1 (pk1 INT NOT NULL)'));
+        wait($db->exec('ALTER TABLE ONLY t1 ADD CONSTRAINT pk_pkey PRIMARY KEY (pk1)'));
+        $ids = [];
+        foreach (range(40, 50) as $id) {
+            wait($db->exec('INSERT INTO t1 (pk1) VALUES (?)', $id));
+            $ids[] = $id;
+        }
+        $_ids = $ids;
+        $asc = (bool) mt_rand(0, 1);
+        $params = ['asc' => $asc, 'config' => ['iterator_chunk_size' => mt_rand(1, 4)]];
+        foreach ($db->iterate('t1', $params)->generator() as $key => $value) {
+            $k = array_search($key, $_ids);
+            $this->assertTrue(count($value) === 1);
+            $this->assertTrue($k !== false);
+            unset($_ids[$k]);
+        }
+        $this->assertTrue($_ids === []);
+        $this->assertEquals(11, count(iterator_to_array($db->iterate('t1')->generator())));
+        $this->assertEquals(11, count(iterator_to_array($db->iterate('t1', $params)->generator())));
+        $_params = ['max' => 49] + $params;
+        $this->assertEquals(10, count(iterator_to_array($db->iterate('t1', $_params)->generator())));
+        $_params = ['min' => 42] + $params;
+        $this->assertEquals(9, count(iterator_to_array($db->iterate('t1', $_params)->generator())));
+        $_params = ['min' => 42, 'max' => 47] + $params;
+        $this->assertEquals(6, count(iterator_to_array($db->iterate('t1', $_params)->generator())));
+        $_params = ['min' => 42, 'max' => 47, 'limit' => 3] + $params;
+        $this->assertEquals(3, count(iterator_to_array($db->iterate('t1', $_params)->generator())));
+        $_params = ['fields' => []] + $params;
+        $_ = iterator_to_array($db->iterate('t1', $_params)->generator());
+        $this->assertEquals([], current($_));
+        $this->assertEquals($asc ? 40 : 50, key($_));
+        $_params = ['asc' => !$asc] + $params;
+        $_ = iterator_to_array($db->iterate('t1', $_params)->generator());
+        $this->assertEquals($asc ? 50 : 40, key($_));
+    }
 
-    // /**
-    //  * @test
-    //  */
-    // public function test_case_database_postgres_iterate_3()
-    // {
-    //     $db = $this->pool->random();
-    //     $db->exec('CREATE TABLE t1 (pk1 TEXT NOT NULL)');
-    //     $db->exec('ALTER TABLE ONLY t1 ADD CONSTRAINT pk_pkey PRIMARY KEY (pk1)');
-    //     $ids = [];
-    //     foreach (range('a', 'z') as $id) {
-    //         $db->exec('INSERT INTO t1 (pk1) VALUES (?)', $id);
-    //         $ids[] = $id;
-    //     }
-    //     $params = ['config' => ['iterator_chunk_size' => mt_rand(2, 4)]];
-    //     $ids = array_keys(iterator_to_array($db->iterate('t1', $params)));
-    //     $this->assertTrue($ids[0] === 'a' && $ids[count($ids) - 1] === 'z');
-    // }
+    /**
+     * @test
+     */
+    public function test_case_database_postgres_iterate_2()
+    {
+        $db = $this->pool->random();
+        wait($db->exec('CREATE TABLE t1 (pk1 INT NOT NULL)'));
+        wait($db->exec('ALTER TABLE ONLY t1 ADD CONSTRAINT pk_pkey PRIMARY KEY (pk1)'));
+        $ids = [];
+        foreach (range(10, 100) as $id) {
+            wait($db->exec('INSERT INTO t1 (pk1) VALUES (?)', $id));
+            $ids[] = $id;
+        }
+        $params = ['config' => [
+            'iterator_chunk_size' => mt_rand(1, 100),
+            'rand_iterator_intervals' => mt_rand(1, 100),
+        ]];
+        $ids = array_keys(iterator_to_array($db->iterate('t1', ['rand' => true])->generator()));
+        $this->assertFalse($ids[0] === 10 && $ids[count($ids) - 1] === 100);
+        $this->assertFalse($ids[0] === 100 && $ids[count($ids) - 1] === 10);
+    }
 
-    // /**
-    //  * @test
-    //  */
-    // public function test_case_database_postgres_get()
-    // {
-    //     $db = $this->pool->random();
-    //     $db->exec('CREATE TABLE t1 (pk1 INT NOT NULL)');
-    //     $db->exec('ALTER TABLE ONLY t1 ADD CONSTRAINT pk_pkey PRIMARY KEY (pk1)');
-    //     $ids = [];
-    //     foreach (range(1, 1000) as $id) {
-    //         $db->exec('INSERT INTO t1 (pk1) VALUES (?)', $id);
-    //         $ids[] = $id;
-    //     }
-    //     $this->assertTrue(iterator_to_array($db->get('t1', [1E6])) === []);
-    //     $this->assertTrue(iterator_to_array($db->get('t2', [1E6])) === []);
-    //     $_ = iterator_to_array($db->get('t1', [1, 2], ['fields' => []]));
-    //     $this->assertTrue($_ === [1 => [], 2 => []]);
-    //     // var_dump();
-    //     // $ids = array_keys(iterator_to_array($db->iterate('t1', $params)));
-    //     // $this->assertTrue($ids[0] === 'a' && $ids[count($ids) - 1] === 'z');
-    // }
+    /**
+     * @test
+     */
+    public function test_case_database_postgres_iterate_3()
+    {
+        $db = $this->pool->random();
+        wait($db->exec('CREATE TABLE t1 (pk1 TEXT NOT NULL)'));
+        wait($db->exec('ALTER TABLE ONLY t1 ADD CONSTRAINT pk_pkey PRIMARY KEY (pk1)'));
+        $ids = [];
+        foreach (range('a', 'z') as $id) {
+            wait($db->exec('INSERT INTO t1 (pk1) VALUES (?)', $id));
+            $ids[] = $id;
+        }
+        $params = ['config' => ['iterator_chunk_size' => mt_rand(2, 4)]];
+        $ids = array_keys(iterator_to_array($db->iterate('t1', $params)->generator()));
+        $this->assertTrue($ids[0] === 'a' && $ids[count($ids) - 1] === 'z');
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_database_postgres_get()
+    {
+        $db = $this->pool->random();
+        wait($db->exec('CREATE TABLE t1 (pk1 INT NOT NULL)'));
+        wait($db->exec('ALTER TABLE ONLY t1 ADD CONSTRAINT pk_pkey PRIMARY KEY (pk1)'));
+        foreach (range(1, 1000) as $id) {
+            wait($db->exec('INSERT INTO t1 (pk1) VALUES (?)', $id));
+        }
+        $_ = iterator_to_array($db->get('t1', [1E6])->generator());
+        $this->assertTrue($_ === []);
+        $_ = iterator_to_array($db->get('t2', [1E6])->generator());
+        $this->assertTrue($_ === []);
+        $_ = iterator_to_array($db->get('t1', [1, 2], ['fields' => []])->generator());
+        $this->assertTrue($_ === [1 => [], 2 => []]);
+        $_ = iterator_to_array($db->get('t1', range(1, 1000), ['fields' => []])->generator());
+        $this->assertTrue($_ === array_fill_keys(range(1, 1000), []));
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_database_postgres_get_fields()
+    {
+        $db = $this->pool->random();
+        wait($db->exec('CREATE TABLE t1 (pk1 INT NOT NULL, "text" TEXT NOT NULL)'));
+        wait($db->exec('ALTER TABLE ONLY t1 ADD CONSTRAINT pk_pkey PRIMARY KEY (pk1)'));
+        $string = '"foo"';
+        wait($db->exec('INSERT INTO t1 (pk1, "text") VALUES (?, ?)', 1, $string));
+        //
+        $fields = [new Field('text')];
+        $_ = iterator_to_array($db->get('t1', [1], compact('fields'))->generator());
+        $_ = current($_);
+        $this->assertTrue(isset($_['text']));
+        //
+        $fields = [new Field('text', null, 'text1')];
+        $_ = iterator_to_array($db->get('t1', [1], compact('fields'))->generator());
+        $_ = current($_);
+        $this->assertTrue(isset($_['text1']));
+        //
+        $fields = [new Field('text', Type::json(), 'json')];
+        $_ = iterator_to_array($db->get('t1', [1], compact('fields'))->generator());
+        $_ = current($_);
+        $this->assertEquals($_, ['json' => 'foo']);
+    }
 }

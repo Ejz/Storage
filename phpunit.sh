@@ -52,7 +52,7 @@ if [ "$action" = "begin" -o "$action" = "start" ]; then
     exit
 fi
 
-if [ "$action" = "end" -o "$action" = "finish" ]; then
+if [ "$action" = "end" -o "$action" = "finish" -o "$action" = "stop" ]; then
     cleanup
     exit
 fi

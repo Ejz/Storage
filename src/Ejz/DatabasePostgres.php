@@ -8,7 +8,6 @@ use Amp\Iterator;
 use Amp\Postgres\Connection;
 use Amp\Postgres\ConnectionConfig;
 use Amp\Postgres\PgSqlCommandResult;
-use RuntimeException;
 
 class DatabasePostgres implements DatabaseInterface
 {
@@ -372,8 +371,8 @@ class DatabasePostgres implements DatabaseInterface
             }
             $fields = $fields ?? yield $this->fields($table);
             if ($rand) {
-                $min = $min ?? $this->min($table)[0];
-                $max = $max ?? $this->max($table)[0];
+                $min = $min ?? (yield $this->min($table))[0];
+                $max = $max ?? (yield $this->max($table))[0];
                 if (!isset($min, $max)) {
                     return;
                 }
@@ -388,17 +387,14 @@ class DatabasePostgres implements DatabaseInterface
                 $c = count($intervals);
                 while ($c) {
                     $key = array_rand($intervals);
-                    if (!$intervals[$key] instanceof Generator) {
+                    if (!$intervals[$key] instanceof Iterator) {
                         [$min, $max] = $intervals[$key];
                         $asc = (bool) mt_rand(0, 1);
                         $params = compact('asc', 'min', 'max') + $params;
                         $intervals[$key] = $this->iterate($table, $params);
                     }
-                    if ($intervals[$key]->valid()) {
-                        $k = $intervals[$key]->key();
-                        $v = $intervals[$key]->current();
-                        yield $k => $v;
-                        $intervals[$key]->next();
+                    if (yield $intervals[$key]->advance()) {
+                        yield $emit($intervals[$key]->getCurrent());
                     } else {
                         unset($intervals[$key]);
                         $c--;
@@ -416,23 +412,23 @@ class DatabasePostgres implements DatabaseInterface
                 $collect[$field->getAlias()] = $field;
             }
             $fields = $collect;
-            $fields = array_map(function ($field) use ($q) {
+            $select = array_map(function ($field) use ($q) {
                 return $field->getSelectString($q);
             }, $fields);
             $_pk = 'pk_' . md5($pk);
-            $fields[] = $qpk . ' AS ' . $q . $_pk . $q;
+            $select[] = $qpk . ' AS ' . $q . $_pk . $q;
             $order = $order ? $qpk . ' ' . ($asc ? 'ASC' : 'DESC') : '';
             $order = $order ? 'ORDER BY ' . $order : '';
             $template = sprintf(
                 'SELECT %s FROM %s %%s %s LIMIT %%s',
-                implode(', ', $fields),
+                implode(', ', $select),
                 $q . $table . $q,
                 $order
             );
             [$op1, $op2] = $asc ? ['>', '<='] : ['<', '>='];
             $where = $where instanceof Condition ? $where : new Condition($where);
             while ($limit > 0) {
-                $where->resetPushed();
+                $where->reset();
                 if (($asc && $min !== null) || (!$asc && $max !== null)) {
                     $first = $first ?? true;
                     $where->push($pk, $op1 . ($first ? '=' : ''), $asc ? $min : $max);
@@ -450,6 +446,12 @@ class DatabasePostgres implements DatabaseInterface
                 foreach ($all as $row) {
                     $id = $row[$_pk];
                     unset($row[$_pk]);
+                    foreach ($row as $k => &$v) {
+                        $f = $fields[$k];
+                        $f->importValue($v);
+                        $v = $f->getValue();
+                    }
+                    unset($v);
                     yield $emit([$id, $row]);
                 }
                 $limit -= count($all);
@@ -457,10 +459,57 @@ class DatabasePostgres implements DatabaseInterface
                 $first = false;
             }
         };
-        return new Producer($emit);
-         // {
-            // use DatabaseGeneratorTrait;
-        // };
+        return new class($emit) extends Producer {
+            use GeneratorTrait;
+        };
+    }
+
+    /**
+     * @param string $table
+     * @param array  $ids
+     * @param array  $params (optional)
+     *
+     * @return Iterator
+     */
+    public function get(string $table, array $ids, array $params = []): Iterator
+    {
+        $emit = function ($emit) use ($table, $ids, $params) {
+            $params += [
+                'pk' => null,
+                'fields' => null,
+                'config' => [],
+            ];
+            [
+                'pk' => $pk,
+                'fields' => $fields,
+                'config' => $config,
+            ] = $params;
+            $config += $this->config;
+            [
+                'iterator_chunk_size' => $iterator_chunk_size,
+            ] = $config;
+            $fields = $fields ?? yield $this->fields($table);
+            $pk = $pk ?? yield $this->pk($table);
+            if ($pk === null || count($pk) !== 1) {
+                return;
+            }
+            [$pk] = $pk;
+            foreach (array_chunk($ids, $iterator_chunk_size) as $chunk) {
+                $iterator = $this->iterate($table, [
+                    'where' => new Condition([$pk => $chunk]),
+                    'fields' => $fields,
+                    'limit' => $iterator_chunk_size,
+                    'config' => compact('iterator_chunk_size'),
+                    'order' => false,
+                ]);
+                while (yield $iterator->advance()) {
+                    yield $emit($iterator->getCurrent());
+                }
+            }
+        };
+        return new class($emit) extends Producer {
+            use GeneratorTrait;
+        };
     }
 
     /**
@@ -486,44 +535,7 @@ class DatabasePostgres implements DatabaseInterface
         return $intervals;
     }
 
-    // /**
-    //  * @param string $table
-    //  * @param array  $ids
-    //  * @param array  $params (optional)
-    //  *
-    //  * @return Generator
-    //  */
-    // public function get(string $table, array $ids, array $params = []): Generator
-    // {
-    //     $params += [
-    //         'pk' => null,
-    //         'fields' => null,
-    //         'config' => [],
-    //     ];
-    //     [
-    //         'pk' => $pk,
-    //         'fields' => $fields,
-    //         'config' => $config,
-    //     ] = $params;
-    //     $config += $this->config;
-    //     [
-    //         'iterator_chunk_size' => $iterator_chunk_size,
-    //     ] = $config;
-    //     $pk = $pk ?? $this->pk($table);
-    //     if ($pk === null || count($pk) !== 1) {
-    //         return;
-    //     }
-    //     [$pk] = $pk;
-    //     foreach (array_chunk($ids, $iterator_chunk_size) as $chunk) {
-    //         yield from $this->iterate($table, [
-    //             'where' => new Condition([$pk => $chunk]),
-    //             'fields' => $fields,
-    //             'limit' => $iterator_chunk_size,
-    //             'config' => compact('iterator_chunk_size'),
-    //             'order' => false,
-    //         ]);
-    //     }
-    // }
+    
 
     // /**
     //  * @param Repository $repository

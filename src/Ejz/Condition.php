@@ -47,7 +47,9 @@ class Condition
         return [implode(' AND ', $result), $arguments];
     }
 
-    public function resetPushed()
+    /**
+     */
+    public function reset()
     {
         $this->pushed = [];
     }

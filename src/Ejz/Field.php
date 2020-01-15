@@ -27,7 +27,7 @@ class Field
     public function __construct(string $name, ?AbstractType $type = null, ?string $alias = null)
     {
         $this->name = $name;
-        $this->type = $type ?? Type::default();
+        $this->type = $type ?? Type::default(true);
         $this->alias = $alias ?? $this->name;
         $this->unsetValue();
     }
@@ -39,69 +39,150 @@ class Field
      */
     public function getSelectString(string $quote): string
     {
-        $handler = $this->type->getSelectStringHandler();
-        $middlewares = $this->getSelectStringMiddlewares();
-        $onion = array_reduce($middlewares, function ($string, $current) {
-            // return $current($request, $handler);
-        }, $handler);
-        $f1 = str_replace($onion(), '%s', $quote . $this->name . $quote);
+        $selectString = $this->type->getSelectString();
+        $f1 = str_replace($selectString, '%s', $quote . $this->name . $quote);
         $f2 = $quote . $this->alias . $quote;
         return $f1 . ' AS ' . $f2;
     }
 
     /**
-     * @return array
+     * @param mixed $value
      */
-    private function getSelectStringMiddlewares(): array
+    public function importValue($value)
     {
-        return [];
+        $value = $this->type->import($value);
+        $this->setValue($value);
     }
 
     /**
-     * @param string $quote
-     *
+     * @return bool
+     */
+    public function hasValue(): bool
+    {
+        return $this->hasValue;
+    }
+
+    /**
+     * @return mixed
+     */
+    public function getValue()
+    {
+        return $this->value;
+    }
+
+    /**
      * @return string
      */
-    public function getInsertString(string $quote): string
+    public function getAlias(): string
     {
-        $handler = $this->type->getInsertStringHandler();
-        $middlewares = $this->getInsertStringMiddlewares();
-        $onion = array_reduce($middlewares, function ($string, $current) {
-            // return $current($request, $handler);
-        }, $handler);
-        return $onion();
+        return $this->alias;
     }
 
     /**
-     * @return array
      */
-    private function getInsertStringMiddlewares(): array
+    public function unsetValue()
     {
-        return [];
+        $this->value = null;
+        $this->hasValue = false;
     }
 
     /**
-     * @param string $quote
-     *
+     * @param mixed $value
+     */
+    public function setValue($value)
+    {
+        $value = $this->type->set($value);
+        $this->value = $value;
+        $this->hasValue = true;
+    }
+
+    /**
+     * @return AbstractType
+     */
+    public function getType(): AbstractType
+    {
+        return $this->type;
+    }
+
+    /**
      * @return string
      */
-    public function getUpdateString(string $quote): string
+    public function getName(): string
     {
-        $handler = $this->type->getUpdateStringHandler();
-        $middlewares = $this->getUpdateStringMiddlewares();
-        $onion = array_reduce($middlewares, function ($string, $current) {
-            // return $current($request, $handler);
-        }, $handler);
-        return str_replace($onion(), '%s', $quote . $this->name . $quote);
+        return $this->name;
     }
 
     /**
-     * @return array
+     * @return string
      */
-    private function getUpdateStringMiddlewares(): array
+    public function __toString(): string
     {
-        return [];
+        return $this->getName();
     }
+
+    // $f1 = str_replace('%s', '%s', $quote . $this->name . $quote);
+    // $f2 = $quote . $this->alias . $quote;
+    // return $f1 . ' AS ' . $f2;
+    // return '%s';
+    // $handler = $this->type->getSelectStringHandler();
+    // $middlewares = $this->getSelectStringMiddlewares();
+    // $onion = array_reduce($middlewares, function ($string, $current) {
+        // return $current($request, $handler);
+    // }, $handler);
+
+    // /**
+    //  * @return array
+    //  */
+    // private function getSelectStringMiddlewares(): array
+    // {
+    //     return [];
+    // }
+
+    // /**
+    //  * @param string $quote
+    //  *
+    //  * @return string
+    //  */
+    // public function getInsertString(string $quote): string
+    // {
+    //     $handler = $this->type->getInsertStringHandler();
+    //     $middlewares = $this->getInsertStringMiddlewares();
+    //     $onion = array_reduce($middlewares, function ($string, $current) {
+    //         // return $current($request, $handler);
+    //     }, $handler);
+    //     return $onion();
+    // }
+
+    // /**
+    //  * @return array
+    //  */
+    // private function getInsertStringMiddlewares(): array
+    // {
+    //     return [];
+    // }
+
+    // /**
+    //  * @param string $quote
+    //  *
+    //  * @return string
+    //  */
+    // public function getUpdateString(string $quote): string
+    // {
+    //     $handler = $this->type->getUpdateStringHandler();
+    //     $middlewares = $this->getUpdateStringMiddlewares();
+    //     $onion = array_reduce($middlewares, function ($string, $current) {
+    //         // return $current($request, $handler);
+    //     }, $handler);
+    //     return str_replace($onion(), '%s', $quote . $this->name . $quote);
+    // }
+
+    // /**
+    //  * @return array
+    //  */
+    // private function getUpdateStringMiddlewares(): array
+    // {
+    //     return [];
+    // }
 
 
 
@@ -173,70 +254,9 @@ class Field
     // private function getSelectValueMiddlewares(): array
     // {
     //     return [];
-    // }
+    // }// if ()
+        // $this->value = $this->type === null ? $value : 
+        // $this->hasValue = true;
 
-    /**
-     * @return bool
-     */
-    public function hasValue(): bool
-    {
-        return $this->hasValue;
-    }
-
-    /**
-     * @return mixed
-     */
-    public function getValue()
-    {
-        return $this->value;
-    }
-
-    /**
-     * @return string
-     */
-    public function getAlias(): string
-    {
-        return $this->alias;
-    }
-
-    /**
-     */
-    public function unsetValue()
-    {
-        $this->value = null;
-        $this->hasValue = false;
-    }
-
-    /**
-     * @param mixed $value
-     */
-    public function setValue($value)
-    {
-        $this->value = $this->type->cast($value);
-        $this->hasValue = true;
-    }
-
-    /**
-     * @return AbstractType
-     */
-    public function getType()
-    {
-        return $this->type;
-    }
-
-    /**
-     * @return string
-     */
-    public function getName(): string
-    {
-        return $this->name;
-    }
-
-    /**
-     * @return string
-     */
-    public function __toString(): string
-    {
-        return $this->getName();
-    }
+    
 }

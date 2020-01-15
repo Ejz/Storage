@@ -107,9 +107,9 @@ interface DatabaseInterface
      * @param array  $ids
      * @param array  $params (optional)
      *
-     * @return Producer
+     * @return Iterator
      */
-    // public function get(string $table, array $ids, array $params = []): Producer;
+    public function get(string $table, array $ids, array $params = []): Iterator;
 
     /**
      * @param Repository $repository

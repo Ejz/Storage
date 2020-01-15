@@ -7,9 +7,9 @@ class Type
     /**
      * @return AbstractType
      */
-    public static function default(): AbstractType
+    public static function default(bool $nullable = false): AbstractType
     {
-        return self::string(true);
+        return new Type\TypeDefault($nullable);
     }
 
     /**
