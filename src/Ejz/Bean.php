@@ -3,6 +3,7 @@
 namespace Ejz;
 
 use Amp\Promise;
+use RuntimeException;
 
 class Bean
 {
@@ -17,6 +18,13 @@ class Bean
 
     /** @var array */
     private $_changed;
+
+    /* -- -- -- */
+    private const ERROR_INVALID_FIELD = 'ERROR_INVALID_FIELD: %s';
+    private const ERROR_INSERT_WITH_ID = 'ERROR_INSERT_WITH_ID';
+    private const ERROR_UPDATE_WITHOUT_ID = 'ERROR_UPDATE_WITHOUT_ID';
+    private const ERROR_DELETE_WITHOUT_ID = 'ERROR_DELETE_WITHOUT_ID';
+    /* -- -- -- */
 
     /**
      * @param Repository $repository
@@ -112,7 +120,8 @@ class Bean
     private function checkField(string $name)
     {
         if (!isset($this->_fields[$name])) {
-            throw new RuntimeException(sprintf(self::INVALID_FIELD, $name));
+            $message = sprintf(self::ERROR_INVALID_FIELD, $name);
+            throw new RuntimeException($message);
         }
     }
 
@@ -124,7 +133,8 @@ class Bean
     public function update(bool $force = false): Promise
     {
         if ($this->_id === null) {
-            throw new RuntimeException();
+            $message = self::ERROR_UPDATE_WITHOUT_ID;
+            throw new RuntimeException($message);
         }
         return \Amp\call(function ($force) {
             $changed = array_flip($this->_changed);
@@ -148,11 +158,24 @@ class Bean
     public function delete(): Promise
     {
         if ($this->_id === null) {
-            throw new RuntimeException();
+            $message = self::ERROR_DELETE_WITHOUT_ID;
+            throw new RuntimeException($message);
         }
         return \Amp\call(function () {
             $promise = $this->_repository->delete([$this->_id]);
             return (bool) yield $promise;
         });
+    }
+
+    /**
+     * @return Promise
+     */
+    public function insert(): Promise
+    {
+        if ($this->_id !== null) {
+            $message = self::ERROR_INSERT_WITH_ID;
+            throw new RuntimeException($message);
+        }
+        return $this->_repository->insert($this->getValues());
     }
 }

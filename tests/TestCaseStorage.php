@@ -239,18 +239,93 @@ class TestCaseStorage extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_storage_crud_3()
+    public function test_case_storage_crud_exceptions_1()
     {
-        // $this->expectException(RuntimeException::class);
+        $this->expectException(RuntimeException::class);
         $storage = getStorage([
-            'table' => [],
+            'table' => [
+                'field1' => Type::string(),
+            ],
+        ]);
+        $table = $storage->table();
+        wait($table->create());
+        if (mt_rand(0, 1)) {
+            $bean = $table->getBean(1);
+        } else {
+            $bean = $table->getBean();
+            $bean->setId(1);
+        }
+        $this->assertTrue($bean instanceof Bean);
+        $bean->field1 = 'foo';
+        wait($bean->insert());
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_crud_exceptions_2()
+    {
+        $this->expectException(RuntimeException::class);
+        $storage = getStorage([
+            'table' => [
+                'field1' => Type::string(),
+            ],
         ]);
         $table = $storage->table();
         wait($table->create());
         $bean = $table->getBean();
-        $this->assertTrue($bean instanceof Bean);
-        // $bean->setId(1);
-        // wait($table->insert($bean));
+        $bean->field3 = 'foo';
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_crud_exceptions_3()
+    {
+        $this->expectException(RuntimeException::class);
+        $storage = getStorage([
+            'table' => [
+                'field1' => Type::string(),
+            ],
+        ]);
+        $table = $storage->table();
+        wait($table->create());
+        $bean = $table->getBean();
+        $bean->field1 = 'foo';
+        $bean->update((bool) mt_rand(0, 1));
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_crud_exceptions_4()
+    {
+        $this->expectException(RuntimeException::class);
+        $storage = getStorage([
+            'table' => [
+                'field1' => Type::string(),
+            ],
+        ]);
+        $table = $storage->table();
+        wait($table->create());
+        $bean = $table->getBean();
+        $bean->delete();
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_crud_exceptions_5()
+    {
+        $this->expectException(RuntimeException::class);
+        $storage = getStorage([
+            'table' => [
+                'field1' => Type::string(),
+            ],
+        ]);
+        $table = $storage->table();
+        wait($table->create());
+        wait($table->insert(['foo' => 'bar']));
     }
 
     /**
@@ -313,29 +388,142 @@ class TestCaseStorage extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_storage_blob()
+    public function test_case_storage_crud_insert()
     {
-        // $storage = $this->getStorage([
-        //     'table' => [
-        //         'fields' => [
-        //             'field1' => Type::string(),
-        //         ],
-        //     ],
-        // ]);
-        // $table = $storage->table();
-        // $table->create();
-        // $id1 = $table->insert(['blob' => chr(0)]);
-        // $elem = current($table->get($id1));
-        // $this->assertTrue($elem['blob'] === chr(0));
-        // $id2 = $table->insert(['blob' => str_repeat(chr(1), 1E7)]);
-        // $elem = current($table->get($id2));
-        // $this->assertTrue(strlen($elem['blob']) == 1E7);
-        // $id3 = $table->insert(['blob' => '']);
-        // $elem = current($table->get($id3));
-        // $this->assertTrue($elem['blob'] === '');
-        // $id4 = $table->insert();
-        // $elem = current($table->get($id4));
-        // $this->assertTrue($elem['blob'] === '');
+        $storage = getStorage([
+            'table' => [
+                'fields' => [
+                    'field1' => Type::string(),
+                ],
+            ],
+        ]);
+        $table = $storage->table();
+        wait($table->create());
+        $bean = $table->getBean();
+        $bean->field1 = 'foo';
+        $id = wait($bean->insert());
+        $this->assertTrue($id > 0);
+        [$bean] = iterator_to_array($table->get([$id])->generator());
+        $this->assertTrue($bean->field1 === 'foo');
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_json()
+    {
+        $storage = getStorage([
+            'table' => [
+                'fields' => [
+                    'json' => Type::json(),
+                ],
+            ],
+        ]);
+        $table = $storage->table();
+        wait($table->create());
+        $values = [
+            'string',
+            ['string'],
+            ['foo' => 'bar'],
+        ];
+        foreach ($values as $value) {
+            $id = wait($table->insert(['json' => $value]));
+            $bean = $table->get([$id])->generator()->current();
+            $this->assertTrue(serialize($bean->json) === serialize($value));
+        }
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_binary()
+    {
+        $storage = getStorage([
+            'table' => [
+                'fields' => [
+                    'binary' => Type::binary(),
+                ],
+            ],
+        ]);
+        $table = $storage->table();
+        wait($table->create());
+        $values = [
+            '',
+            chr(0),
+            str_repeat(chr(1), 1E7) . str_repeat(chr(2), 1E7),
+        ];
+        foreach ($values as $value) {
+            $id = wait($table->insert(['binary' => $value]));
+            $bean = $table->get([$id])->generator()->current();
+            $this->assertTrue(serialize($bean->binary) === serialize($value));
+        }
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_string_array_1()
+    {
+        $storage = getStorage([
+            'table' => [
+                'fields' => [
+                    'array' => Type::stringArray(),
+                ],
+            ],
+        ]);
+        $table = $storage->table();
+        wait($table->create());
+        $values = [
+            [['foo']],
+            [['']],
+            [[true], ['1']],
+            [[false], ['']],
+            [[null], ['']],
+            [['foo' => 'bar'], ['bar']],
+            [array_fill(0, 1E4, true), array_fill(0, 1E4, '1')],
+            // [[]],
+        ];
+        foreach ($values as $value) {
+            $value0 = $value[0];
+            $value1 = $value[1] ?? $value0;
+            $id = wait($table->insert(['array' => $value0]));
+            $bean = $table->get([$id])->generator()->current();
+            $this->assertTrue(serialize($bean->array) === serialize($value1));
+        }
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_string_array_2()
+    {
+        $storage = getStorage([
+            'table' => [
+                'fields' => [
+                    'array' => Type::intArray(),
+                ],
+            ],
+        ]);
+        $table = $storage->table();
+        wait($table->create());
+        $values = [
+            [[0]],
+            [[''], [0]],
+            [[true], [1]],
+            [[false], [0]],
+            [[null], [0]],
+            [[1, 2], [1, 2]],
+            [range(1, 1E3)],
+            // [[]],
+        ];
+        foreach ($values as $value) {
+            $value0 = $value[0];
+            $value1 = $value[1] ?? $value0;
+            $value1 = array_map('intval', $value1);
+            $id = wait($table->insert(['array' => $value0]));
+            $bean = $table->get([$id])->generator()->current();
+            $this->assertTrue(serialize($bean->array) === serialize($value1));
+        }
     }
 
     // /**

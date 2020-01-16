@@ -292,7 +292,7 @@ class Repository
         $bean = $this->getBean(null, $values);
         $deferred = new Deferred();
         $promises = $this->getWritablePool()->insert($this, $bean->getFields());
-        \Amp\Promise\all($promises)->onResolve(function ($err, $res) use ($deferred) {
+        Promise\all($promises)->onResolve(function ($err, $res) use ($deferred) {
             $ids = $err ? [0] : array_values($res);
             $min = min($ids);
             $max = max($ids);
@@ -335,7 +335,7 @@ class Repository
     {
         $deferred = new Deferred();
         $promises = $this->getWritablePool()->update($this, $ids, $fields);
-        \Amp\Promise\all($promises)->onResolve(function ($err, $res) use ($deferred) {
+        Promise\all($promises)->onResolve(function ($err, $res) use ($deferred) {
             $deferred->resolve($err ? 0 : array_sum($res));
         });
         return $deferred->promise();
@@ -350,7 +350,7 @@ class Repository
     {
         $deferred = new Deferred();
         $promises = $this->getWritablePool()->delete($this, $ids);
-        \Amp\Promise\all($promises)->onResolve(function ($err, $res) use ($deferred) {
+        Promise\all($promises)->onResolve(function ($err, $res) use ($deferred) {
             $deferred->resolve($err ? 0 : array_sum($res));
         });
         return $deferred->promise();
@@ -364,11 +364,11 @@ class Repository
      */
     public function getBean(?int $id = null, array $values = []): Bean
     {
-        $fields = $this->getFields();
+        $bean = $this->getBeanWithFields($id, $this->getFields());
         foreach ($values as $key => $value) {
-            $fields[$key]->setValue($value);
+            $bean->$key = $value;
         }
-        return $this->getBeanWithFields($id, $fields);
+        return $bean;
     }
 
     /**
