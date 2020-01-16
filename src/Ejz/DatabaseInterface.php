@@ -135,19 +135,18 @@ interface DatabaseInterface
 
     /**
      * @param Repository $repository
-     * @param int        $id
-     * @param array      $values
+     * @param array      $ids
+     * @param array      $fields
      *
      * @return Promise
      */
-    // public function update(Repository $repository, int $id, array $values): Promise;
+    public function update(Repository $repository, array $ids, array $fields): Promise;
 
     /**
      * @param Repository $repository
-     * @param int        $id
-     * @param array      $values
+     * @param array      $ids
      *
      * @return Promise
      */
-    // public function delete(Repository $repository, int $id): Promise;
+    public function delete(Repository $repository, array $ids): Promise;
 }

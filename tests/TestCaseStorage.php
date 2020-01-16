@@ -3,6 +3,7 @@
 namespace Tests;
 
 use Ejz\Type;
+use Ejz\Bean;
 use Ejz\Storage;
 use Ejz\Index;
 use RuntimeException;
@@ -240,46 +241,102 @@ class TestCaseStorage extends AbstractTestCase
      */
     public function test_case_storage_crud_3()
     {
-        $this->expectException(RuntimeException::class);
+        // $this->expectException(RuntimeException::class);
         $storage = getStorage([
             'table' => [],
         ]);
         $table = $storage->table();
         wait($table->create());
         $bean = $table->getBean();
-        $bean->setId(1);
-        wait($table->insert($bean));
+        $this->assertTrue($bean instanceof Bean);
+        // $bean->setId(1);
+        // wait($table->insert($bean));
     }
 
-    // /**
-    //  * @test
-    //  */
-    // public function test_case_storage_get_set()
-    // {
-    //     $storage = $this->getStorage([
-    //         'table' => [
-    //             'fields' => [
-    //                 'blob' => [
-    //                     'type' => TableDefinition::TYPE_BLOB,
-    //                 ],
-    //             ],
-    //         ],
-    //     ]);
-    //     $table = $storage->table();
-    //     $table->create();
-    //     $id1 = $table->insert(['blob' => chr(0)]);
-    //     $elem = current($table->get($id1));
-    //     $this->assertTrue($elem['blob'] === chr(0));
-    //     $id2 = $table->insert(['blob' => str_repeat(chr(1), 1E7)]);
-    //     $elem = current($table->get($id2));
-    //     $this->assertTrue(strlen($elem['blob']) == 1E7);
-    //     $id3 = $table->insert(['blob' => '']);
-    //     $elem = current($table->get($id3));
-    //     $this->assertTrue($elem['blob'] === '');
-    //     $id4 = $table->insert();
-    //     $elem = current($table->get($id4));
-    //     $this->assertTrue($elem['blob'] === '');
-    // }
+    /**
+     * @test
+     */
+    public function test_case_storage_crud_update()
+    {
+        $storage = getStorage([
+            'table' => [
+                'fields' => [
+                    'field1' => Type::string(),
+                    'field2' => Type::int(),
+                ],
+            ],
+        ]);
+        $table = $storage->table();
+        wait($table->create());
+        $id = wait($table->insert());
+        [$bean] = iterator_to_array($table->get([$id])->generator());
+        $this->assertTrue($bean->field1 === '');
+        $this->assertTrue($bean->field2 === 0);
+        $bean->field1 = '1';
+        $bean->field2 = '10';
+        $this->assertTrue($bean->field1 === '1');
+        $this->assertTrue($bean->field2 === 10);
+        $this->assertTrue($bean->getValues()['field1'] === '1');
+        $this->assertTrue($bean->getValues()['field2'] === 10);
+        $this->assertTrue(wait($bean->update()));
+        unset($bean);
+        [$bean] = iterator_to_array($table->get([$id])->generator());
+        $this->assertTrue($bean->field1 === '1');
+        $this->assertTrue($bean->field2 === 10);
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_crud_delete()
+    {
+        $storage = getStorage([
+            'table' => [
+                'fields' => [
+                    'field1' => Type::string(),
+                ],
+            ],
+        ]);
+        $table = $storage->table();
+        wait($table->create());
+        $id = wait($table->insert(['field1' => 'foo']));
+        [$bean] = iterator_to_array($table->get([$id])->generator());
+        $this->assertTrue($bean->field1 === 'foo');
+        $this->assertTrue(wait($bean->delete()));
+        $this->assertFalse(wait($bean->delete()));
+        $_ = iterator_to_array($table->get([$id])->generator());
+        $this->assertTrue($_ === []);
+        $id = wait($table->insert());
+        $this->assertTrue(wait($table->delete([$id])) === $storage->getPool()->size());
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_blob()
+    {
+        // $storage = $this->getStorage([
+        //     'table' => [
+        //         'fields' => [
+        //             'field1' => Type::string(),
+        //         ],
+        //     ],
+        // ]);
+        // $table = $storage->table();
+        // $table->create();
+        // $id1 = $table->insert(['blob' => chr(0)]);
+        // $elem = current($table->get($id1));
+        // $this->assertTrue($elem['blob'] === chr(0));
+        // $id2 = $table->insert(['blob' => str_repeat(chr(1), 1E7)]);
+        // $elem = current($table->get($id2));
+        // $this->assertTrue(strlen($elem['blob']) == 1E7);
+        // $id3 = $table->insert(['blob' => '']);
+        // $elem = current($table->get($id3));
+        // $this->assertTrue($elem['blob'] === '');
+        // $id4 = $table->insert();
+        // $elem = current($table->get($id4));
+        // $this->assertTrue($elem['blob'] === '');
+    }
 
     // /**
     //  * @test

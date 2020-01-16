@@ -56,6 +56,16 @@ class AbstractType
     }
 
     /**
+     * @param mixed $value
+     *
+     * @return mixed
+     */
+    public function serialize($value): string
+    {
+        return serialize($value);
+    }
+
+    /**
      * @return string
      */
     public function getName(): string
@@ -87,65 +97,11 @@ class AbstractType
         return '?';
     }
 
-    // /**
-    //  * @return Closure
-    //  */
-    // public function getSelectStringHandler(): Closure
-    // {
-    //     return function () {
-    //         return '%s';
-    //     };
-    // }
-
-    // /**
-    //  * @return Closure
-    //  */
-    // public function getSelectValueHandler(): Closure
-    // {
-    //     return function ($value) {
-    //         return $value;
-    //     };
-    // }
-
-    // /**
-    //  * @return Closure
-    //  */
-    // public function getInsertStringHandler(): Closure
-    // {
-    //     return function () {
-    //         return '%s';
-    //     };
-    // }
-
-    // /**
-    //  * @return Closure
-    //  */
-    // public function getInsertValueHandler(): Closure
-    // {
-    //     return function ($value) {
-    //         return $value;
-    //     };
-    // }
-
-    // /**
-    //  * @return Closure
-    //  */
-    // public function getUpdateStringHandler(): Closure
-    // {
-    //     return function () {
-    //         return '%s';
-    //     };
-    // }
-
-    // /**
-    //  * @return Closure
-    //  */
-    // public function getUpdateValueHandler(): Closure
-    // {
-    //     return function ($value) {
-    //         return $value;
-    //     };
-    // }
-
-    
+    /**
+     * @return string
+     */
+    public function getUpdateString(): string
+    {
+        return '?';
+    }
 }

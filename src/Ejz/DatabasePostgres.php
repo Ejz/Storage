@@ -453,7 +453,8 @@ class DatabasePostgres implements DatabaseInterface
             }
             $fields = $collect;
             $select = array_map(function ($field) use ($q) {
-                return $field->getSelectString($q);
+                $as = $q . $field->getAlias() . $q;
+                return $field->getSelectString($q) . ' AS ' . $as;
             }, $fields);
             $_pk = 'pk_' . md5($pk);
             $select[] = $qpk . ' AS ' . $q . $_pk . $q;
@@ -478,11 +479,11 @@ class DatabasePostgres implements DatabaseInterface
                 }
                 [$_where, $_args] = $where->stringify($q);
                 $_where = $_where ? 'WHERE ' . $_where : '';
-                $sql = sprintf($template, $_where, min($limit, $iterator_chunk_size));
+                $lim = min($limit, $iterator_chunk_size);
+                $sql = sprintf($template, $_where, $lim);
                 $all = yield $this->all($sql, ...$_args);
-                if (!$all) {
-                    break;
-                }
+                $c = count($all);
+                $limit -= $c;
                 foreach ($all as $row) {
                     $id = $row[$_pk];
                     unset($row[$_pk]);
@@ -494,7 +495,9 @@ class DatabasePostgres implements DatabaseInterface
                     unset($v);
                     yield $emit([$id, $row]);
                 }
-                $limit -= count($all);
+                if (!$c || $c < $lim) {
+                    break;
+                }
                 ${$asc ? 'min' : 'max'} = $id;
                 $first = false;
             }
@@ -539,6 +542,7 @@ class DatabasePostgres implements DatabaseInterface
             foreach (array_chunk($ids, $iterator_chunk_size) as $chunk) {
                 $iterator = $this->iterate($table, [
                     'where' => new Condition([$pk => $chunk]),
+                    'pk' => [$pk],
                     'fields' => $fields,
                     'returnFields' => $returnFields,
                     'limit' => $iterator_chunk_size,
@@ -724,6 +728,82 @@ class DatabasePostgres implements DatabaseInterface
     }
 
     /**
+     * @param Repository $repository
+     * @param array      $ids
+     * @param array      $fields
+     *
+     * @return Promise
+     */
+    public function update(Repository $repository, array $ids, array $fields): Promise
+    {
+        return \Amp\call(function ($repository, $ids, $fields) {
+            if (!$fields || !$ids) {
+                return 0;
+            }
+            [$cmd, $args] = $this->getUpdateCommand($repository, $ids, $fields);
+            return (int) yield $this->exec($cmd, ...$args);
+        }, $repository, $ids, $fields);
+    }
+
+    /**
+     * @param Repository $repository
+     * @param array      $ids
+     * @param array      $fields
+     *
+     * @return array
+     */
+    private function getUpdateCommand(Repository $repository, array $ids, array $fields): array
+    {
+        $q = $this->config['quote'];
+        $table = $repository->getTable();
+        $pk = $repository->getPk();
+        [$args, $update] = [[], []];
+        foreach ($fields as $field) {
+            $f = $q . $field->getName() . $q;
+            $update[] = $f . ' = ' . $field->getUpdateString($q);
+            $args[] = $field->exportValue();
+        }
+        $update = implode(', ', $update);
+        $args = array_merge($args, $ids);
+        $_ = implode(', ', array_fill(0, count($ids), '?'));
+        $command = "UPDATE {$q}{$table}{$q} SET {$update} WHERE {$q}{$pk}{$q} IN ({$_})";
+        return [$command, $args];
+    }
+
+    /**
+     * @param Repository $repository
+     * @param array      $ids
+     *
+     * @return Promise
+     */
+    public function delete(Repository $repository, array $ids): Promise
+    {
+        return \Amp\call(function ($repository, $ids) {
+            if (!$ids) {
+                return 0;
+            }
+            [$cmd, $args] = $this->getDeleteCommand($repository, $ids);
+            return (int) yield $this->exec($cmd, ...$args);
+        }, $repository, $ids);
+    }
+
+    /**
+     * @param Repository $repository
+     * @param array      $ids
+     *
+     * @return array
+     */
+    private function getDeleteCommand(Repository $repository, array $ids): array
+    {
+        $q = $this->config['quote'];
+        $table = $repository->getTable();
+        $pk = $repository->getPk();
+        $_ = implode(', ', array_fill(0, count($ids), '?'));
+        $command = "DELETE FROM {$q}{$table}{$q} WHERE {$q}{$pk}{$q} IN ({$_})";
+        return [$command, $ids];
+    }
+
+    /**
      * @param AbstractType $type
      *
      * @return string
@@ -845,23 +925,7 @@ class DatabasePostgres implements DatabaseInterface
 
     
 
-    // // /**
-    // //  * @param TableDefinition $definition
-    // //  * @param int             $id
-    // //  * @param array           $values
-    // //  *
-    // //  * @return Promise
-    // //  */
-    // // public function updateAsync(TableDefinition $definition, int $id, array $values): Promise
-    // // {
-    // //     return \Amp\call(function ($definition, $id, $values) {
-    // //         if (!$values) {
-    // //             return false;
-    // //         }
-    // //         [$cmd, $args] = $this->updateCommand($definition, $id, $values);
-    // //         return yield $this->execAsync($cmd, ...$args);
-    // //     }, $definition, $id, $values);
-    // // }
+    
 
     // // /**
     // //  * @param TableDefinition $definition
@@ -923,30 +987,7 @@ class DatabasePostgres implements DatabaseInterface
 
     
 
-    // // /**
-    // //  * @param TableDefinition $definition
-    // //  * @param int             $id
-    // //  * @param array           $values
-    // //  *
-    // //  * @return array
-    // //  */
-    // // private function updateCommand(TableDefinition $definition, int $id, array $values): array
-    // // {
-    // //     $q = $this->config['quote'];
-    // //     $table = $definition->getTable();
-    // //     $pk = $definition->getPrimaryKey();
-    // //     $args = [];
-    // //     $update = [];
-    // //     foreach ($values as $value) {
-    // //         $f = $q . $value['field'] . $q;
-    // //         $update[] = $f . ' = ' . str_replace('%s', $f, $value['set_pattern']);
-    // //         $args[] = $value['set'] ? $value['set']($value['value']) : $value['value'];
-    // //     }
-    // //     $update = implode(', ', $update);
-    // //     $args[] = $id;
-    // //     $command = "UPDATE {$q}{$table}{$q} SET {$update} WHERE {$q}{$pk}{$q} = ?";
-    // //     return [$command, $args];
-    // // }
+    
 
     // // /**
     // //  * @param TableDefinition $definition
@@ -971,15 +1012,7 @@ class DatabasePostgres implements DatabaseInterface
     // //  *
     // //  * @return array
     // //  */
-    // // private function deleteCommand(TableDefinition $definition, int $id): array
-    // // {
-    // //     $q = $this->config['quote'];
-    // //     $table = $definition->getTable();
-    // //     $pk = $definition->getPrimaryKey();
-    // //     $args = [$id];
-    // //     $command = "DELETE FROM {$q}{$table}{$q} WHERE {$q}{$pk}{$q} = ?";
-    // //     return [$command, $args];
-    // // }
+    
 
     // // /**
     // //  * @param TableDefinition $definition

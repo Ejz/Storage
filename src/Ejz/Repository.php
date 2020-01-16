@@ -25,7 +25,8 @@ class Repository
     protected $indexes;
 
     /* -- -- -- */
-    private const USE_UPDATE_TO_CHANGE_BEAN_WITH_ID = 'USE_UPDATE_TO_CHANGE_BEAN_WITH_ID';
+    private const USE_UPDATE_EXCEPTION = 'USE_UPDATE_EXCEPTION';
+    private const USE_INSERT_EXCEPTION = 'USE_INSERT_EXCEPTION';
     /* -- -- -- */
 
     /**
@@ -282,27 +283,22 @@ class Repository
     }
 
     /**
-     * @param Bean|array $values (optional)
+     * @param array $values (optional)
      *
      * @return Promise
      */
-    public function insert($values = []): Promise
+    public function insert(array $values = []): Promise
     {
-        return \Amp\call(function ($values) {
-            $deferred = new Deferred();
-            $bean = is_array($values) ? $this->getBean(null, $values, true) : $values;
-            if ($bean->getId() !== null) {
-                throw new RuntimeException(self::USE_UPDATE_TO_CHANGE_BEAN_WITH_ID);
-            }
-            $promises = $this->getWritablePool()->insert($this, $bean->getFields());
-            \Amp\Promise\all($promises)->onResolve(function ($err, $res) use ($deferred) {
-                $ids = $err ? [0] : array_values($res);
-                $min = min($ids);
-                $max = max($ids);
-                $deferred->resolve($min === $max ? $min : 0);
-            });
-            return $deferred->promise();
-        }, $values);
+        $bean = $this->getBean(null, $values);
+        $deferred = new Deferred();
+        $promises = $this->getWritablePool()->insert($this, $bean->getFields());
+        \Amp\Promise\all($promises)->onResolve(function ($err, $res) use ($deferred) {
+            $ids = $err ? [0] : array_values($res);
+            $min = min($ids);
+            $max = max($ids);
+            $deferred->resolve($min === $max ? $min : 0);
+        });
+        return $deferred->promise();
     }
 
     /**
@@ -316,8 +312,8 @@ class Repository
             $table = $this->getTable();
             $db = $this->getReadablePool()->random();
             $fields = array_values($this->getFields());
-            $params = ['fields' => $fields, 'returnFields' => true];
-            $iterator = $db->get($table, $ids, $params);
+            [$returnFields, $pk] = [true, [$this->getPk()]];
+            $iterator = $db->get($table, $ids, compact('fields', 'pk', 'returnFields'));
             while (yield $iterator->advance()) {
                 [$id, $fields] = $iterator->getCurrent();
                 $bean = $this->getBeanWithFields($id, $fields);
@@ -327,6 +323,37 @@ class Repository
         return new class($emit) extends Producer {
             use SimpleGeneratorTrait;
         };
+    }
+
+    /**
+     * @param array $ids
+     * @param array $fields
+     *
+     * @return Promise
+     */
+    public function update(array $ids, array $fields): Promise
+    {
+        $deferred = new Deferred();
+        $promises = $this->getWritablePool()->update($this, $ids, $fields);
+        \Amp\Promise\all($promises)->onResolve(function ($err, $res) use ($deferred) {
+            $deferred->resolve($err ? 0 : array_sum($res));
+        });
+        return $deferred->promise();
+    }
+
+    /**
+     * @param array $ids
+     *
+     * @return Promise
+     */
+    public function delete(array $ids): Promise
+    {
+        $deferred = new Deferred();
+        $promises = $this->getWritablePool()->delete($this, $ids);
+        \Amp\Promise\all($promises)->onResolve(function ($err, $res) use ($deferred) {
+            $deferred->resolve($err ? 0 : array_sum($res));
+        });
+        return $deferred->promise();
     }
 
     /**

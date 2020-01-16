@@ -37,9 +37,7 @@ class Field
     public function getSelectString(string $quote): string
     {
         $selectString = $this->type->getSelectString();
-        $f1 = str_replace($selectString, '%s', $quote . $this->name . $quote);
-        $f2 = $quote . $this->alias . $quote;
-        return $f1 . ' AS ' . $f2;
+        return str_replace('%s', $quote . $this->name . $quote, $selectString);
     }
 
     /**
@@ -48,6 +46,15 @@ class Field
     public function getInsertString(): string
     {
         return $this->type->getInsertString();
+    }
+
+    /**
+     * @return string
+     */
+    public function getUpdateString(string $quote): string
+    {
+        $updateString = $this->type->getUpdateString();
+        return str_replace('%s', $quote . $this->name . $quote, $updateString);
     }
 
     /**
@@ -68,14 +75,6 @@ class Field
     }
 
     /**
-     * @return bool
-     */
-    public function hasValue(): bool
-    {
-        return $this->hasValue;
-    }
-
-    /**
      * @return mixed
      */
     public function getValue()
@@ -93,10 +92,15 @@ class Field
 
     /**
      * @param mixed $value
+     *
+     * @return bool
      */
-    public function setValue($value)
+    public function setValue($value): bool
     {
+        $old = $this->type->serialize($this->value);
         $this->value = $this->type->set($value);
+        $new = $this->type->serialize($this->value);
+        return $old !== $new;
     }
 
     /**
