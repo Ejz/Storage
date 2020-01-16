@@ -462,7 +462,7 @@ class TestCaseStorage extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_storage_string_array_1()
+    public function test_case_storage_string_array()
     {
         $storage = getStorage([
             'table' => [
@@ -495,7 +495,7 @@ class TestCaseStorage extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_storage_string_array_2()
+    public function test_case_storage_int_array()
     {
         $storage = getStorage([
             'table' => [
@@ -526,61 +526,37 @@ class TestCaseStorage extends AbstractTestCase
         }
     }
 
-    // /**
-    //  * @test
-    //  */
-    // public function test_case_storage_text_and_json()
-    // {
-    //     $storage = $this->getStorage([
-    //         'table' => [
-    //             'fields' => [
-    //                 'text' => [
-    //                 ],
-    //                 'json' => [
-    //                     'type' => TableDefinition::TYPE_JSON,
-    //                 ],
-    //             ],
-    //         ],
-    //     ]);
-    //     $table = $storage->table();
-    //     $table->create();
-    //     $id1 = $table->insert(['text' => 'hello', 'json' => ['hi']]);
-    //     $elem = current($table->get($id1));
-    //     $this->assertTrue($elem['text'] === 'hello');
-    //     $this->assertTrue($elem['json'] === ['hi']);
-    // }
-
-    // /**
-    //  * @test
-    //  */
-    // public function test_case_storage_unique()
-    // {
-    //     $storage = $this->getStorage([
-    //         'table' => [
-    //             'fields' => [
-    //                 'u1' => [
-    //                     'unique' => 'u1',
-    //                 ],
-    //                 'u2' => [
-    //                     'unique' => 'u23',
-    //                 ],
-    //                 'u3' => [
-    //                     'unique' => ['u23'],
-    //                 ],
-    //             ],
-    //         ],
-    //     ]);
-    //     $table = $storage->table();
-    //     $table->create();
-    //     $id1 = $table->insert(['u1' => 'foo', 'u2' => mt_rand(), 'u3' => mt_rand()]);
-    //     $this->assertTrue($id1 === 1);
-    //     $id2 = $table->insert(['u1' => 'foo', 'u2' => mt_rand(), 'u3' => mt_rand()]);
-    //     $this->assertTrue($id2 === 0);
-    //     $id3 = $table->insert(['u1' => mt_rand(), 'u2' => mt_rand(), 'u3' => mt_rand()]);
-    //     $this->assertTrue($id3 === 3);
-    //     $elem = current($table->get($id1));
-    //     $this->assertTrue($elem['u1'] === 'foo');
-    // }
+    /**
+     * @test
+     */
+    public function test_case_storage_enum()
+    {
+        $storage = getStorage([
+            'table' => [
+                'fields' => [
+                    'enum' => Type::enum(['foo', 'bar']),
+                ],
+            ],
+        ]);
+        $table = $storage->table();
+        wait($table->create());
+        $id = wait($table->insert());
+        $bean = $table->get([$id])->generator()->current();
+        $this->assertTrue($bean->enum === 'foo');
+        $values = [
+            ['foo'],
+            ['bar'],
+            ['', 'foo'],
+            [[], 'foo'],
+        ];
+        foreach ($values as $value) {
+            $value0 = $value[0];
+            $value1 = $value[1] ?? $value0;
+            $id = wait($table->insert(['enum' => $value0]));
+            $bean = $table->get([$id])->generator()->current();
+            $this->assertTrue(serialize($bean->enum) === serialize($value1));
+        }
+    }
 
     // /**
     //  * @test

@@ -6,7 +6,7 @@ use Ejz\AbstractType;
 
 class TypeDate extends AbstractType
 {
-    const DATE_FORMAT = 'Y-m-d';
+    private const DATE_FORMAT = 'Y-m-d';
 
     /**
      * @param mixed $value

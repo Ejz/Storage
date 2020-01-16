@@ -104,4 +104,14 @@ class AbstractType
     {
         return '?';
     }
+
+    /**
+     * @param self $type
+     *
+     * @return bool
+     */
+    public function is(self $type): bool
+    {
+        return $this->getName() === $type->getName();
+    }
 }

@@ -824,6 +824,7 @@ class DatabasePostgres implements DatabaseInterface
                 (string) Type::intArray() => 'INTEGER[]',
                 (string) Type::stringArray() => 'TEXT[]',
                 (string) Type::binary() => 'BYTEA',
+                (string) Type::enum() => 'TEXT',
             ];
         }
         return $map[(string) $type];
@@ -851,6 +852,9 @@ class DatabasePostgres implements DatabaseInterface
                 (string) Type::stringArray() => "'{}'",
                 (string) Type::binary() => "''::BYTEA",
             ];
+        }
+        if (Type::enum()->is($type)) {
+            return "'" . $type->getDefault() . "'::TEXT";
         }
         return $map[(string) $type];
     }

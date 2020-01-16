@@ -121,4 +121,14 @@ class Type
     {
         return new Type\TypeBinary($nullable);
     }
+
+    /**
+     * @param array $enums
+     *
+     * @return AbstractType
+     */
+    public static function enum(array $enums = []): AbstractType
+    {
+        return new Type\TypeEnum($enums);
+    }
 }
