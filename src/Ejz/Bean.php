@@ -19,7 +19,6 @@ class Bean
     /**
      * @param Repository $repository
      * @param ?int       $id
-     * @param array      $values
      * @param array      $fields
      */
     public function __construct(Repository $repository, ?int $id, array $fields)
@@ -28,7 +27,6 @@ class Bean
         $this->id = $id;
         $this->fields = $fields;
         $this->changed = [];
-        $this->cloneFields();
     }
 
     /**
@@ -40,11 +38,26 @@ class Bean
     }
 
     /**
-     * @return int
+     * @return ?int
      */
     public function getId(): ?int
     {
         return $this->id;
+    }
+
+    /**
+     * @param int $id
+     */
+    public function setId(int $id)
+    {
+        $this->id = $id;
+    }
+
+    /**
+     */
+    public function unsetId()
+    {
+        $this->id = null;
     }
 
     /**
@@ -73,16 +86,5 @@ class Bean
     public function getPk(): string
     {
         return $this->repository->getPk();
-    }
-
-    /**
-     */
-    private function cloneFields()
-    {
-        $fields = [];
-        foreach ($this->fields as $key => $field) {
-            $fields[$key] = clone $field;
-        }
-        $this->fields = $fields;
     }
 }

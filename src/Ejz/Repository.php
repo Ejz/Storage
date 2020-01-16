@@ -5,6 +5,7 @@ namespace Ejz;
 use Amp\Promise;
 use Amp\Deferred;
 use Amp\Iterator;
+use RuntimeException;
 
 class Repository
 {
@@ -22,6 +23,10 @@ class Repository
 
     /** @var array */
     protected $indexes;
+
+    /* -- -- -- */
+    private const USE_UPDATE_TO_CHANGE_BEAN_WITH_ID = 'USE_UPDATE_TO_CHANGE_BEAN_WITH_ID';
+    /* -- -- -- */
 
     /**
      * @param Storage $storage
@@ -207,7 +212,7 @@ class Repository
             if ($field instanceof AbstractType) {
                 $field = ['type' => $field];
             }
-            $collect[$name] = new Field($name, $field['type']);
+            $collect[$name] = $field;
         }
         $this->fields = $collect;
         $collect = [];
@@ -249,16 +254,15 @@ class Repository
     }
 
     /**
-     * @param ?array $filter (optional)
-     *
      * @return array
      */
-    public function getFields(?array $filter = null): array
+    public function getFields(): array
     {
-        if ($filter === null) {
-            return $this->fields;
+        $fields = [];
+        foreach ($this->fields as $name => $field) {
+            $fields[$name] = new Field($name, $field['type']);
         }
-        return array_intersect_key($this->fields, array_flip((array) $filter));
+        return $fields;
     }
 
     /**
@@ -286,7 +290,10 @@ class Repository
     {
         return \Amp\call(function ($values) {
             $deferred = new Deferred();
-            $bean = is_array($values) ? $this->convertValuesToBean($values) : $values;
+            $bean = is_array($values) ? $this->getBean(null, $values, true) : $values;
+            if ($bean->getId() !== null) {
+                throw new RuntimeException(self::USE_UPDATE_TO_CHANGE_BEAN_WITH_ID);
+            }
             $promises = $this->getWritablePool()->insert($this, $bean->getFields());
             \Amp\Promise\all($promises)->onResolve(function ($err, $res) use ($deferred) {
                 $ids = $err ? [0] : array_values($res);
@@ -300,21 +307,20 @@ class Repository
 
     /**
      * @param array  $ids
-     * @param ?array $fields (optional)
      *
      * @return Iterator
      */
-    public function get(array $ids, ?array $fields = null): Iterator
+    public function get(array $ids): Iterator
     {
-        $emit = function ($emit) use ($ids, $fields) {
+        $emit = function ($emit) use ($ids) {
             $table = $this->getTable();
             $db = $this->getReadablePool()->random();
-            $fields = array_values($this->getFields($fields));
+            $fields = array_values($this->getFields());
             $params = ['fields' => $fields, 'returnFields' => true];
             $iterator = $db->get($table, $ids, $params);
             while (yield $iterator->advance()) {
                 [$id, $fields] = $iterator->getCurrent();
-                $bean = $this->getBean($id, $fields);
+                $bean = $this->getBeanWithFields($id, $fields);
                 yield $emit($bean);
             }
         };
@@ -324,28 +330,29 @@ class Repository
     }
 
     /**
-     * @param ?int  $id
-     * @param array $fields
+     * @param ?int  $id     (optional)
+     * @param array $values (optional)
      *
      * @return Bean
      */
-    public function getBean(?int $id, array $fields): Bean
-    {
-        $bean = $this->config['bean'] ?? Bean::class;
-        return new $bean($this, $id, $fields);
-    }
-
-    /**
-     * @param array $values
-     *
-     * @return Bean
-     */
-    private function convertValuesToBean(array $values): Bean
+    public function getBean(?int $id = null, array $values = []): Bean
     {
         $fields = $this->getFields();
         foreach ($values as $key => $value) {
             $fields[$key]->setValue($value);
         }
-        return $this->getBean(null, $fields);
+        return $this->getBeanWithFields($id, $fields);
+    }
+
+    /**
+     * @param ?int  $id
+     * @param array $fields
+     *
+     * @return Bean
+     */
+    private function getBeanWithFields(?int $id, array $fields): Bean
+    {
+        $bean = $this->config['bean'] ?? Bean::class;
+        return new $bean($this, $id, $fields);
     }
 }

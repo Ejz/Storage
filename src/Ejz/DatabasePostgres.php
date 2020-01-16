@@ -489,7 +489,7 @@ class DatabasePostgres implements DatabaseInterface
                     foreach ($row as $k => &$v) {
                         $f = $fields[$k];
                         $f->importValue($v);
-                        $v = $returnFields ? $f : $f->getValue();
+                        $v = $returnFields ? clone $f : $f->getValue();
                     }
                     unset($v);
                     yield $emit([$id, $row]);

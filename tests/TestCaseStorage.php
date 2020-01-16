@@ -5,6 +5,7 @@ namespace Tests;
 use Ejz\Type;
 use Ejz\Storage;
 use Ejz\Index;
+use RuntimeException;
 
 use function Amp\Promise\wait;
 use function Container\getStorage;
@@ -196,33 +197,58 @@ class TestCaseStorage extends AbstractTestCase
         $storage = getStorage([
             'table' => [
                 'fields' => [
-                    'field' => Type::string(),
+                    'field1' => Type::string(),
+                    'field2' => Type::string(true),
+                    'field3' => Type::int(),
                 ],
             ],
         ]);
         $table = $storage->table();
         wait($table->create());
-        return;
         $id = wait($table->insert());
         $this->assertTrue($id > 0);
-        return;
-        var_dump($this->get($id));
-        foreach ($storage->getPool() as $db) {
-            $fields = $db->fields('table');
-            $this->assertTrue(count($fields) === 2);
-            $this->assertTrue(isset($fields['int']));
-            $this->assertTrue($fields['int']['type'] === 'integer');
-            $this->assertTrue($fields['table_id']['type'] === 'bigint');
-            $this->assertTrue($fields['table_id']['is_primary']);
-        }
-        $id1 = $table->insert();
-        $this->assertEquals(1, $id1);
-        $id2 = $table->insert();
-        $this->assertEquals(2, $id2);
-        $id3 = $table->insert(['int' => 0]);
-        $this->assertEquals(3, $id3);
-        $elem = current($table->get($id3));
-        $this->assertTrue($elem['int'] === 0);
+        [$bean] = iterator_to_array($table->get([$id])->generator());
+        $values = $bean->getValues();
+        $this->assertEquals(['field1' => '', 'field2' => null, 'field3' => 0], $values);
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_crud_2()
+    {
+        $storage = getStorage([
+            'table' => [
+                'fields' => [
+                    'field1' => Type::string(),
+                ],
+            ],
+        ]);
+        $table = $storage->table();
+        wait($table->create());
+        $id1 = wait($table->insert(['field1' => 'text1']));
+        $id2 = wait($table->insert(['field1' => 'text2']));
+        [$bean1, $bean2] = iterator_to_array($table->get([$id1, $id2])->generator());
+        $values1 = $bean1->getValues();
+        $values2 = $bean2->getValues();
+        $this->assertTrue($values1 === ['field1' => 'text1']);
+        $this->assertTrue($values2 === ['field1' => 'text2']);
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_crud_3()
+    {
+        $this->expectException(RuntimeException::class);
+        $storage = getStorage([
+            'table' => [],
+        ]);
+        $table = $storage->table();
+        wait($table->create());
+        $bean = $table->getBean();
+        $bean->setId(1);
+        wait($table->insert($bean));
     }
 
     // /**
