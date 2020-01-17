@@ -338,9 +338,7 @@ class Repository
                 yield $emit([$id, $bean]);
             }
         };
-        return new class($emit) extends Producer {
-            use GeneratorTrait;
-        };
+        return new Producer($emit);
     }
 
     /**

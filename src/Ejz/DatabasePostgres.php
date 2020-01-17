@@ -517,9 +517,7 @@ class DatabasePostgres implements DatabaseInterface
                 $first = false;
             }
         };
-        return new class($emit) extends Producer {
-            use GeneratorTrait;
-        };
+        return new Producer($emit);
     }
 
     /**
@@ -569,9 +567,7 @@ class DatabasePostgres implements DatabaseInterface
                 }
             }
         };
-        return new class($emit) extends Producer {
-            use GeneratorTrait;
-        };
+        return new Producer($emit);
     }
 
     /**

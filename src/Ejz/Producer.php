@@ -2,7 +2,9 @@
 
 namespace Ejz;
 
-abstract class Producer implements \Amp\Iterator
+use Generator;
+
+class Producer implements \Amp\Iterator
 {
     use \Amp\CallableMaker;
     use \Amp\Internal\Producer;
@@ -24,6 +26,21 @@ abstract class Producer implements \Amp\Iterator
             }
             $this->complete();
         });
+    }
+
+    /**
+     * @return Generator
+     */
+    public function generator(): Generator
+    {
+        $iterator = function ($producer) {
+            if (yield $producer->advance()) {
+                return $producer->getCurrent();
+            }
+        };
+        while (($yield = \Amp\Promise\wait(\Amp\call($iterator, $this))) !== null) {
+            yield $yield[0] => $yield[1];
+        }
     }
 }
 
