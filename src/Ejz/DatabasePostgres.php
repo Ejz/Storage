@@ -128,13 +128,23 @@ class DatabasePostgres implements DatabaseInterface
      */
     public function tables(): Promise
     {
-        return \Amp\call(function () {
-            $sql = '
-                SELECT table_name FROM information_schema.tables
-                WHERE table_schema = ?
-            ';
-            return yield $this->col($sql, 'public');
-        });
+        $sql = '
+            SELECT table_name FROM information_schema.tables
+            WHERE table_schema = ?
+        ';
+        return $this->col($sql, 'public');
+    }
+
+    /**
+     * @param string $table
+     *
+     * @return Promise
+     */
+    public function tableExists(string $table): Promise
+    {
+        return \Amp\call(function ($table) {
+            return in_array($table, yield $this->tables());
+        }, $table);
     }
 
     /**
@@ -367,18 +377,6 @@ class DatabasePostgres implements DatabaseInterface
     public function __toString(): string
     {
         return $this->getName();
-    }
-
-    /**
-     * @param string $table
-     *
-     * @return Promise
-     */
-    public function tableExists(string $table): Promise
-    {
-        return \Amp\call(function ($table) {
-            return in_array($table, yield $this->tables());
-        }, $table);
     }
 
     /**
@@ -896,7 +894,7 @@ class DatabasePostgres implements DatabaseInterface
         return $map[$type];
     }
 
-    
+
 
     
 
@@ -933,7 +931,7 @@ class DatabasePostgres implements DatabaseInterface
     // //  *
     // //  * @return Promise
     // //  */
-    // // public function createAsync(TableDefinition $definition): Promise
+    // // public function createAsync(TableDefinition $definition): Pr omise
     // // {
     // //     return \Amp\call(function ($definition) {
     // //         yield $this->dropAsync($definition->getTable());
@@ -955,7 +953,7 @@ class DatabasePostgres implements DatabaseInterface
     // //  *
     // //  * @return Promise
     // //  */
-    // // public function getAsync(TableDefinition $definition, array $ids, $fields): Promise
+    // // public function getAsync(TableDefinition $definition, array $ids, $fields): Pro mise
     // // {
     // //     return \Amp\call(function ($definition, $ids, $fields) {
     // //         [$cmd, $args, $pk] = $this->getCommand($definition, $ids, $fields);
@@ -982,7 +980,7 @@ class DatabasePostgres implements DatabaseInterface
     // //  *
     // //  * @return Promise
     // //  */
-    // // public function reidAsync(TableDefinition $definition, int $id1, int $id2): Promise
+    // // public function reidAsync(TableDefinition $definition, int $id1, int $id2): Pro mise
     // // {
     // //     return \Amp\call(function ($definition, $id1, $id2) {
     // //         [$cmd, $args] = $this->reidCommand($definition, $id1, $id2);
@@ -996,7 +994,7 @@ class DatabasePostgres implements DatabaseInterface
     // //  *
     // //  * @return Promise
     // //  */
-    // // public function deleteAsync(TableDefinition $definition, int $id): Promise
+    // // public function deleteAsync(TableDefinition $definition, int $id): Pr omise
     // // {
     // //     return \Amp\call(function ($definition, $id) {
     // //         [$cmd, $args] = $this->deleteCommand($definition, $id);
@@ -1085,4 +1083,194 @@ class DatabasePostgres implements DatabaseInterface
     // //     }
     // //     return ['(' . implode(' AND ', $collect) . ')', $args];
     // // }
+
+    /**
+     * @param array ...$args
+     *
+     * @return mixed
+     */
+    public function execSync(...$args)
+    {
+        return Promise\wait($this->exec(...$args));
+    }
+
+    /**
+     * @param array ...$args
+     *
+     * @return mixed
+     */
+    public function allSync(...$args)
+    {
+        return Promise\wait($this->all(...$args));
+    }
+
+    /**
+     * @param array ...$args
+     *
+     * @return mixed
+     */
+    public function oneSync(...$args)
+    {
+        return Promise\wait($this->one(...$args));
+    }
+
+    /**
+     * @param array ...$args
+     *
+     * @return mixed
+     */
+    public function valSync(...$args)
+    {
+        return Promise\wait($this->val(...$args));
+    }
+
+    /**
+     * @param array ...$args
+     *
+     * @return mixed
+     */
+    public function colSync(...$args)
+    {
+        return Promise\wait($this->col(...$args));
+    }
+
+    /**
+     * @param array ...$args
+     *
+     * @return mixed
+     */
+    public function tablesSync(...$args)
+    {
+        return Promise\wait($this->tables(...$args));
+    }
+
+    /**
+     * @param array ...$args
+     *
+     * @return mixed
+     */
+    public function tableExistsSync(...$args)
+    {
+        return Promise\wait($this->tableExists(...$args));
+    }
+
+    /**
+     * @param array ...$args
+     *
+     * @return mixed
+     */
+    public function fieldsSync(...$args)
+    {
+        return Promise\wait($this->fields(...$args));
+    }
+
+    /**
+     * @param array ...$args
+     *
+     * @return mixed
+     */
+    public function countSync(...$args)
+    {
+        return Promise\wait($this->count(...$args));
+    }
+
+    /**
+     * @param array ...$args
+     *
+     * @return mixed
+     */
+    public function indexesSync(...$args)
+    {
+        return Promise\wait($this->indexes(...$args));
+    }
+
+    /**
+     * @param array ...$args
+     *
+     * @return mixed
+     */
+    public function pkSync(...$args)
+    {
+        return Promise\wait($this->pk(...$args));
+    }
+
+    /**
+     * @param array ...$args
+     *
+     * @return mixed
+     */
+    public function minSync(...$args)
+    {
+        return Promise\wait($this->min(...$args));
+    }
+
+    /**
+     * @param array ...$args
+     *
+     * @return mixed
+     */
+    public function maxSync(...$args)
+    {
+        return Promise\wait($this->max(...$args));
+    }
+
+    /**
+     * @param array ...$args
+     *
+     * @return mixed
+     */
+    public function truncateSync(...$args)
+    {
+        return Promise\wait($this->truncate(...$args));
+    }
+
+    /**
+     * @param array ...$args
+     *
+     * @return mixed
+     */
+    public function dropSync(...$args)
+    {
+        return Promise\wait($this->drop(...$args));
+    }
+
+    /**
+     * @param array ...$args
+     *
+     * @return mixed
+     */
+    public function createSync(...$args)
+    {
+        return Promise\wait($this->create(...$args));
+    }
+
+    /**
+     * @param array ...$args
+     *
+     * @return mixed
+     */
+    public function insertSync(...$args)
+    {
+        return Promise\wait($this->insert(...$args));
+    }
+
+    /**
+     * @param array ...$args
+     *
+     * @return mixed
+     */
+    public function updateSync(...$args)
+    {
+        return Promise\wait($this->update(...$args));
+    }
+
+    /**
+     * @param array ...$args
+     *
+     * @return mixed
+     */
+    public function deleteSync(...$args)
+    {
+        return Promise\wait($this->delete(...$args));
+    }
 }

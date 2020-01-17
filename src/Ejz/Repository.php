@@ -3,6 +3,7 @@
 namespace Ejz;
 
 use Amp\Promise;
+use Amp\Success;
 use Amp\Deferred;
 use Amp\Iterator;
 use RuntimeException;
@@ -23,11 +24,6 @@ class Repository
 
     /** @var array */
     protected $indexes;
-
-    /* -- -- -- */
-    private const USE_UPDATE_EXCEPTION = 'USE_UPDATE_EXCEPTION';
-    private const USE_INSERT_EXCEPTION = 'USE_INSERT_EXCEPTION';
-    /* -- -- -- */
 
     /**
      * @param Storage $storage
@@ -317,19 +313,33 @@ class Repository
     public function get(array $ids): Iterator
     {
         $emit = function ($emit) use ($ids) {
+            if (!$ids) {
+                return;
+            }
             $table = $this->getTable();
-            $db = $this->getReadablePool(null, null)->random();
+            $dbs = [];
+            foreach ($ids as $id) {
+                $db = $this->getReadablePool($id, null)->random();
+                $name = $db->getName();
+                $dbs[$name] = $dbs[$name] ?? ['db' => $db, 'ids' => []];
+                $dbs[$name]['ids'][] = $id;
+            }
             $fields = array_values($this->getFields());
             [$returnFields, $pk] = [true, [$this->getPk()]];
-            $iterator = $db->get($table, $ids, compact('fields', 'pk', 'returnFields'));
+            $params = compact('fields', 'pk', 'returnFields');
+            $iterators = [];
+            foreach ($dbs as ['db' => $db, 'ids' => $ids]) {
+                $iterators[] = $db->get($table, $ids, $params);
+            }
+            $iterator = count($iterators) === 1 ? $iterators[0] : Iterator\merge($iterators);
             while (yield $iterator->advance()) {
                 [$id, $fields] = $iterator->getCurrent();
                 $bean = $this->getBeanWithFields($id, $fields);
-                yield $emit($bean);
+                yield $emit([$id, $bean]);
             }
         };
         return new class($emit) extends Producer {
-            use SimpleGeneratorTrait;
+            use GeneratorTrait;
         };
     }
 
@@ -341,8 +351,22 @@ class Repository
      */
     public function update(array $ids, array $fields): Promise
     {
+        if (!$ids) {
+            return Success(0);
+        }
         $deferred = new Deferred();
-        $promises = $this->getWritablePool(null, null)->update($this, $ids, $fields);
+        $dbs = [];
+        foreach ($ids as $id) {
+            $pool = $this->getWritablePool($id, null);
+            foreach ($pool->names() as $name) {
+                $dbs[$name] = $dbs[$name] ?? ['db' => $pool->db($name), 'ids' => []];
+                $dbs[$name]['ids'][] = $id;
+            }
+        }
+        $promises = [];
+        foreach ($dbs as ['db' => $db, 'ids' => $ids]) {
+            $promises[] = $db->update($this, $ids, $fields);
+        }
         Promise\all($promises)->onResolve(function ($err, $res) use ($deferred) {
             $deferred->resolve($err ? 0 : array_sum($res));
         });
@@ -356,8 +380,22 @@ class Repository
      */
     public function delete(array $ids): Promise
     {
+        if (!$ids) {
+            return Success(0);
+        }
         $deferred = new Deferred();
-        $promises = $this->getWritablePool(null, null)->delete($this, $ids);
+        $dbs = [];
+        foreach ($ids as $id) {
+            $pool = $this->getWritablePool($id, null);
+            foreach ($pool->names() as $name) {
+                $dbs[$name] = $dbs[$name] ?? ['db' => $pool->db($name), 'ids' => []];
+                $dbs[$name]['ids'][] = $id;
+            }
+        }
+        $promises = [];
+        foreach ($dbs as ['db' => $db, 'ids' => $ids]) {
+            $promises[] = $db->delete($this, $ids);
+        }
         Promise\all($promises)->onResolve(function ($err, $res) use ($deferred) {
             $deferred->resolve($err ? 0 : array_sum($res));
         });
@@ -389,5 +427,65 @@ class Repository
     {
         $bean = $this->config['bean'] ?? Bean::class;
         return new $bean($this, $id, $fields);
+    }
+
+    /**
+     * @param array ...$args
+     *
+     * @return mixed
+     */
+    public function createSync(...$args)
+    {
+        return Promise\wait($this->create(...$args));
+    }
+
+    /**
+     * @param array ...$args
+     *
+     * @return mixed
+     */
+    public function dropSync(...$args)
+    {
+        return Promise\wait($this->drop(...$args));
+    }
+
+    /**
+     * @param array ...$args
+     *
+     * @return mixed
+     */
+    public function truncateSync(...$args)
+    {
+        return Promise\wait($this->truncate(...$args));
+    }
+
+    /**
+     * @param array ...$args
+     *
+     * @return mixed
+     */
+    public function insertSync(...$args)
+    {
+        return Promise\wait($this->insert(...$args));
+    }
+
+    /**
+     * @param array ...$args
+     *
+     * @return mixed
+     */
+    public function updateSync(...$args)
+    {
+        return Promise\wait($this->update(...$args));
+    }
+
+    /**
+     * @param array ...$args
+     *
+     * @return mixed
+     */
+    public function deleteSync(...$args)
+    {
+        return Promise\wait($this->delete(...$args));
     }
 }

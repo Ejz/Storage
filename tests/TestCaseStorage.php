@@ -208,7 +208,7 @@ class TestCaseStorage extends AbstractTestCase
         wait($table->create());
         $id = wait($table->insert());
         $this->assertTrue($id > 0);
-        [$bean] = iterator_to_array($table->get([$id])->generator());
+        [$id => $bean] = iterator_to_array($table->get([$id])->generator());
         $values = $bean->getValues();
         $this->assertEquals(['field1' => '', 'field2' => null, 'field3' => 0], $values);
     }
@@ -229,7 +229,7 @@ class TestCaseStorage extends AbstractTestCase
         wait($table->create());
         $id1 = wait($table->insert(['field1' => 'text1']));
         $id2 = wait($table->insert(['field1' => 'text2']));
-        [$bean1, $bean2] = iterator_to_array($table->get([$id1, $id2])->generator());
+        [$id1 => $bean1, $id2 => $bean2] = iterator_to_array($table->get([$id1, $id2])->generator());
         $values1 = $bean1->getValues();
         $values2 = $bean2->getValues();
         $this->assertTrue($values1 === ['field1' => 'text1']);
@@ -344,7 +344,7 @@ class TestCaseStorage extends AbstractTestCase
         $table = $storage->table();
         wait($table->create());
         $id = wait($table->insert());
-        [$bean] = iterator_to_array($table->get([$id])->generator());
+        $bean = $table->get([$id])->generator()->current();
         $this->assertTrue($bean->field1 === '');
         $this->assertTrue($bean->field2 === 0);
         $bean->field1 = '1';
@@ -355,7 +355,7 @@ class TestCaseStorage extends AbstractTestCase
         $this->assertTrue($bean->getValues()['field2'] === 10);
         $this->assertTrue(wait($bean->update()));
         unset($bean);
-        [$bean] = iterator_to_array($table->get([$id])->generator());
+        $bean = $table->get([$id])->generator()->current();
         $this->assertTrue($bean->field1 === '1');
         $this->assertTrue($bean->field2 === 10);
     }
@@ -375,7 +375,7 @@ class TestCaseStorage extends AbstractTestCase
         $table = $storage->table();
         wait($table->create());
         $id = wait($table->insert(['field1' => 'foo']));
-        [$bean] = iterator_to_array($table->get([$id])->generator());
+        $bean = $table->get([$id])->generator()->current();
         $this->assertTrue($bean->field1 === 'foo');
         $this->assertTrue(wait($bean->delete()));
         $this->assertFalse(wait($bean->delete()));
@@ -403,7 +403,7 @@ class TestCaseStorage extends AbstractTestCase
         $bean->field1 = 'foo';
         $id = wait($bean->insert());
         $this->assertTrue($id > 0);
-        [$bean] = iterator_to_array($table->get([$id])->generator());
+        $bean = $table->get([$id])->generator()->current();
         $this->assertTrue($bean->field1 === 'foo');
     }
 
@@ -481,7 +481,7 @@ class TestCaseStorage extends AbstractTestCase
             [[null], ['']],
             [['foo' => 'bar'], ['bar']],
             [array_fill(0, 1E4, true), array_fill(0, 1E4, '1')],
-            // [[]],
+            [[]],
         ];
         foreach ($values as $value) {
             $value0 = $value[0];
@@ -514,7 +514,7 @@ class TestCaseStorage extends AbstractTestCase
             [[null], [0]],
             [[1, 2], [1, 2]],
             [range(1, 1E3)],
-            // [[]],
+            [[]],
         ];
         foreach ($values as $value) {
             $value0 = $value[0];
@@ -655,10 +655,43 @@ class TestCaseStorage extends AbstractTestCase
             $this->assertTrue($min <= $c && $c <= $max);
         }
         $id = $ids[array_rand($ids)];
-        var_dump($id);
-        $field1 = $storageTable->get([$id]);
-        // ->generator()->current()->field1;
-        // var_dump($field1);
+        $field1 = $storageTable->get([$id])->generator()->current()->field1;
+        $this->assertTrue(!empty($field1));
+        $name = $this->call($storageTable, 'getReadablePool', $id, null)->random()->getName();
+        $this->assertTrue(!empty($name));
+        $f = $storage->$name()->get([$id])->generator()->current()->field1;
+        $this->assertTrue($field1 === $f);
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_cluster_4()
+    {
+        $config = [
+            'table' => [
+                'fields' => [
+                    'field1' => Type::string(),
+                ],
+            ] + Storage::getShardsClusterConfig(),
+        ];
+        $storage = getStorage($config);
+        $table = $storage->table();
+        wait($table->create());
+        $ids = [];
+        foreach (range(1, 10) as $_) {
+            $ids[] = wait($table->insert(['field1' => 'foo']));
+        }
+        $id = $ids[array_rand($ids)];
+        $bean = $table->get([$id])->generator()->current();
+        $this->assertTrue($bean->field1 === 'foo');
+        $bean->field1 = 'bar';
+        wait($bean->update());
+        $bean = $table->get([$id])->generator()->current();
+        $this->assertTrue($bean->field1 === 'bar');
+        wait($bean->delete());
+        $bean = $table->get([$id])->generator()->current();
+        $this->assertTrue($bean === null);
     }
 
     // /**

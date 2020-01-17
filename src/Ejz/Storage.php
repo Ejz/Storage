@@ -671,9 +671,9 @@ class Storage
                 if ($v === null) {
                     return $readable ? [] : [$names[array_rand($names)]];
                 }
-                $id = crc32($v);
-                $id %= $c;
-                $key = $keys[$id];
+                $crc = crc32($v);
+                $crc %= $c;
+                $key = $keys[$crc];
                 return [$names[$key]];
             };
         };

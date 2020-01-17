@@ -57,6 +57,13 @@ interface DatabaseInterface
      *
      * @return Promise
      */
+    public function tableExists(string $table): Promise;
+
+    /**
+     * @param string $table
+     *
+     * @return Promise
+     */
     public function fields(string $table): Promise;
 
     /**
