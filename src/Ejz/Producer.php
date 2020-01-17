@@ -62,6 +62,7 @@ class Producer implements Iterator
                 'asc' => $asc,
                 'rand' => $rand,
             ] = $params;
+            $inc = $asc ? 1 : -1;
             $values = [];
             $ids = [];
             $already = [];
@@ -81,21 +82,28 @@ class Producer implements Iterator
                         unset($iterators[$key]);
                     }
                 }
-                if (!$values && !$iterators) {
-                    break;
+                if (!$values) {
+                    if (!$iterators) {
+                        break;
+                    }
+                    continue;
                 }
                 if ($rand) {
-                    $id = array_rand($ids);
-                } else {
-                    $_ids = array_keys($ids);
-                    $id = $asc ? min($_ids) : max($_ids);
+                    foreach ($ids as $id => $k) {
+                        yield $emit($values[$k]);
+                        unset($values[$k]);
+                    }
+                    $ids = [];
+                    continue;
                 }
+                $_ids = array_keys($ids);
+                $id = $asc ? min($_ids) : max($_ids);
                 do {
                     $k = $ids[$id];
                     yield $emit($values[$k]);
                     unset($values[$k]);
                     unset($ids[$id]);
-                    $id++;
+                    $id += $inc;
                 } while (isset($ids[$id]));
             } while (true);
         };

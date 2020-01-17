@@ -352,9 +352,16 @@ class Repository
     {
         $emit = function ($emit) use ($params) {
             $params += [
-                'asc' => true,
-                'rand' => false,
+                'fields' => null,
+                'returnFields' => true,
             ];
+            [
+                'fields' => $fields,
+                'returnFields' => $returnFields,
+            ] = $params;
+            $fields = $fields ?? array_values($this->getFields());
+            $pk = [$this->getPk()];
+            $params = compact('fields', 'pk') + $params;
             $table = $this->getTable();
             $pool = $this->getReadablePool();
             $iterators = [];
@@ -364,8 +371,8 @@ class Repository
             $iterator = count($iterators) === 1 ? $iterators[0] : Producer::merge($iterators, $params);
             while (yield $iterator->advance()) {
                 [$id, $fields] = $iterator->getCurrent();
-                $bean = $this->getBeanWithFields($id, $fields);
-                yield $emit([$id, $bean]);
+                $ret = $returnFields ? $this->getBeanWithFields($id, $fields) : $fields;
+                yield $emit([$id, $ret]);
             }
         };
         return new Producer($emit);
