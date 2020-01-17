@@ -694,6 +694,73 @@ class TestCaseStorage extends AbstractTestCase
         $this->assertTrue($bean === null);
     }
 
+    /**
+     * @test
+     */
+    public function test_case_storage_iterate_1()
+    {
+        $storage = getStorage([
+            'table' => [
+                'fields' => [
+                    'text1' => Type::string(),
+                ],
+            ] + (mt_rand(0, 1) ? Storage::getShardsClusterConfig() : []),
+        ]);
+        $table = $storage->table();
+        $table->createSync();
+        $ids = [];
+        foreach (range(1, 1000) as $_) {
+            if (mt_rand(0, 1)) {
+                $ids[] = $table->insertSync();
+            }
+        }
+        sort($ids);
+        $_ids = [];
+        $iterator_chunk_size = mt_rand(1, 10);
+        $params = ['config' => compact('iterator_chunk_size')];
+        foreach ($table->iterate($params)->generator() as $bean) {
+            $_ids[] = $bean->getId();
+        }
+        $this->assertEquals($ids, $_ids);
+        arsort($ids);
+        $ids = array_values($ids);
+        $_ids = [];
+        $iterator_chunk_size = mt_rand(1, 10);
+        $params = ['config' => compact('iterator_chunk_size'), 'asc' => false];
+        foreach ($table->iterate($params)->generator() as $bean) {
+            $_ids[] = $bean->getId();
+        }
+        $this->assertEquals($ids, $_ids);
+        // $table->dropSync();
+
+        // var_dump($_ids);
+        // $table->create();
+        // foreach (range(1, 2E3) as $_) {
+        //     $table->insert($_ = ['text1' => mt_rand() % 5, 'text2' => mt_rand() % 5]);
+        // }
+        // $ids = [];
+        // foreach ($table->iterate(null, 'text3') as $id => $row) {
+        //     $ids[] = $id;
+        // }
+        // $this->assertTrue(isset($row['text3']));
+        // $this->assertTrue(!!preg_match('~^\dhello$~', $row['text3']));
+        // $this->assertTrue(min($ids) === 1);
+        // $this->assertTrue(max($ids) === 2000);
+        // $this->assertTrue(count($ids) === 2000);
+        // $all = array_fill_keys($ids, true);
+        // $ids = [];
+        // foreach ($table->iterate(null, null, ['rand' => true]) as $id => $row) {
+        //     $ids[] = $id;
+        //     unset($all[$id]);
+        // }
+        // $this->assertTrue($ids[0] !== 1 && $ids[1999] !== 2000);
+        // $this->assertTrue(!$all);
+        // $this->assertTrue(min($ids) === 1);
+        // $this->assertTrue(max($ids) === 2000);
+        // $this->assertTrue(count($ids) === 2000);
+        // $this->assertTrue(count(array_unique($ids)) === 2000);
+    }
+
     // /**
     //  * @test
     //  */
@@ -740,57 +807,7 @@ class TestCaseStorage extends AbstractTestCase
     //     $this->assertTrue(!isset($elem['text2']));
     // }
 
-    // /**
-    //  * @test
-    //  */
-    // public function test_case_storage_iterate_1()
-    // {
-    //     $storage = $this->getStorage([
-    //         'table' => [
-    //             'fields' => [
-    //                 'text1' => [
-    //                 ],
-    //                 'text2' => [
-    //                 ],
-    //             ],
-    //             'modifiers' => [
-    //                 '~^text3$~i' => function ($match, $value) {
-    //                     return [
-    //                         'text2',
-    //                         ['get_pattern' => 'CONCAT(%s, \'hello\')'],
-    //                         $value,
-    //                     ];
-    //                 },
-    //             ],
-    //         ],
-    //     ]);
-    //     $table = $storage->table();
-    //     $table->create();
-    //     foreach (range(1, 2E3) as $_) {
-    //         $table->insert($_ = ['text1' => mt_rand() % 5, 'text2' => mt_rand() % 5]);
-    //     }
-    //     $ids = [];
-    //     foreach ($table->iterate(null, 'text3') as $id => $row) {
-    //         $ids[] = $id;
-    //     }
-    //     $this->assertTrue(isset($row['text3']));
-    //     $this->assertTrue(!!preg_match('~^\dhello$~', $row['text3']));
-    //     $this->assertTrue(min($ids) === 1);
-    //     $this->assertTrue(max($ids) === 2000);
-    //     $this->assertTrue(count($ids) === 2000);
-    //     $all = array_fill_keys($ids, true);
-    //     $ids = [];
-    //     foreach ($table->iterate(null, null, ['rand' => true]) as $id => $row) {
-    //         $ids[] = $id;
-    //         unset($all[$id]);
-    //     }
-    //     $this->assertTrue($ids[0] !== 1 && $ids[1999] !== 2000);
-    //     $this->assertTrue(!$all);
-    //     $this->assertTrue(min($ids) === 1);
-    //     $this->assertTrue(max($ids) === 2000);
-    //     $this->assertTrue(count($ids) === 2000);
-    //     $this->assertTrue(count(array_unique($ids)) === 2000);
-    // }
+    
 
     // /**
     //  * @test

@@ -83,8 +83,8 @@ class Repository
     }
 
     /**
-     * @param ?int   $id
-     * @param ?array $values
+     * @param ?int   $id     (optional)
+     * @param ?array $values (optional)
      *
      * @return DatabasePool
      */
@@ -95,23 +95,25 @@ class Repository
         if ($callable === null) {
             return $pool;
         }
-        return $pool->filter($callable($id, $values, $pool->names()));
+        $nargs = func_num_args();
+        return $pool->filter($callable($id, $values, $pool->names(), $nargs));
     }
 
     /**
-     * @param ?int   $id
-     * @param ?array $values
+     * @param ?int   $id     (optional)
+     * @param ?array $values (optional)
      *
      * @return DatabasePool
      */
-    private function getReadablePool(?int $id, ?array $values): DatabasePool
+    private function getReadablePool(?int $id = null, ?array $values = null): DatabasePool
     {
         $pool = $this->getPool();
         $callable = $this->config['getReadablePool'] ?? null;
         if ($callable === null) {
             return $pool;
         }
-        return $pool->filter($callable($id, $values, $pool->names()));
+        $nargs = func_num_args();
+        return $pool->filter($callable($id, $values, $pool->names(), $nargs));
     }
 
     /**
@@ -319,7 +321,7 @@ class Repository
             $table = $this->getTable();
             $dbs = [];
             foreach ($ids as $id) {
-                $db = $this->getReadablePool($id, null)->random();
+                $db = $this->getReadablePool($id)->random();
                 $name = $db->getName();
                 $dbs[$name] = $dbs[$name] ?? ['db' => $db, 'ids' => []];
                 $dbs[$name]['ids'][] = $id;
@@ -340,6 +342,34 @@ class Repository
         };
         return new Producer($emit);
     }
+
+    /**
+     * @param array $params (optional)
+     *
+     * @return Iterator
+     */
+    public function iterate(array $params = []): Iterator
+    {
+        $emit = function ($emit) use ($params) {
+            $params += [
+                'asc' => true,
+                'rand' => false,
+            ];
+            $table = $this->getTable();
+            $pool = $this->getReadablePool();
+            $iterators = [];
+            foreach ($pool->names() as $name) {
+                $iterators[] = $pool->db($name)->iterate($table, $params);
+            }
+            $iterator = count($iterators) === 1 ? $iterators[0] : Producer::merge($iterators, $params);
+            while (yield $iterator->advance()) {
+                [$id, $fields] = $iterator->getCurrent();
+                $bean = $this->getBeanWithFields($id, $fields);
+                yield $emit([$id, $bean]);
+            }
+        };
+        return new Producer($emit);
+}
 
     /**
      * @param array $ids

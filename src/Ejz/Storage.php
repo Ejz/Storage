@@ -655,7 +655,7 @@ class Storage
     public static function getShardsClusterConfig(?string $field = null): array
     {
         $getPoolClosure = function ($readable) use ($field) {
-            return function ($id, $values, $names) use ($readable, $field) {
+            return function ($id, $values, $names, $nargs) use ($readable, $field) {
                 $c = count($names);
                 $keys = array_keys($names);
                 if ($id !== null) {
@@ -668,13 +668,16 @@ class Storage
                 }
                 $values = $values ?? [];
                 $v = $field === null ? null : ($values[$field] ?? null);
-                if ($v === null) {
-                    return $readable ? [] : [$names[array_rand($names)]];
+                if ($v !== null) {
+                    $crc = crc32($v);
+                    $crc %= $c;
+                    $key = $keys[$crc];
+                    return [$names[$key]];
                 }
-                $crc = crc32($v);
-                $crc %= $c;
-                $key = $keys[$crc];
-                return [$names[$key]];
+                if ($readable) {
+                    return $nargs === 0 ? $names : [];
+                }
+                return [$names[array_rand($names)]];
             };
         };
         $getReadablePool = $getPoolClosure(true);

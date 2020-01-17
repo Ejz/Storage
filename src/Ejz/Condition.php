@@ -5,7 +5,7 @@ namespace Ejz;
 class Condition
 {
 
-    public function __construct($conditions)
+    public function __construct(array $conditions)
     {
         $collect = [];
         foreach ($conditions as $field => $value) {
