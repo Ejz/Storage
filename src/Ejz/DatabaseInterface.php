@@ -64,6 +64,13 @@ interface DatabaseInterface
      *
      * @return Promise
      */
+    public function count(string $table): Promise;
+
+    /**
+     * @param string $table
+     *
+     * @return Promise
+     */
     public function indexes(string $table): Promise;
 
     /**

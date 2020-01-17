@@ -46,11 +46,11 @@ class Repository
      *
      * @return bool
      */
-    public function isForeignKeyTable(string $name): bool
+    public function isPrimaryTable(string $name): bool
     {
-        $callable = $this->config['isForeignKeyTable'] ?? null;
+        $callable = $this->config['isPrimaryTable'] ?? null;
         if ($callable === null) {
-            return false;
+            return true;
         }
         $names = $this->getPool()->names();
         return (bool) $callable($name, $names);
@@ -87,29 +87,35 @@ class Repository
     }
 
     /**
+     * @param ?int   $id
+     * @param ?array $values
+     *
      * @return DatabasePool
      */
-    private function getWritablePool(): DatabasePool
+    private function getWritablePool(?int $id, ?array $values): DatabasePool
     {
         $pool = $this->getPool();
         $callable = $this->config['getWritablePool'] ?? null;
         if ($callable === null) {
             return $pool;
         }
-        return $pool->filter($callable);
+        return $pool->filter($callable($id, $values, $pool->names()));
     }
 
     /**
+     * @param ?int   $id
+     * @param ?array $values
+     *
      * @return DatabasePool
      */
-    private function getReadablePool(): DatabasePool
+    private function getReadablePool(?int $id, ?array $values): DatabasePool
     {
         $pool = $this->getPool();
         $callable = $this->config['getReadablePool'] ?? null;
         if ($callable === null) {
             return $pool;
         }
-        return $pool->filter($callable);
+        return $pool->filter($callable($id, $values, $pool->names()));
     }
 
     /**
@@ -291,7 +297,9 @@ class Repository
     {
         $bean = $this->getBean(null, $values);
         $deferred = new Deferred();
-        $promises = $this->getWritablePool()->insert($this, $bean->getFields());
+        $fields = $bean->getFields();
+        $values = $bean->getValues();
+        $promises = $this->getWritablePool(null, $values)->insert($this, $fields);
         Promise\all($promises)->onResolve(function ($err, $res) use ($deferred) {
             $ids = $err ? [0] : array_values($res);
             $min = min($ids);
@@ -310,7 +318,7 @@ class Repository
     {
         $emit = function ($emit) use ($ids) {
             $table = $this->getTable();
-            $db = $this->getReadablePool()->random();
+            $db = $this->getReadablePool(null, null)->random();
             $fields = array_values($this->getFields());
             [$returnFields, $pk] = [true, [$this->getPk()]];
             $iterator = $db->get($table, $ids, compact('fields', 'pk', 'returnFields'));
@@ -334,7 +342,7 @@ class Repository
     public function update(array $ids, array $fields): Promise
     {
         $deferred = new Deferred();
-        $promises = $this->getWritablePool()->update($this, $ids, $fields);
+        $promises = $this->getWritablePool(null, null)->update($this, $ids, $fields);
         Promise\all($promises)->onResolve(function ($err, $res) use ($deferred) {
             $deferred->resolve($err ? 0 : array_sum($res));
         });
@@ -349,7 +357,7 @@ class Repository
     public function delete(array $ids): Promise
     {
         $deferred = new Deferred();
-        $promises = $this->getWritablePool()->delete($this, $ids);
+        $promises = $this->getWritablePool(null, null)->delete($this, $ids);
         Promise\all($promises)->onResolve(function ($err, $res) use ($deferred) {
             $deferred->resolve($err ? 0 : array_sum($res));
         });

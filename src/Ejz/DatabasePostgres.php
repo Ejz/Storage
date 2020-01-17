@@ -161,6 +161,23 @@ class DatabasePostgres implements DatabaseInterface
      *
      * @return Promise
      */
+    public function count(string $table): Promise
+    {
+        return \Amp\call(function ($table) {
+            if (!yield $this->tableExists($table)) {
+                return null;
+            }
+            $q = $this->config['quote'];
+            $sql = "SELECT COUNT(1) FROM {$q}{$table}{$q}";
+            return (int) yield $this->val($sql);
+        }, $table);
+    }
+
+    /**
+     * @param string $table
+     *
+     * @return Promise
+     */
     public function indexes(string $table): Promise
     {
         return \Amp\call(function ($table) {
@@ -615,7 +632,7 @@ class DatabasePostgres implements DatabaseInterface
         };
         $table = $repository->getTable();
         [$fields, $indexes, $foreignKeys] = [[], [], []];
-        if (!$repository->isForeignKeyTable($this->getName())) {
+        if ($repository->isPrimaryTable($this->getName())) {
             $fields = $repository->getFields();
             $indexes = $repository->getIndexes();
             $foreignKeys = $repository->getForeignKeys();
@@ -711,7 +728,7 @@ class DatabasePostgres implements DatabaseInterface
         $q = $this->config['quote'];
         $table = $repository->getTable();
         $pk = $repository->getPk();
-        if ($repository->isForeignKeyTable($this->getName())) {
+        if (!$repository->isPrimaryTable($this->getName())) {
             $fields = [];
         }
         [$columns, $values, $args] = [[], [], []];

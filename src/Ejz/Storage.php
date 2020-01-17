@@ -2,7 +2,7 @@
 
 namespace Ejz;
 
-// use RuntimeException;
+use RuntimeException;
 // use Generator;
 // use Error;
 // use Amp\Loop;
@@ -632,4 +632,65 @@ class Storage
     //     }
     //     return $chains;
     // }
+    //
+
+    /**
+     * @param int $primary
+     *
+     * @return array
+     */
+    public static function getPrimarySecondaryClusterConfig(int $primary): array
+    {
+        $isPrimaryTable = function ($name, $names) use ($primary) {
+            return array_search($name, $names) === $primary;
+        };
+        return compact('isPrimaryTable');
+    }
+
+    /**
+     * @param ?string $field
+     *
+     * @return array
+     */
+    public static function getShardsClusterConfig(?string $field = null): array
+    {
+        $getPoolClosure = function ($readable) use ($field) {
+            return function ($id, $values, $names) use ($readable, $field) {
+                $c = count($names);
+                $keys = array_keys($names);
+                if ($id !== null) {
+                    $id = abs($id);
+                    $id %= $c;
+                    $id -= 1;
+                    $id = $id < 0 ? $id + $c : $id;
+                    $key = $keys[$id];
+                    return [$names[$key]];
+                }
+                $values = $values ?? [];
+                $v = $field === null ? null : ($values[$field] ?? null);
+                if ($v === null) {
+                    return $readable ? [] : [$names[array_rand($names)]];
+                }
+                $id = crc32($v);
+                $id %= $c;
+                $key = $keys[$id];
+                return [$names[$key]];
+            };
+        };
+        $getReadablePool = $getPoolClosure(true);
+        $getWritablePool = $getPoolClosure(false);
+        $getPkStartWith = function ($name, $names) {
+            $_ = (int) array_search($name, $names);
+            return $_ + 1;
+        };
+        $getPkIncrementBy = function ($name, $names) {
+            return count($names);
+        };
+        return compact([
+            'getReadablePool',
+            'getWritablePool',
+            'getPkStartWith',
+            'getPkIncrementBy',
+        ]);
+    }
 }

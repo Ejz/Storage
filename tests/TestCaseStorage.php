@@ -558,6 +558,109 @@ class TestCaseStorage extends AbstractTestCase
         }
     }
 
+    /**
+     * @test
+     */
+    public function test_case_storage_cluster_1()
+    {
+        $storage = getStorage([
+            'table' => [
+                'fields' => [
+                    'field1' => Type::string(),
+                ],
+            ] + Storage::getPrimarySecondaryClusterConfig(0),
+        ]);
+        $table = $storage->table();
+        wait($table->create());
+        wait($table->insert());
+        $pool = $table->getPool();
+        $names = $pool->names();
+        $fields = wait($pool->db($names[0])->fields($table->getTable()));
+        $this->assertTrue(count($fields) === 2);
+        $fields = wait($pool->db($names[1])->fields($table->getTable()));
+        $this->assertTrue(count($fields) === 1);
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_cluster_2()
+    {
+        $storage = getStorage([
+            'table' => [
+                'fields' => [
+                    'field1' => Type::string(),
+                ],
+            ] + Storage::getShardsClusterConfig(),
+        ]);
+        $table = $storage->table();
+        wait($table->create());
+        foreach (range(1, 1000) as $_) {
+            wait($table->insert());
+        }
+        $count = count($names = $table->getPool()->names());
+        $diff = 0.3 * 1000 / $count;
+        $min = 1000 / $count - $diff;
+        $max = 1000 / $count + $diff;
+        foreach ($names as $name) {
+            $db = $table->getPool()->db($name);
+            $c = wait($db->count($table->getTable()));
+            $this->assertTrue($min <= $c && $c <= $max);
+        }
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_cluster_3()
+    {
+        $names = $this->pool->names();
+        $table = 'table' . mt_rand();
+        $config = [
+            $table => [
+                'table' => $table,
+                'fields' => [
+                    'field1' => Type::string(),
+                ],
+            ] + Storage::getShardsClusterConfig('field1'),
+        ];
+        foreach ($names as $name) {
+            $config[$name] = [
+                'table' => $table,
+                'fields' => [
+                    'field1' => Type::string(),
+                ],
+                'getWritablePool' => function () use ($name) {
+                    return [$name];
+                },
+                'getReadablePool' => function () use ($name) {
+                    return [$name];
+                },
+            ];
+        }
+        $storage = getStorage($config);
+        $storageTable = $storage->$table();
+        wait($storageTable->create());
+        $ids = [];
+        foreach (range(1, 1000) as $_) {
+            $ids[] = wait($storageTable->insert(['field1' => mt_rand()]));
+        }
+        $count = count($names = $storageTable->getPool()->names());
+        $diff = 0.3 * 1000 / $count;
+        $min = 1000 / $count - $diff;
+        $max = 1000 / $count + $diff;
+        foreach ($names as $name) {
+            $db = $storageTable->getPool()->db($name);
+            $c = wait($db->count($storageTable->getTable()));
+            $this->assertTrue($min <= $c && $c <= $max);
+        }
+        $id = $ids[array_rand($ids)];
+        var_dump($id);
+        $field1 = $storageTable->get([$id]);
+        // ->generator()->current()->field1;
+        // var_dump($field1);
+    }
+
     // /**
     //  * @test
     //  */
