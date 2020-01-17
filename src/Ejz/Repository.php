@@ -88,7 +88,7 @@ class Repository
      *
      * @return DatabasePool
      */
-    private function getWritablePool(?int $id, ?array $values): DatabasePool
+    private function getWritablePool(?int $id = null, ?array $values = null): DatabasePool
     {
         $pool = $this->getPool();
         $callable = $this->config['getWritablePool'] ?? null;
@@ -354,16 +354,21 @@ class Repository
             $params += [
                 'fields' => null,
                 'returnFields' => true,
+                'poolFilter' => null,
             ];
             [
                 'fields' => $fields,
                 'returnFields' => $returnFields,
+                'poolFilter' => $poolFilter,
             ] = $params;
             $fields = $fields ?? array_values($this->getFields());
             $pk = [$this->getPk()];
             $params = compact('fields', 'pk') + $params;
             $table = $this->getTable();
             $pool = $this->getReadablePool();
+            if ($poolFilter !== null) {
+                $pool = $pool->filter($poolFilter);
+            }
             $iterators = [];
             foreach ($pool->names() as $name) {
                 $iterators[] = $pool->db($name)->iterate($table, $params);
@@ -376,7 +381,28 @@ class Repository
             }
         };
         return new Producer($emit);
-}
+    }
+
+    /**
+     * @param array $conditions
+     *
+     * @return Iterator
+     */
+    public function filter(array $conditions): Iterator
+    {
+        $where = new Condition($conditions);
+        return $this->iterate(compact('where'));
+    }
+
+    /**
+     * @param array $conditions
+     *
+     * @return Promise
+     */
+    public function exists(array $conditions): Promise
+    {
+        return $this->filter($conditions)->advance();
+    }
 
     /**
      * @param array $ids
@@ -438,6 +464,51 @@ class Repository
     }
 
     /**
+     * @param int $id1
+     * @param int $id2
+     *
+     * @return Promise
+     */
+    public function reid(int $id1, int $id2): Promise
+    {
+        $pool1 = $this->getWritablePool($id1);
+        $pool2 = $this->getWritablePool($id2);
+        if (array_diff($pool1->names(), $pool2->names())) {
+            return Success(false);
+        }
+        $deferred = new Deferred();
+        $promises = $pool1->reid($this, $id1, $id2);
+        \Amp\Promise\all($promises)->onResolve(function ($err) use ($deferred) {
+            $deferred->resolve(!$err);
+        });
+        return $deferred->promise();
+    }
+
+    /**
+     */
+    public function sort()
+    {
+        $sort = $this->config['sort'] ?? null;
+        if ($sort === null) {
+            return;
+        }
+        $names = $this->getPool()->names();
+        foreach ($names as $name) {
+            $scores = [];
+            $generator = $this->iterate(['poolFilter' => $name])->generator();
+            foreach ($generator as $id => $bean) {
+                $scores[$id] = $score($bean->getValues());
+            }
+            $chains = $this->getSortChains($scores);
+            // foreach ($chains as $ids) {
+            //     if (!$this->rotateIds(...$ids)) {
+            //         break;
+            //     }
+            // }
+        }
+    }
+
+    /**
      * @param ?int  $id     (optional)
      * @param array $values (optional)
      *
@@ -450,6 +521,36 @@ class Repository
             $bean->$key = $value;
         }
         return $bean;
+    }
+
+    /**
+     * @param array $scores
+     *
+     * @return array
+     */
+    private function getSortChains(array $scores): array
+    {
+        $ids1 = array_keys($scores);
+        arsort($scores);
+        $ids2 = array_keys($scores);
+        $ids = array_combine($ids1, $ids2);
+        $ids = array_filter($ids, function ($v, $k) {
+            return $v != $k;
+        }, ARRAY_FILTER_USE_BOTH);
+        $chains = [];
+        while ($ids) {
+            $chain = [];
+            reset($ids);
+            $ex = key($ids);
+            do {
+                $chain[] = $ex;
+                @ $_ = $ids[$ex];
+                unset($ids[$ex]);
+                @ $ex = $_;
+            } while (isset($ids[$ex]));
+            $chains[] = array_reverse($chain);
+        }
+        return $chains;
     }
 
     /**
@@ -522,5 +623,25 @@ class Repository
     public function deleteSync(...$args)
     {
         return Promise\wait($this->delete(...$args));
+    }
+
+    /**
+     * @param array ...$args
+     *
+     * @return mixed
+     */
+    public function existsSync(...$args)
+    {
+        return Promise\wait($this->exists(...$args));
+    }
+
+    /**
+     * @param array ...$args
+     *
+     * @return mixed
+     */
+    public function reidSync(...$args)
+    {
+        return Promise\wait($this->reid(...$args));
     }
 }

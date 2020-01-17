@@ -815,6 +815,37 @@ class DatabasePostgres implements DatabaseInterface
     }
 
     /**
+     * @param Repository $repository
+     * @param int        $id1
+     * @param int        $id2
+     *
+     * @return Promise
+     */
+    public function reid(Repository $repository, int $id1, int $id2): Promise
+    {
+        return \Amp\call(function ($repository, $id1, $id2) {
+            [$cmd, $args] = $this->getReidCommand($repository, $id1, $id2);
+            return (bool) yield $this->exec($cmd, ...$args);
+        }, $repository, $id1, $id2);
+    }
+
+    /**
+     * @param Repository $repository
+     * @param int        $id1
+     * @param int        $id2
+     *
+     * @return array
+     */
+    private function getReidCommand(Repository $repository, int $id1, int $id2): array
+    {
+        $q = $this->config['quote'];
+        $table = $repository->getTable();
+        $pk = $repository->getPk();
+        $command = "UPDATE {$q}{$table}{$q} SET {$q}{$pk}{$q} = ? WHERE {$q}{$pk}{$q} = ?";
+        return [$command, [$id2, $id1]];
+    }
+
+    /**
      * @param AbstractType $type
      *
      * @return string
@@ -889,196 +920,6 @@ class DatabasePostgres implements DatabaseInterface
         }
         return $map[$type];
     }
-
-
-
-    
-
-    //     // $alters = [];
-    //     // $_fields = [];
-    //     // $map = [
-    //     //     TableDefinition::TYPE_INT => 'INTEGER',
-    //     //     TableDefinition::TYPE_BLOB => 'BYTEA',
-    //     //     TableDefinition::TYPE_TEXT => 'TEXT',
-    //     //     TableDefinition::TYPE_JSON => 'JSONB',
-    //     //     TableDefinition::TYPE_FOREIGN_KEY => 'BIGINT',
-    //     //     TableDefinition::TYPE_BOOL => 'BOOLEAN',
-    //     //     TableDefinition::TYPE_FLOAT => 'REAL',
-    //     //     TableDefinition::TYPE_DATE => 'DATE',
-    //     //     TableDefinition::TYPE_DATETIME => 'TIMESTAMP(0) WITHOUT TIME ZONE',
-    //     //     TableDefinition::TYPE_INT_ARRAY => 'INTEGER[]',
-    //     //     TableDefinition::TYPE_TEXT_ARRAY => 'TEXT[]',
-    //     // ];
-    //     // $defaults = [
-    //     //     TableDefinition::TYPE_INT => '0',
-    //     //     TableDefinition::TYPE_FOREIGN_KEY => '0',
-    //     //     TableDefinition::TYPE_BLOB => '\'\'::BYTEA',
-    //     //     TableDefinition::TYPE_TEXT => ,
-    //     //     TableDefinition::TYPE_JSON => '\'{}\'::JSONB',
-    //     //     TableDefinition::TYPE_BOOL => '\'f\'::BOOLEAN',
-    //     //     TableDefinition::TYPE_FLOAT => '0',
-    //     //     TableDefinition::TYPE_DATE => 'CURRENT_DATE',
-    //     //     TableDefinition::TYPE_DATETIME => 'CURRENT_TIMESTAMP',
-    //     //     TableDefinition::TYPE_INT_ARRAY => '\'{}\'::INTEGER[]',
-    //     //     TableDefinition::TYPE_TEXT_ARRAY => '\'{}\'::TEXT[]',
-    //     // ];
-    // // /**
-    // //  * @param TableDefinition $definition
-    // //  *
-    // //  * @return Promise
-    // //  */
-    // // public function createAsync(TableDefinition $definition): Pr omise
-    // // {
-    // //     return \Amp\call(function ($definition) {
-    // //         yield $this->dropAsync($definition->getTable());
-    // //         $commands = $this->createCommands($definition);
-    // //         foreach ($commands as $command) {
-    // //             yield $this->execAsync($command);
-    // //         }
-    // //     }, $definition);
-    // // }
-
-    
-
-    
-
-    // // /**
-    // //  * @param TableDefinition $definition
-    // //  * @param array           $ids
-    // //  * @param mixed           $fields
-    // //  *
-    // //  * @return Promise
-    // //  */
-    // // public function getAsync(TableDefinition $definition, array $ids, $fields): Pro mise
-    // // {
-    // //     return \Amp\call(function ($definition, $ids, $fields) {
-    // //         [$cmd, $args, $pk] = $this->getCommand($definition, $ids, $fields);
-    // //         $all = yield $this->allAsync($cmd, ...$args);
-    // //         $collect = [];
-    // //         foreach ($all as $row) {
-    // //             $id = $row[$pk];
-    // //             unset($row[$pk]);
-    // //             foreach ($row as $k => &$v) {
-    // //                 $get = $fields[$k]['get'] ?? null;
-    // //                 $v = $get === null ? $v : $get($v);
-    // //             }
-    // //             unset($v);
-    // //             $collect[$id] = $row;
-    // //         }
-    // //         return $collect;
-    // //     }, $definition, $ids, $fields);
-    // // }
-
-    // // /**
-    // //  * @param TableDefinition $definition
-    // //  * @param int             $id1
-    // //  * @param int             $id2
-    // //  *
-    // //  * @return Promise
-    // //  */
-    // // public function reidAsync(TableDefinition $definition, int $id1, int $id2): Pro mise
-    // // {
-    // //     return \Amp\call(function ($definition, $id1, $id2) {
-    // //         [$cmd, $args] = $this->reidCommand($definition, $id1, $id2);
-    // //         return yield $this->execAsync($cmd, ...$args);
-    // //     }, $definition, $id1, $id2);
-    // // }
-
-    // // /**
-    // //  * @param TableDefinition $definition
-    // //  * @param int             $id1
-    // //  *
-    // //  * @return Promise
-    // //  */
-    // // public function deleteAsync(TableDefinition $definition, int $id): Pr omise
-    // // {
-    // //     return \Amp\call(function ($definition, $id) {
-    // //         [$cmd, $args] = $this->deleteCommand($definition, $id);
-    // //         return yield $this->execAsync($cmd, ...$args);
-    // //     }, $definition, $id);
-    // // }
-
-    
-
-    
-
-    
-
-    // // /**
-    // //  * @param TableDefinition $definition
-    // //  * @param int             $id1
-    // //  * @param int             $id2
-    // //  *
-    // //  * @return array
-    // //  */
-    // // private function reidCommand(TableDefinition $definition, int $id1, int $id2): array
-    // // {
-    // //     $q = $this->config['quote'];
-    // //     $table = $definition->getTable();
-    // //     $pk = $definition->getPrimaryKey();
-    // //     $args = [$id2, $id1];
-    // //     $command = "UPDATE {$q}{$table}{$q} SET {$q}{$pk}{$q} = ? WHERE {$q}{$pk}{$q} = ?";
-    // //     return [$command, $args];
-    // // }
-
-    // // /**
-    // //  * @param TableDefinition $definition
-    // //  * @param int             $id
-    // //  *
-    // //  * @return array
-    // //  */
-    
-
-    // // /**
-    // //  * @param TableDefinition $definition
-    // //  * @param array           $ids
-    // //  * @param mixed           $fields
-    // //  *
-    // //  * @return array
-    // //  */
-    // // private function getCommand(TableDefinition $definition, array $ids, $fields): array
-    // // {
-    // //     $q = $this->config['quote'];
-    // //     $table = $definition->getTable();
-    // //     $pk = $definition->getPrimaryKey();
-    // //     $ids = array_map('intval', $ids);
-    // //     $_ = implode(', ', array_fill(0, count($ids), '?'));
-    // //     $where = "{$q}{$pk}{$q} IN ({$_})";
-    // //     $_pk = '_pk_' . mt_rand();
-    // //     $_fields = ["{$q}{$pk}{$q} AS {$q}{$_pk}{$q}"];
-    // //     foreach ($fields as $alias => $field) {
-    // //         $f = str_replace('%s', $q . $field['field'] . $q, $field['get_pattern']);
-    // //         $_fields[] = $f . ' AS ' . $q . $alias . $q;
-    // //     }
-    // //     $_fields = implode(', ', $_fields);
-    // //     $command = "SELECT {$_fields} FROM {$q}{$table}{$q} WHERE {$where}";
-    // //     return [$command, $ids, $_pk];
-    // // }
-
-    // // /**
-    // //  * @param array $where
-    // //  *
-    // //  * @return array
-    // //  */
-    // // private function flattenWhere(array $where): array
-    // // {
-    // //     if (!$where) {
-    // //         return ['(TRUE)', []];
-    // //     }
-    // //     $q = $this->config['quote'];
-    // //     $collect = [];
-    // //     foreach ($where as $key => $value) {
-    // //         if (is_array($value) && count($value)) {
-    // //             $args = array_merge($args, $value);
-    // //             $_ = implode(', ', array_fill(0, count($value), '?'));
-    // //             $collect[] = "({$q}{$key}{$q} IN ({$_}))";
-    // //         } elseif (!is_array($value)) {
-    // //             $args[] = $value;
-    // //             $collect[] = "({$q}{$key}{$q} = ?)";
-    // //         }
-    // //     }
-    // //     return ['(' . implode(' AND ', $collect) . ')', $args];
-    // // }
 
     /**
      * @param array ...$args

@@ -279,26 +279,7 @@ class Storage
     //     return $beans;
     // }
 
-    // /**
-    //  * @param ?callable $score (optional)
-    //  */
-    // public function sort(?callable $score = null)
-    // {
-    //     $shards = $this->getAllShards()->names();
-    //     $definition = $this->getTableDefinition();
-    //     foreach ($shards as $shard) {
-    //         $scores = [];
-    //         foreach ($this->iterate(null, null, ['shards' => [$shard]]) as $id => $values) {
-    //             $scores[$id] = $score === null ? $definition->getScore($values) : $score($values);
-    //         }
-    //         $chains = $this->getSwapChains($scores);
-    //         foreach ($chains as $ids) {
-    //             if (!$this->rotateIds(...$ids)) {
-    //                 throw new RuntimeException(self::SORT_HAS_FAILED);
-    //             }
-    //         }
-    //     }
-    // }
+    
 
     // /**
     //  * @param int $id
@@ -603,35 +584,7 @@ class Storage
     //     return new Producer($emit);
     // }
 
-    // /**
-    //  * @param array $scores
-    //  *
-    //  * @return array
-    //  */
-    // private function getSwapChains(array $scores): array
-    // {
-    //     $ids1 = array_keys($scores);
-    //     arsort($scores);
-    //     $ids2 = array_keys($scores);
-    //     $ids = array_combine($ids1, $ids2);
-    //     $ids = array_filter($ids, function ($v, $k) {
-    //         return $v != $k;
-    //     }, ARRAY_FILTER_USE_BOTH);
-    //     $chains = [];
-    //     while ($ids) {
-    //         $chain = [];
-    //         reset($ids);
-    //         $ex = key($ids);
-    //         do {
-    //             $chain[] = $ex;
-    //             @ $_ = $ids[$ex];
-    //             unset($ids[$ex]);
-    //             @ $ex = $_;
-    //         } while (isset($ids[$ex]));
-    //         $chains[] = array_reverse($chain);
-    //     }
-    //     return $chains;
-    // }
+    
     //
 
     /**

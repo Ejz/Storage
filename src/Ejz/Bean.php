@@ -24,6 +24,7 @@ class Bean
     private const ERROR_INSERT_WITH_ID = 'ERROR_INSERT_WITH_ID';
     private const ERROR_UPDATE_WITHOUT_ID = 'ERROR_UPDATE_WITHOUT_ID';
     private const ERROR_DELETE_WITHOUT_ID = 'ERROR_DELETE_WITHOUT_ID';
+    private const ERROR_REID_WITHOUT_ID = 'ERROR_REID_WITHOUT_ID';
     /* -- -- -- */
 
     /**
@@ -177,5 +178,23 @@ class Bean
             throw new RuntimeException($message);
         }
         return $this->_repository->insert($this->getValues());
+    }
+
+    /**
+     * @param int $id
+     *
+     * @return Promise
+     */
+    public function reid(int $id): Promise
+    {
+        if ($this->_id === null) {
+            $message = self::ERROR_REID_WITHOUT_ID;
+            throw new RuntimeException($message);
+        }
+        return \Amp\call(function ($id) {
+            $result = yield $this->_repository->reid($this->_id, $id);
+            $this->setId($id);
+            return $result;
+        }, $id);
     }
 }

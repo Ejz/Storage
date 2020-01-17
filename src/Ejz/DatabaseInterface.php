@@ -163,4 +163,13 @@ interface DatabaseInterface
      * @return Promise
      */
     public function delete(Repository $repository, array $ids): Promise;
+
+    /**
+     * @param Repository $repository
+     * @param int        $id1
+     * @param int        $id2
+     *
+     * @return Promise
+     */
+    public function reid(Repository $repository, int $id1, int $id2): Promise;
 }

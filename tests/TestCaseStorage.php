@@ -749,6 +749,73 @@ class TestCaseStorage extends AbstractTestCase
         }
     }
 
+    /**
+     * @test
+     */
+    public function test_case_storage_filter()
+    {
+        $storage = getStorage([
+            'table' => [
+                'fields' => [
+                    'text1' => Type::string(),
+                ],
+            ] + Storage::getShardsClusterConfig(),
+        ]);
+        $table = $storage->table();
+        $table->createSync();
+        foreach (range(1, 1000) as $_) {
+            $table->insertSync(['text1' => mt_rand(1, 3)]);
+        }
+        $this->assertTrue(
+            count(iterator_to_array($table->filter(['text1' => 1])->generator())) +
+            count(iterator_to_array($table->filter(['text1' => 2])->generator())) +
+            count(iterator_to_array($table->filter(['text1' => 3])->generator())) ===
+            1000
+        );
+        $this->assertTrue($table->existsSync(['text1' => 1]));
+        $this->assertTrue(!$table->existsSync(['text1' => 10]));
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_reid()
+    {
+        $storage = getStorage([
+            'table' => [
+                'fields' => [
+                    'text1' => Type::string(),
+                ],
+            ],
+        ]);
+        $table = $storage->table();
+        $table->createSync();
+        $id = $table->insertSync(['text1' => 'foo']);
+        $this->assertTrue($table->reidSync($id, $id + 1));
+        $null = $table->get([$id])->generator()->current();
+        $this->assertTrue($null === null);
+        $bean = $table->get([$id + 1])->generator()->current();
+        $this->assertTrue($bean->text1 === 'foo');
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_sort_chains()
+    {
+        $storage = getStorage([
+            'table' => [],
+        ]);
+        $table = $storage->table();
+        $result = $this->call($table, 'getSortChains', [1 => 1, 2 => 2]);
+        $this->assertTrue($result[0] === [2, 1]);
+        $result = $this->call($table, 'getSortChains', [1 => 1, 2 => 3, 3 => 2]);
+        $this->assertTrue($result[0] === [3, 2, 1]);
+        $result = $this->call($table, 'getSortChains', [1 => 1, 2 => 3, 3 => 2, 10 => 10, 11 => 11]);
+        $this->assertTrue($result[0] === [11, 1]);
+        $this->assertTrue($result[1] === [3, 10, 2]);
+    }
+
     // /**
     //  * @test
     //  */
