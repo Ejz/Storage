@@ -413,7 +413,7 @@ class Repository
     public function update(array $ids, array $fields): Promise
     {
         if (!$ids) {
-            return Success(0);
+            return new Success(0);
         }
         $deferred = new Deferred();
         $dbs = [];
@@ -442,7 +442,7 @@ class Repository
     public function delete(array $ids): Promise
     {
         if (!$ids) {
-            return Success(0);
+            return new Success(0);
         }
         $deferred = new Deferred();
         $dbs = [];
@@ -473,39 +473,50 @@ class Repository
     {
         $pool1 = $this->getWritablePool($id1);
         $pool2 = $this->getWritablePool($id2);
-        if (array_diff($pool1->names(), $pool2->names())) {
-            return Success(false);
+        $names1 = $pool1->names();
+        $names2 = $pool2->names();
+        if (!$names1 || array_diff($names1, $names2)) {
+            return new Success(false);
         }
         $deferred = new Deferred();
         $promises = $pool1->reid($this, $id1, $id2);
-        \Amp\Promise\all($promises)->onResolve(function ($err) use ($deferred) {
+        Promise\all($promises)->onResolve(function ($err) use ($deferred) {
             $deferred->resolve(!$err);
         });
         return $deferred->promise();
     }
 
     /**
+     * @return bool
      */
-    public function sort()
+    public function sort(): bool
     {
-        $sort = $this->config['sort'] ?? null;
-        if ($sort === null) {
-            return;
+        $getSortScore = $this->config['getSortScore'] ?? null;
+        if ($getSortScore === null) {
+            return false;
         }
         $names = $this->getPool()->names();
+        $ok = 0;
         foreach ($names as $name) {
             $scores = [];
             $generator = $this->iterate(['poolFilter' => $name])->generator();
             foreach ($generator as $id => $bean) {
-                $scores[$id] = $score($bean->getValues());
+                $scores[$id] = $getSortScore($bean->getValues());
             }
-            $chains = $this->getSortChains($scores);
-            // foreach ($chains as $ids) {
-            //     if (!$this->rotateIds(...$ids)) {
-            //         break;
-            //     }
-            // }
+            foreach ($this->getSortChains($scores) as $ids) {
+                $max = max($ids);
+                $ids[] = -$max;
+                array_unshift($ids, -$max);
+                for ($i = count($ids); $i > 1; $i--) {
+                    [$id1, $id2] = [$ids[$i - 2], $ids[$i - 1]];
+                    if (!$this->reidSync($id1, $id2)) {
+                        break 2;
+                    }
+                }
+            }
+            $ok++;
         }
+        return $ok === count($names);
     }
 
     /**

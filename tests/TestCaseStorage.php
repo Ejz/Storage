@@ -816,49 +816,35 @@ class TestCaseStorage extends AbstractTestCase
         $this->assertTrue($result[1] === [3, 10, 2]);
     }
 
-    // /**
-    //  * @test
-    //  */
-    // public function test_case_storage_filter()
-    // {
-    //     $storage = $this->getStorage([
-    //         'table' => [
-    //             'fields' => [
-    //                 'text1' => [
-    //                 ],
-    //                 'text2' => [
-    //                 ],
-    //             ],
-    //         ],
-    //     ]);
-    //     $table = $storage->table();
-    //     $table->create();
-    //     foreach (range(1, 1000) as $_) {
-    //         $table->insert($_ = ['text1' => mt_rand() % 5, 'text2' => mt_rand() % 5]);
-    //     }
-    //     $elems = $table->filter(['text1' => 1]);
-    //     $this->assertTrue(100 < count($elems) && count($elems) < 300);
-    //     $this->assertTrue(
-    //         count($table->filter(['text1' => 0])) +
-    //         count($table->filter(['text1' => 1])) +
-    //         count($table->filter(['text1' => 2])) +
-    //         count($table->filter(['text1' => 3])) +
-    //         count($table->filter(['text1' => 4])) ===
-    //         1000
-    //     );
-    //     [$id, $row] = [key($elems), current($elems)];
-    //     $this->assertTrue($id > 0);
-    //     $this->assertTrue(isset($row['text1']));
-    //     $this->assertTrue(isset($row['text2']));
-    //     $this->assertTrue(!isset($row['table_id']));
-    //     $elem = current($table->get($id, 'text2'));
-    //     $this->assertTrue(!isset($elem['text1']));
-    //     $this->assertTrue(isset($elem['text2']));
-    //     $elem = current($table->get($id));
-    //     $this->assertTrue(isset($elem['text1']));
-    //     $this->assertTrue(isset($elem['text2']));
-    //     $elem = current($table->get($id, []));
-    //     $this->assertTrue(!isset($elem['text1']));
-    //     $this->assertTrue(!isset($elem['text2']));
-    // }
+    /**
+     * @test
+     */
+    public function test_case_storage_table_sort()
+    {
+        $storage = getStorage([
+            'table' => [
+                'fields' => [
+                    'text1' => Type::int(),
+                ],
+                'getSortScore' => function ($values) {
+                    return $values['text1'];
+                },
+            ] + (mt_rand(0, 1) ? Storage::getShardsClusterConfig() : []),
+        ]);
+        $table = $storage->table();
+        $table->dropSync();
+        $table->createSync();
+        $text1s = [];
+        foreach (range(1, 1000) as $_) {
+            $_ = mt_rand(1, 100);
+            $text1s[] = $_;
+            $table->insertSync(['text1' => $_]);
+        }
+        $this->assertTrue($table->sort());
+        $min = min($text1s);
+        $max = max($text1s);
+        $this->assertTrue($min < $max);
+        $this->assertTrue($table->iterate(['asc' => true])->generator()->current()->text1 === $max);
+        $this->assertTrue($table->iterate(['asc' => false])->generator()->current()->text1 === $min);
+    }
 }
