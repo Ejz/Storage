@@ -9,7 +9,9 @@ use Ejz\Index;
 use RuntimeException;
 
 use function Amp\Promise\wait;
+use function Amp\Promise\all;
 use function Container\getStorage;
+use function Container\getBitmap;
 
 class TestCaseStorage extends AbstractTestCase
 {
@@ -832,7 +834,6 @@ class TestCaseStorage extends AbstractTestCase
             ] + (mt_rand(0, 1) ? Storage::getShardsClusterConfig() : []),
         ]);
         $table = $storage->table();
-        $table->dropSync();
         $table->createSync();
         $text1s = [];
         foreach (range(1, 1000) as $_) {
@@ -846,5 +847,188 @@ class TestCaseStorage extends AbstractTestCase
         $this->assertTrue($min < $max);
         $this->assertTrue($table->iterate(['asc' => true])->generator()->current()->text1 === $max);
         $this->assertTrue($table->iterate(['asc' => false])->generator()->current()->text1 === $min);
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_cache_1()
+    {
+        $cacheTtl = 3;
+        $tbl = 'table' . mt_rand();
+        $storage = getStorage([
+            'table' => [
+                'table' => $tbl,
+                'fields' => [
+                    'text1' => Type::string(),
+                ],
+                'cache' => [
+                    'ttl' => $cacheTtl,
+                ],
+            ],
+        ]);
+        $table = $storage->table();
+        $pk = $table->getPk();
+        $table->createSync();
+        $id = $table->insertSync(['text1' => 'foo']);
+        $text1 = $table->get([$id])->generator()->current()->text1;
+        $this->assertTrue($text1 === 'foo');
+        wait(all($table->getPool()->exec("UPDATE {$tbl} SET text1 = ? WHERE {$pk} = ?", 'bar', $id)));
+        $text1 = $table->get([$id])->generator()->current()->text1;
+        $this->assertTrue($text1 === 'foo');
+        sleep($cacheTtl - 1);
+        $text1 = $table->get([$id])->generator()->current()->text1;
+        $this->assertTrue($text1 === 'foo');
+        sleep(2);
+        $text1 = $table->get([$id])->generator()->current()->text1;
+        $this->assertTrue($text1 === 'bar');
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_cache_2()
+    {
+        $storage = getStorage([
+            'table' => [
+                'fields' => [
+                    'text1' => Type::string(),
+                ],
+                'cache' => [],
+            ],
+        ]);
+        $table = $storage->table();
+        $pk = $table->getPk();
+        $table->createSync();
+        $id = $table->insertSync(['text1' => 'foo']);
+        $bean = $table->get([$id])->generator()->current();
+        $bean->text1 = 'bar';
+        $bean->update();
+        $bean = $table->get([$id])->generator()->current();
+        $this->assertTrue($bean->text1 === 'bar');
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_cache_3()
+    {
+        $storage = getStorage([
+            'table' => [
+                'fields' => [
+                    'text1' => Type::string(),
+                ],
+                'cache' => [],
+            ],
+        ]);
+        $table = $storage->table();
+        $pk = $table->getPk();
+        $table->createSync();
+        $id = $table->insertSync(['text1' => 'foo']);
+        $bean = $table->get([$id])->generator()->current();
+        $bean->delete();
+        $bean = $table->get([$id])->generator()->current();
+        $this->assertTrue($bean === null);
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_cache_4()
+    {
+        $cacheTtl = 3;
+        $tbl = 'table' . mt_rand();
+        $storage = getStorage([
+            'table' => [
+                'table' => $tbl,
+                'fields' => [
+                    'text1' => Type::string(),
+                ],
+                'cache' => [
+                    'ttl' => $cacheTtl,
+                    'fieldsToId' => ['text1'],
+                ],
+            ],
+        ]);
+        $table = $storage->table();
+        $pk = $table->getPk();
+        $table->createSync();
+        $id = $table->insertSync(['text1' => 'foo1']);
+        $text1 = $table->get([$id])->generator()->current()->text1;
+        $this->assertTrue($text1 === 'foo1');
+        $text1 = $table->filter(['text1' => 'foo1'])->generator()->current()->text1;
+        $this->assertTrue($text1 === 'foo1');
+        wait(all($table->getPool()->exec("UPDATE {$tbl} SET text1 = ? WHERE {$pk} = ?", 'bar1', $id)));
+        $text1 = $table->filter(['text1' => 'foo1'])->generator()->current()->text1;
+        $this->assertTrue($text1 === 'foo1');
+        sleep($cacheTtl + 1);
+        $this->assertTrue($table->filter(['text1' => 'foo1'])->generator()->current() === null);
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_bitmap_1()
+    {
+        $bitmap = getBitmap();
+        $storage = getStorage([
+            'table' => [
+                'fields' => [],
+                'bitmap' => [
+                    'fields' => [
+                        'boolean' => Type::bitmapBool(),
+                    ],
+                    'handleValues' => function () {
+                        return ['boolean' => mt_rand(0, 1)];
+                    },
+                ],
+            ],
+        ]);
+        $table = $storage->table();
+        $table->createSync();
+        $table->bitmapCreate();
+        $this->assertTrue(in_array($table->getTable(), $bitmap->LIST()));
+        foreach (range(1, 100) as $_) {
+            $this->assertTrue($table->insertSync() > 0);
+        }
+        $table->bitmapPopulate();
+        $this->assertTrue($table->search('*')->getSize() === 100);
+        $_0 = $table->search('@boolean:0')->getSize();
+        $_1 = $table->search('@boolean:1')->getSize();
+        $this->assertTrue($_0 + $_1 === 100);
+        $this->assertTrue($_0 > 10 && $_1 > 10);
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_bitmap_2()
+    {
+        $bitmap = getBitmap();
+        $storage = getStorage([
+            'table' => [
+                'fields' => [
+                    'boolean' => Type::bool(),
+                ],
+                'bitmap' => [
+                    'fields' => [
+                        'boolean' => Type::bitmapBool(),
+                    ],
+                ],
+            ],
+        ]);
+        $table = $storage->table();
+        $table->createSync();
+        $table->bitmapCreate();
+        $this->assertTrue(in_array($table->getTable(), $bitmap->LIST()));
+        foreach (range(1, 100) as $_) {
+            $this->assertTrue($table->insertSync(['boolean' => mt_rand(0, 1)]) > 0);
+        }
+        $table->bitmapPopulate();
+        $this->assertTrue($table->search('*')->getSize() === 100);
+        $_0 = $table->search('@boolean:0')->getSize();
+        $_1 = $table->search('@boolean:1')->getSize();
+        $this->assertTrue($_0 + $_1 === 100);
+        $this->assertTrue($_0 > 10 && $_1 > 10);
     }
 }

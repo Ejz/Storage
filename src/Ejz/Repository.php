@@ -25,6 +25,12 @@ class Repository
     /** @var array */
     protected $indexes;
 
+    /** @var ?array */
+    protected $cache;
+
+    /** @var ?array */
+    protected $bitmap;
+
     /**
      * @param Storage $storage
      * @param string  $name
@@ -35,6 +41,8 @@ class Repository
         $this->name = $name;
         $this->config = $config;
         $this->normalize();
+        $this->normalizeCache();
+        $this->normalizeBitmap();
     }
 
     /**
@@ -162,6 +170,22 @@ class Repository
     }
 
     /**
+     * @return ?array
+     */
+    public function getBitmap(): ?array
+    {
+        return $this->bitmap;
+    }
+
+    /**
+     * @return ?array
+     */
+    public function getCache(): ?array
+    {
+        return $this->cache;
+    }
+
+    /**
      * @return string
      */
     public function getTable(): string
@@ -191,7 +215,7 @@ class Repository
      */
     public function truncate(): Promise
     {
-        return Promise\all($this->getPool()->truncate($this->getTable()));
+        return Promise\all([$this->drop(), $this->create()]);
     }
 
     /**
@@ -250,6 +274,43 @@ class Repository
     }
 
     /**
+     */
+    private function normalizeCache()
+    {
+        $cache = $this->config['cache'] ?? null;
+        unset($this->config['cache']);
+        if ($cache !== null) {
+            $cache += [
+                'ttl' => 3600,
+            ];
+            @ $cache['fieldsToId'] = (array) $cache['fieldsToId'];
+        }
+        $this->cache = $cache;
+    }
+
+    /**
+     */
+    private function normalizeBitmap()
+    {
+        $bitmap = $this->config['bitmap'] ?? null;
+        unset($this->config['bitmap']);
+        if ($bitmap !== null) {
+            $fields = $bitmap['fields'] ?? [];
+            $collect = [];
+            foreach ($fields as $name => $field) {
+                if ($field instanceof AbstractType) {
+                    $field = ['type' => $field];
+                }
+                $collect[$name] = $field;
+            }
+            $fields = $collect;
+            $handleValues = $bitmap['handleValues'] ?? null;
+            $bitmap = compact('fields', 'handleValues');
+        }
+        $this->bitmap = $bitmap;
+    }
+
+    /**
      * @return string
      */
     public function getPk(): string
@@ -265,6 +326,18 @@ class Repository
     {
         $fields = [];
         foreach ($this->fields as $name => $field) {
+            $fields[$name] = new Field($name, $field['type']);
+        }
+        return $fields;
+    }
+
+    /**
+     * @return array
+     */
+    public function getBitmapFields(): array
+    {
+        $fields = [];
+        foreach ($this->bitmap['fields'] as $name => $field) {
             $fields[$name] = new Field($name, $field['type']);
         }
         return $fields;
@@ -294,6 +367,16 @@ class Repository
     public function insert(array $values = []): Promise
     {
         $bean = $this->getBean(null, $values);
+        return $this->insertBean($bean);
+    }
+
+    /**
+     * @param Bean $bean
+     *
+     * @return Promise
+     */
+    public function insertBean(Bean $bean): Promise
+    {
         $deferred = new Deferred();
         $fields = $bean->getFields();
         $values = $bean->getValues();
@@ -305,6 +388,29 @@ class Repository
             $deferred->resolve($min === $max ? $min : 0);
         });
         return $deferred->promise();
+    }
+
+    /**
+     * @param array $values (optional)
+     *
+     * @return Promise
+     */
+    public function add(int $id, array $values = []): Promise
+    {
+        $bean = $this->getBitmapBean($id, $values);
+        return $this->addBean($bean);
+    }
+
+    /**
+     * @param BitmapBean $bean
+     *
+     * @return bool
+     */
+    public function addBean(BitmapBean $bean): bool
+    {
+        $table = $this->getTable();
+        $bitmap = $this->storage->getBitmap();
+        return $bitmap->ADD($table, $bean->getId(), $bean->getFields());
     }
 
     /**
@@ -320,11 +426,28 @@ class Repository
             }
             $table = $this->getTable();
             $dbs = [];
+            $meta = [];
             foreach ($ids as $id) {
+                if ($this->cache !== null) {
+                    $ck = $table . '.' . $id;
+                    $cache = $cache ?? $this->storage->getCache();
+                    $v = $cache->get($ck);
+                    if ($v !== null) {
+                        [$id, $fields] = $v;
+                        $bean = $this->getBeanWithFields($id, $fields);
+                        yield $emit([$id, $bean]);
+                        continue;
+                    }
+                    $ct = [$table, $table . '.' . $id];
+                    $meta[$id] = [$ck, $ct];
+                }
                 $db = $this->getReadablePool($id)->random();
                 $name = $db->getName();
                 $dbs[$name] = $dbs[$name] ?? ['db' => $db, 'ids' => []];
                 $dbs[$name]['ids'][] = $id;
+            }
+            if (!$dbs) {
+                return;
             }
             $fields = array_values($this->getFields());
             [$returnFields, $pk] = [true, [$this->getPk()]];
@@ -335,8 +458,18 @@ class Repository
             }
             $iterator = count($iterators) === 1 ? $iterators[0] : Iterator\merge($iterators);
             while (yield $iterator->advance()) {
-                [$id, $fields] = $iterator->getCurrent();
+                [$id, $fields] = $v = $iterator->getCurrent();
                 $bean = $this->getBeanWithFields($id, $fields);
+                if ($this->cache !== null) {
+                    [$ck, $ct] = $meta[$id];
+                    $cache = $cache ?? $this->storage->getCache();
+                    $cache->set($ck, $v, $this->cache['ttl'], $ct);
+                    foreach ($this->cache['fieldsToId'] as $f2id) {
+                        $v = md5(serialize($bean->$f2id));
+                        $ck = $table . '.' . $f2id . '.' . $v;
+                        $cache->set($ck, $id, $this->cache['ttl'], $ct);
+                    }
+                }
                 yield $emit([$id, $bean]);
             }
         };
@@ -390,8 +523,35 @@ class Repository
      */
     public function filter(array $conditions): Iterator
     {
+        if (
+            $this->cache !== null &&
+            count($conditions) === 1 &&
+            in_array($f = key($conditions), $this->cache['fieldsToId'])
+        ) {
+            $value = current($conditions);
+            if (!is_array($value)) {
+                $table = $this->getTable();
+                $v = md5(serialize($value));
+                $ck = $table . '.' . $f . '.' . $v;
+                $id = $this->storage->getCache()->get($ck);
+                if ($id !== null) {
+                    return $this->get([$id]);
+                }
+            }
+        }
         $where = new Condition($conditions);
         return $this->iterate(compact('where'));
+    }
+
+    /**
+     * @param string $query
+     *
+     * @return Iterator
+     */
+    public function search(string $query): Iterator
+    {
+        $table = $this->getTable();
+        return $this->storage->getBitmap()->SEARCH($table, $query);
     }
 
     /**
@@ -418,6 +578,11 @@ class Repository
         $deferred = new Deferred();
         $dbs = [];
         foreach ($ids as $id) {
+            if ($this->cache !== null) {
+                $table = $table ?? $this->getTable();
+                $cache = $cache ?? $this->storage->getCache();
+                $cache->drop($table . '.' . $id);
+            }
             $pool = $this->getWritablePool($id, null);
             foreach ($pool->names() as $name) {
                 $dbs[$name] = $dbs[$name] ?? ['db' => $pool->db($name), 'ids' => []];
@@ -447,6 +612,11 @@ class Repository
         $deferred = new Deferred();
         $dbs = [];
         foreach ($ids as $id) {
+            if ($this->cache !== null) {
+                $table = $table ?? $this->getTable();
+                $cache = $cache ?? $this->storage->getCache();
+                $cache->drop($table . '.' . $id);
+            }
             $pool = $this->getWritablePool($id, null);
             foreach ($pool->names() as $name) {
                 $dbs[$name] = $dbs[$name] ?? ['db' => $pool->db($name), 'ids' => []];
@@ -520,6 +690,58 @@ class Repository
     }
 
     /**
+     */
+    public function bitmapCreate()
+    {
+        $this->storage->getBitmap()->CREATE($this);
+    }
+
+    /**
+     */
+    public function bitmapDrop()
+    {
+        $table = $this->getTable();
+        $this->storage->getBitmap()->DROP($table);
+    }
+
+    public function bitmapTruncate()
+    {
+        $this->bitmapDrop();
+        $this->bitmapCreate();
+    }
+
+    /**
+     */
+    public function bitmapPopulate()
+    {
+        $bitmap = $this->bitmap;
+        $handleValues = $bitmap['handleValues'] ?? null;
+        $generator = $bitmap === null ? [] : $this->iterate()->generator();
+        unset($bitmap);
+        $table = $this->getTable();
+        foreach ($generator as $id => $bean) {
+            $values = $bean->getValues();
+            if ($handleValues !== null) {
+                $values = $handleValues($values);
+            }
+            $this->getBitmapBean($id, $values)->add();
+        }
+    }
+
+    /**
+     * @param int   $id
+     * @param array $values (optional)
+     *
+     * @return Bean
+     */
+    private function getBitmapBean(int $id, array $values = []): BitmapBean
+    {
+        $bean = $this->getBitmapBeanWithFields($id, $this->getBitmapFields());
+        $bean->setValues($values);
+        return $bean;
+    }
+
+    /**
      * @param ?int  $id     (optional)
      * @param array $values (optional)
      *
@@ -528,9 +750,7 @@ class Repository
     public function getBean(?int $id = null, array $values = []): Bean
     {
         $bean = $this->getBeanWithFields($id, $this->getFields());
-        foreach ($values as $key => $value) {
-            $bean->$key = $value;
-        }
+        $bean->setValues($values);
         return $bean;
     }
 
@@ -573,6 +793,18 @@ class Repository
     private function getBeanWithFields(?int $id, array $fields): Bean
     {
         $bean = $this->config['bean'] ?? Bean::class;
+        return new $bean($this, $id, $fields);
+    }
+
+    /**
+     * @param int   $id
+     * @param array $fields
+     *
+     * @return BitmapBean
+     */
+    private function getBitmapBeanWithFields(int $id, array $fields): BitmapBean
+    {
+        $bean = $this->bitmap['bean'] ?? BitmapBean::class;
         return new $bean($this, $id, $fields);
     }
 

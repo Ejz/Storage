@@ -38,6 +38,7 @@ abstract class AbstractTestCase extends TestCase
     {
         $this->pool->each(function ($db) {
             foreach (wait($db->tables()) as $table) {
+                $this->bitmap->DROP($table);
                 wait($db->drop($table));
             }
         });

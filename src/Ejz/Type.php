@@ -123,12 +123,31 @@ class Type
     }
 
     /**
-     * @param array $enums
+     * @param array $enums (optional)
      *
      * @return AbstractType
      */
     public static function enum(array $enums = []): AbstractType
     {
         return new Type\TypeEnum($enums);
+    }
+
+    /**
+     *
+     * @return AbstractType
+     */
+    public static function bitmapBool(): AbstractType
+    {
+        return new Type\TypeBitmapBool();
+    }
+
+    /**
+     * @param string $table (optional)
+     *
+     * @return AbstractType
+     */
+    public static function bitmapForeignKey(string $table = ''): AbstractType
+    {
+        return new Type\TypeBitmapForeignKey($table);
     }
 }

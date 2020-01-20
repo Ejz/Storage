@@ -8,26 +8,50 @@ use Amp\Promise;
 
 class Producer implements Iterator
 {
-    use \Amp\CallableMaker;
-    use \Amp\Internal\Producer;
+    /** @var \Amp\Producer */
+    private $producer;
+
+    /** @var int */
+    private $size;
 
     /**
      * @param callable $producer
      */
     public function __construct(callable $producer)
     {
-        $result = $producer($this->callableFromInstanceMethod('emit'));
-        $coroutine = new \Amp\Coroutine($result);
-        $coroutine->onResolve(function ($exception) {
-            if ($this->complete) {
-                return;
-            }
-            if ($exception) {
-                $this->fail($exception);
-                return;
-            }
-            $this->complete();
-        });
+        $this->producer = new \Amp\Producer($producer);
+    }
+
+    /**
+     * @return Promise
+     */
+    public function advance(): Promise
+    {
+        return $this->producer->advance();
+    }
+
+    /**
+     * @return mixed
+     */
+    public function getCurrent()
+    {
+        return $this->producer->getCurrent();
+    }
+
+    /**
+     * @return int
+     */
+    public function getSize(): int
+    {
+        return $this->size;
+    }
+
+    /**
+     * @param int $size
+     */
+    public function setSize(int $size)
+    {
+        $this->size = $size;
     }
 
     /**
@@ -40,7 +64,7 @@ class Producer implements Iterator
                 return $producer->getCurrent();
             }
         };
-        while (($yield = Promise\wait(\Amp\call($iterator, $this))) !== null) {
+        while (($yield = Promise\wait(\Amp\call($iterator, $this->producer))) !== null) {
             yield $yield[0] => $yield[1];
         }
     }

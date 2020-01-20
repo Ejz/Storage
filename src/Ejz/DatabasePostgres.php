@@ -895,7 +895,7 @@ class DatabasePostgres implements DatabaseInterface
                 (string) Type::binary() => "''::BYTEA",
             ];
         }
-        if (Type::enum()->is($type)) {
+        if ($type->is(Type::enum())) {
             return "'" . $type->getDefault() . "'::TEXT";
         }
         return $map[(string) $type];

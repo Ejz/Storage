@@ -8,16 +8,16 @@ use RuntimeException;
 class Bean
 {
     /** @var Repository */
-    private $_repository;
+    protected $_repository;
 
     /** @var ?int */
-    private $_id;
+    protected $_id;
 
     /** @var array */
-    private $_fields;
+    protected $_fields;
 
     /** @var array */
-    private $_changed;
+    protected $_changed;
 
     /* -- -- -- */
     private const ERROR_INVALID_FIELD = 'ERROR_INVALID_FIELD: %s';
@@ -82,6 +82,16 @@ class Bean
             $values[$name] = $field->getValue();
         }
         return $values;
+    }
+
+    /**
+     * @param array $values
+     */
+    public function setValues(array $values)
+    {
+        foreach ($values as $key => $value) {
+            $this->$key = $value;
+        }
     }
 
     /**
@@ -177,7 +187,7 @@ class Bean
             $message = self::ERROR_INSERT_WITH_ID;
             throw new RuntimeException($message);
         }
-        return $this->_repository->insert($this->getValues());
+        return $this->_repository->insertBean($this);
     }
 
     /**
