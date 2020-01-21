@@ -377,7 +377,7 @@ class Repository
             $ids = $err ? [0] : array_values($res);
             $min = min($ids);
             $max = max($ids);
-            $deferred->resolve($min === $max ? $min : 0);
+            $deferred->resolve($min === $max ? $min : null);
         });
         return $deferred->promise();
     }
@@ -564,7 +564,7 @@ class Repository
      */
     public function update(array $ids, array $fields): Promise
     {
-        if (!$ids) {
+        if (!$ids || !$fields) {
             return new Success(0);
         }
         $deferred = new Deferred();

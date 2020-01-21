@@ -188,7 +188,10 @@ class Storage
         $isPrimaryTable = function ($name, $names) use ($primary) {
             return array_search($name, $names) === $primary;
         };
-        return compact('isPrimaryTable');
+        $getReadablePool = function ($id, $values, $names, $nargs) use ($primary) {
+            return [$names[$primary]];
+        };
+        return compact('isPrimaryTable', 'getReadablePool');
     }
 
     /**

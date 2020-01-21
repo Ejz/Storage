@@ -159,7 +159,9 @@ class Bean
                 }
             }
             $promise = $this->_repository->update([$this->_id], $fields);
-            return (bool) yield $promise;
+            $ret = (bool) yield $promise;
+            $this->_changed = [];
+            return $ret;
         }, $force);
     }
 
@@ -187,7 +189,11 @@ class Bean
             $message = self::ERROR_INSERT_WITH_ID;
             throw new RuntimeException($message);
         }
-        return $this->_repository->insertBean($this);
+        return \Amp\call(function () {
+            $id = yield $this->_repository->insertBean($this);
+            $this->setId($id);
+            return $id;
+        });
     }
 
     /**
@@ -206,5 +212,45 @@ class Bean
             $this->setId($id);
             return $result;
         }, $id);
+    }
+
+    /**
+     * @param array ...$args
+     *
+     * @return mixed
+     */
+    public function deleteSync(...$args)
+    {
+        return Promise\wait($this->delete(...$args));
+    }
+
+    /**
+     * @param array ...$args
+     *
+     * @return mixed
+     */
+    public function updateSync(...$args)
+    {
+        return Promise\wait($this->update(...$args));
+    }
+
+    /**
+     * @param array ...$args
+     *
+     * @return mixed
+     */
+    public function insertSync(...$args)
+    {
+        return Promise\wait($this->insert(...$args));
+    }
+
+    /**
+     * @param array ...$args
+     *
+     * @return mixed
+     */
+    public function reidSync(...$args)
+    {
+        return Promise\wait($this->reid(...$args));
     }
 }
