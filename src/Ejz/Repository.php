@@ -696,12 +696,6 @@ class Repository
         $this->storage->getBitmap()->DROP($table);
     }
 
-    public function bitmapTruncate()
-    {
-        $this->bitmapDrop();
-        $this->bitmapCreate();
-    }
-
     /**
      */
     public function bitmapPopulate()

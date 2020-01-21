@@ -3,12 +3,7 @@
 namespace Ejz;
 
 use RuntimeException;
-// use Generator;
-// use Error;
-// use Amp\Loop;
-// use Amp\Promise;
-// use Amp\Deferred;
-// use Amp\Producer;
+use Amp\Promise;
 
 class Storage
 {
@@ -98,6 +93,89 @@ class Storage
         }
         $this->cached[$name] = new Repository($this, $name, $config);
         return $this->cached[$name];
+    }
+
+    /**
+     * @return Promise
+     */
+    public function create(): Promise
+    {
+        $promises = [];
+        foreach (array_keys($this->repositories) as $name) {
+            $promises[$name] = $this->$name()->create();
+        }
+        return Promise\all($promises);
+    }
+
+    /**
+     * @param array ...$args
+     *
+     * @return mixed
+     */
+    public function createSync(...$args)
+    {
+        return Promise\wait($this->create(...$args));
+    }
+
+    /**
+     * @return Promise
+     */
+    public function drop(): Promise
+    {
+        $promises = [];
+        foreach (array_keys($this->repositories) as $name) {
+            $promises[$name] = $this->$name()->drop();
+        }
+        return Promise\all($promises);
+    }
+
+    /**
+     * @param array ...$args
+     *
+     * @return mixed
+     */
+    public function dropSync(...$args)
+    {
+        return Promise\wait($this->drop(...$args));
+    }
+
+    /**
+     * @return array
+     */
+    public function sort(): array
+    {
+        $return = [];
+        foreach (array_keys($this->repositories) as $name) {
+            $return[$name] = $this->$name()->sort();
+        }
+        return $return;
+    }
+
+    /**
+     */
+    public function bitmapCreate()
+    {
+        foreach (array_keys($this->repositories) as $name) {
+            $this->$name()->bitmapCreate();
+        }
+    }
+
+    /**
+     */
+    public function bitmapDrop()
+    {
+        foreach (array_keys($this->repositories) as $name) {
+            $this->$name()->bitmapDrop();
+        }
+    }
+
+    /**
+     */
+    public function bitmapPopulate()
+    {
+        foreach (array_keys($this->repositories) as $name) {
+            $this->$name()->bitmapPopulate();
+        }
     }
 
     /**
