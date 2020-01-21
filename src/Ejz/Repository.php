@@ -329,7 +329,7 @@ class Repository
     public function getBitmapFields(): array
     {
         $fields = [];
-        foreach ($this->bitmap['fields'] as $name => $field) {
+        foreach (($this->bitmap['fields'] ?? []) as $name => $field) {
             $fields[$name] = new Field($name, $field['type']);
         }
         return $fields;

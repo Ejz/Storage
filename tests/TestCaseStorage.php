@@ -1037,13 +1037,14 @@ class TestCaseStorage extends AbstractTestCase
      */
     public function test_case_storage_massive_create()
     {
+        $rnd = (bool) mt_rand(0, 1);
         $bitmap = getBitmap();
         $storage = getStorage([
             'table1' => [
                 'bitmap' => [],
             ],
             'table2' => [
-                'bitmap' => [],
+                'bitmap' => $rnd ? [] : null,
             ],
         ]);
         $storage->createSync();
@@ -1055,7 +1056,7 @@ class TestCaseStorage extends AbstractTestCase
         $this->assertTrue(wait($db->tableExists('table1')));
         $this->assertTrue(wait($db->tableExists('table2')));
         $this->assertTrue(in_array('table1', $bitmap->LIST()));
-        $this->assertTrue(in_array('table2', $bitmap->LIST()));
+        $this->assertTrue($rnd xor !in_array('table2', $bitmap->LIST()));
         $storage->dropSync();
         $storage->bitmapDrop();
         $this->assertTrue(!wait($db->tableExists('table1')));
