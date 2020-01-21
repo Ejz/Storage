@@ -685,6 +685,9 @@ class Repository
      */
     public function bitmapCreate()
     {
+        if ($this->bitmap === null) {
+            return;
+        }
         $this->storage->getBitmap()->CREATE($this);
     }
 
@@ -692,6 +695,9 @@ class Repository
      */
     public function bitmapDrop()
     {
+        if ($this->bitmap === null) {
+            return;
+        }
         $table = $this->getTable();
         $this->storage->getBitmap()->DROP($table);
     }
@@ -700,10 +706,8 @@ class Repository
      */
     public function bitmapPopulate()
     {
-        $bitmap = $this->bitmap;
-        $handleValues = $bitmap['handleValues'] ?? null;
-        $generator = $bitmap === null ? [] : $this->iterate()->generator();
-        unset($bitmap);
+        $handleValues = $this->bitmap['handleValues'] ?? null;
+        $generator = $this->bitmap === null ? [] : $this->iterate()->generator();
         $table = $this->getTable();
         foreach ($generator as $id => $bean) {
             $values = $bean->getValues();
