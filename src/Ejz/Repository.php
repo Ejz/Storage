@@ -211,14 +211,6 @@ class Repository
     }
 
     /**
-     * @return Promise
-     */
-    public function truncate(): Promise
-    {
-        return Promise\all([$this->drop(), $this->create()]);
-    }
-
-    /**
      */
     private function normalize()
     {
@@ -826,16 +818,6 @@ class Repository
     public function dropSync(...$args)
     {
         return Promise\wait($this->drop(...$args));
-    }
-
-    /**
-     * @param array ...$args
-     *
-     * @return mixed
-     */
-    public function truncateSync(...$args)
-    {
-        return Promise\wait($this->truncate(...$args));
     }
 
     /**
