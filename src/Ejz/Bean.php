@@ -108,6 +108,10 @@ class Bean
      */
     public function __set(string $name, $value)
     {
+        if ($name === 'id') {
+            $this->setId($value);
+            return;
+        }
         $this->checkField($name);
         if ($this->_fields[$name]->setValue($value)) {
             $this->_changed[] = $name;
@@ -121,6 +125,9 @@ class Bean
      */
     public function __get(string $name)
     {
+        if ($name === 'id') {
+            return $this->getId();
+        }
         $this->checkField($name);
         return $this->_fields[$name]->getValue();
     }
