@@ -10,19 +10,12 @@ class Bitmap
     /** @var RedisClient */
     protected $client;
 
-    /** @var array */
-    protected $config;
-
     /**
      * @param RedisClient $client
-     * @param array       $config (optional)
      */
-    public function __construct(RedisClient $client, array $config = [])
+    public function __construct(RedisClient $client)
     {
         $this->client = $client;
-        $this->config = $config + [
-            'iterator_chunk_size' => 10,
-        ];
     }
 
     /**
@@ -52,6 +45,9 @@ class Bitmap
      */
     public function CREATE(Repository $repository)
     {
+        if (!$repository->hasBitmap()) {
+            return;
+        }
         $table = $repository->getTable();
         $args = [$table];
         $fields = $repository->getBitmapFields();
@@ -82,34 +78,8 @@ class Bitmap
             $args[] = $field->getName();
             $args[] = $field->exportValue();
         }
-        return $this->client->ADD(...$args);
-    }
-
-    /**
-     * @return Iterator
-     */
-    public function SEARCH(string $table, string $query): Iterator
-    {
-        $result = $this->client->SEARCH($table, $query, 'WITHCURSOR');
-        $size = $result[0] ?? 0;
-        $cursor = $result[1] ?? null;
-        $iterator_chunk_size = $this->config['iterator_chunk_size'];
-        $emit = function ($emit) use ($cursor, $size, $iterator_chunk_size) {
-            if ($cursor === null) {
-                return;
-            }
-            while ($size > 0) {
-                $ids = $this->client->CURSOR($cursor, 'LIMIT', $iterator_chunk_size);
-                $size -= $iterator_chunk_size;
-                $iterator = $this->repository->get($ids);
-                while (yield $iterator->advance()) {
-                    yield $emit($iterator->getCurrent());
-                }
-            }
-        };
-        $iterator = new Producer($emit);
-        $iterator->setSize($size);
-        return $iterator;
+        $ret = $this->client->ADD(...$args);
+        return $ret;
     }
 
     /**

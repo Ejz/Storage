@@ -107,5 +107,49 @@ class TestCaseStorageBugs extends AbstractTestCase
         $id = $bean->insertSync();
         $this->assertTrue($id > 0);
         $this->assertTrue($bean->getId() === $id);
+        $this->assertTrue($bean->id === $id);
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_bitmap_bug()
+    {
+        $storage = getStorage([
+            'table' => [
+                'fields' => [
+                    'field1' => Type::bool(),
+                ],
+                'bitmap' => [
+                    'fields' => [
+                        'field1' => Type::bitmapBool(),
+                    ],
+                ],
+            ],
+        ]);
+        $table = $storage->table();
+        $table->createSync();
+        $table->bitmapCreate();
+        $ids = [];
+        foreach (range(1, 1000) as $_) {
+            $ids[] = $table->insertSync(['field1' => mt_rand(0, 1)]);
+        }
+        $table->bitmapPopulate();
+        if (mt_rand(0, 1)) {
+            foreach ($table->search('*')->generator() as $id => $bean) {
+                $_ = array_search($id, $ids);
+                unset($ids[$_]);
+            }
+        } else {
+            foreach ($table->search('@field1:1')->generator() as $id => $bean) {
+                $_ = array_search($id, $ids);
+                unset($ids[$_]);
+            }
+            foreach ($table->search('@field1:0')->generator() as $id => $bean) {
+                $_ = array_search($id, $ids);
+                unset($ids[$_]);
+            }
+        }
+        $this->assertTrue($ids === []);
     }
 }

@@ -25,6 +25,9 @@ class Repository
     /** @var array */
     protected $indexes;
 
+    /** @var DatabasePool */
+    protected $pool;
+
     /** @var ?array */
     protected $cache;
 
@@ -39,10 +42,13 @@ class Repository
     public function __construct(Storage $storage, string $name, array $config) {
         $this->storage = $storage;
         $this->name = $name;
-        $this->config = $config;
+        $this->config = $config + [
+            'iterator_chunk_size' => 100,
+        ];
         $this->normalize();
         $this->normalizeCache();
         $this->normalizeBitmap();
+        $this->pool = $this->getPool();
     }
 
     /**
@@ -56,7 +62,7 @@ class Repository
         if ($callable === null) {
             return true;
         }
-        $names = $this->getPool()->names();
+        $names = $this->pool->names();
         return (bool) $callable($name, $names);
     }
 
@@ -71,7 +77,7 @@ class Repository
         if ($callable === null) {
             return 1;
         }
-        $names = $this->getPool()->names();
+        $names = $this->pool->names();
         return (int) $callable($name, $names);
     }
 
@@ -86,7 +92,7 @@ class Repository
         if ($callable === null) {
             return 1;
         }
-        $names = $this->getPool()->names();
+        $names = $this->pool->names();
         return (int) $callable($name, $names);
     }
 
@@ -98,7 +104,7 @@ class Repository
      */
     private function getWritablePool(?int $id = null, ?array $values = null): DatabasePool
     {
-        $pool = $this->getPool();
+        $pool = $this->pool;
         $callable = $this->config['getWritablePool'] ?? null;
         if ($callable === null) {
             return $pool;
@@ -115,7 +121,7 @@ class Repository
      */
     private function getReadablePool(?int $id = null, ?array $values = null): DatabasePool
     {
-        $pool = $this->getPool();
+        $pool = $this->pool;
         $callable = $this->config['getReadablePool'] ?? null;
         if ($callable === null) {
             return $pool;
@@ -170,19 +176,19 @@ class Repository
     }
 
     /**
-     * @return ?array
+     * @return bool
      */
-    public function getBitmap(): ?array
+    public function hasBitmap(): bool
     {
-        return $this->bitmap;
+        return $this->bitmap !== null;
     }
 
     /**
-     * @return ?array
+     * @return bool
      */
-    public function getCache(): ?array
+    public function hasCache(): bool
     {
-        return $this->cache;
+        return $this->cache !== null;
     }
 
     /**
@@ -199,7 +205,7 @@ class Repository
      */
     public function create(): Promise
     {
-        return Promise\all($this->getPool()->create($this));
+        return Promise\all($this->pool->create($this));
     }
 
     /**
@@ -207,7 +213,7 @@ class Repository
      */
     public function drop(): Promise
     {
-        return Promise\all($this->getPool()->drop($this->getTable()));
+        return Promise\all($this->pool->drop($this->getTable()));
     }
 
     /**
@@ -385,12 +391,12 @@ class Repository
     /**
      * @param array $values (optional)
      *
-     * @return Promise
+     * @return bool
      */
-    public function add(int $id, array $values = []): Promise
+    public function bitmapAdd(int $id, array $values = []): bool
     {
         $bean = $this->getBitmapBean($id, $values);
-        return $this->addBean($bean);
+        return $this->bitmapAddBean($bean);
     }
 
     /**
@@ -398,7 +404,7 @@ class Repository
      *
      * @return bool
      */
-    public function addBean(BitmapBean $bean): bool
+    public function bitmapAddBean(BitmapBean $bean): bool
     {
         $table = $this->getTable();
         $bitmap = $this->storage->getBitmap();
@@ -542,8 +548,22 @@ class Repository
      */
     public function search(string $query): Iterator
     {
-        $table = $this->getTable();
-        return $this->storage->getBitmap()->SEARCH($table, $query);
+        [$size, $cursor] = $this->bitmapSearch($query);
+        $iterator_chunk_size = $this->config['iterator_chunk_size'];
+        $emit = function ($emit) use ($size, $cursor, $iterator_chunk_size) {
+            while ($size > 0) {
+                $bitmap = $bitmap ?? $this->storage->getBitmap();
+                $ids = $bitmap->CURSOR($cursor, 'LIMIT', $iterator_chunk_size);
+                $size -= $iterator_chunk_size;
+                $iterator = $this->get($ids);
+                while (yield $iterator->advance()) {
+                    yield $emit($iterator->getCurrent());
+                }
+            }
+        };
+        $iterator = new Producer($emit);
+        $iterator->setSize($size);
+        return $iterator;
     }
 
     /**
@@ -657,7 +677,7 @@ class Repository
         if ($getSortScore === null) {
             return false;
         }
-        $names = $this->getPool()->names();
+        $names = $this->pool->names();
         $ok = 0;
         foreach ($names as $name) {
             $scores = [];
@@ -685,9 +705,6 @@ class Repository
      */
     public function bitmapCreate()
     {
-        if ($this->bitmap === null) {
-            return;
-        }
         $this->storage->getBitmap()->CREATE($this);
     }
 
@@ -695,11 +712,31 @@ class Repository
      */
     public function bitmapDrop()
     {
-        if ($this->bitmap === null) {
-            return;
-        }
         $table = $this->getTable();
         $this->storage->getBitmap()->DROP($table);
+    }
+
+    /**
+     * @param string $cursor
+     * @param int    $limit
+     *
+     * @return array
+     */
+    public function bitmapCursor(string $cursor, int $limit): array
+    {
+        return $this->storage->getBitmap()->CURSOR($cursor, $limit);
+    }
+
+    /**
+     * @param string $query
+     *
+     * @return array
+     */
+    public function bitmapSearch(string $query): array
+    {
+        $table = $this->getTable();
+        $result = $this->storage->getBitmap()->SEARCH($table, $query, 'WITHCURSOR');
+        return [$result[0] ?? 0, $result[1] ?? null];
     }
 
     /**

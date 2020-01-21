@@ -29,6 +29,6 @@ class BitmapBean extends Bean
             $message = self::ERROR_ADD_WITHOUT_ID;
             throw new RuntimeException($message);
         }
-        return $this->_repository->addBean($this);
+        return $this->_repository->bitmapAddBean($this);
     }
 }

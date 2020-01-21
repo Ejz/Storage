@@ -109,7 +109,7 @@ class Bean
     public function __set(string $name, $value)
     {
         if ($name === 'id') {
-            $this->setId($value);
+            $this->_id = $value;
             return;
         }
         $this->checkField($name);
@@ -126,7 +126,7 @@ class Bean
     public function __get(string $name)
     {
         if ($name === 'id') {
-            return $this->getId();
+            return $this->_id;
         }
         $this->checkField($name);
         return $this->_fields[$name]->getValue();
