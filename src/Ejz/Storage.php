@@ -195,16 +195,22 @@ class Storage
     }
 
     /**
-     * @param ?string $field
+     * @param ?string $field     (optional)
+     * @param bool    $fieldAsId (optional)
      *
      * @return array
      */
-    public static function getShardsClusterConfig(?string $field = null): array
-    {
-        $getPoolClosure = function ($readable) use ($field) {
-            return function ($id, $values, $names, $nargs) use ($readable, $field) {
+    public static function getShardsClusterConfig(
+        ?string $field = null,
+        bool $fieldAsId = false
+    ): array {
+        $getPoolClosure = function ($readable) use ($field, $fieldAsId) {
+            return function ($id, $values, $names, $nargs) use ($readable, $field, $fieldAsId) {
                 $c = count($names);
                 $keys = array_keys($names);
+                if ($fieldAsId && isset($values[$field])) {
+                    $id = $values[$field];
+                }
                 if ($id !== null) {
                     $id = abs($id);
                     $id %= $c;
