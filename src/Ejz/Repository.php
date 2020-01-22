@@ -724,7 +724,7 @@ class Repository
      */
     public function bitmapCursor(string $cursor, int $limit): array
     {
-        return $this->storage->getBitmap()->CURSOR($cursor, $limit);
+        return $this->storage->getBitmap()->CURSOR($cursor, 'LIMIT', $limit);
     }
 
     /**

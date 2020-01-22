@@ -152,4 +152,43 @@ class TestCaseStorageBugs extends AbstractTestCase
         }
         $this->assertTrue($ids === []);
     }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_cursor_bug()
+    {
+        $storage = getStorage([
+            'table' => [
+                'fields' => [
+                    'field1' => Type::bool(),
+                ],
+                'bitmap' => [
+                    'fields' => [
+                        'field1' => Type::bitmapBool(),
+                    ],
+                ],
+            ],
+        ]);
+        $table = $storage->table();
+        $table->createSync();
+        $table->bitmapCreate();
+        $ids = [];
+        foreach (range(1, 1000) as $_) {
+            $ids[] = $table->insertSync(['field1' => mt_rand(0, 1)]);
+        }
+        $table->bitmapPopulate();
+        [$size, $cursor] = $table->bitmapSearch('*');
+        while ($ids) {
+            $c1 = count($ids);
+            $chuck = $table->bitmapCursor($cursor, mt_rand(1, 4));
+            foreach ($chuck as $id) {
+                $_ = array_search($id, $ids);
+                $this->assertTrue($_ !== false);
+                unset($ids[$_]);
+            }
+            $c2 = count($ids);
+            $this->assertTrue($c2 < $c1);
+        }
+    }
 }
