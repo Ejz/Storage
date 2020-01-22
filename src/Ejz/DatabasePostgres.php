@@ -346,6 +346,22 @@ class DatabasePostgres implements DatabaseInterface
     }
 
     /**
+     */
+    public function close()
+    {
+        if ($this->connection !== null) {
+            $this->connection->close();
+        }
+    }
+
+    /**
+     */
+    public function __destruct()
+    {
+        $this->close();
+    }
+
+    /**
      * @param array $all
      *
      * @return array

@@ -41,6 +41,7 @@ abstract class AbstractTestCase extends TestCase
                 $this->bitmap->DROP($table);
                 wait($db->drop($table));
             }
+            $db->close();
         });
     }
 
