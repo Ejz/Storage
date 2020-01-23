@@ -7,6 +7,7 @@ use Amp\Success;
 use Amp\Deferred;
 use Amp\Iterator;
 use RuntimeException;
+use Ejz\Type\AbstractType;
 
 class Repository
 {
@@ -746,10 +747,13 @@ class Repository
         $handleValues = $this->bitmap['handleValues'] ?? null;
         $generator = $this->bitmap === null ? [] : $this->iterate()->generator();
         $table = $this->getTable();
+        $keys = array_keys($this->getBitmapFields());
         foreach ($generator as $id => $bean) {
             $values = $bean->getValues();
             if ($handleValues !== null) {
                 $values = $handleValues($values);
+            } else {
+                $values = array_intersect_key($values, array_flip($keys));
             }
             $this->getBitmapBean($id, $values)->add();
         }

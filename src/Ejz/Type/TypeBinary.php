@@ -2,11 +2,9 @@
 
 namespace Ejz\Type;
 
-use Ejz\AbstractType;
-
 class TypeBinary extends AbstractType
 {
-	/**
+    /**
      * @return string
      */
     public function getSelectString(): string

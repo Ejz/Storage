@@ -4,6 +4,7 @@ namespace Ejz;
 
 use Throwable;
 use Amp\Iterator;
+use Ejz\Type\AbstractType;
 
 class Bitmap
 {

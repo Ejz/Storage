@@ -5,9 +5,9 @@ namespace Ejz;
 class Type
 {
     /**
-     * @return AbstractType
+     * @return Type\AbstractType
      */
-    public static function default(bool $nullable = false): AbstractType
+    public static function default(bool $nullable = false): Type\AbstractType
     {
         return new Type\TypeDefault($nullable);
     }
@@ -15,9 +15,9 @@ class Type
     /**
      * @param bool $nullable (optional)
      *
-     * @return AbstractType
+     * @return Type\AbstractType
      */
-    public static function string(bool $nullable = false): AbstractType
+    public static function string(bool $nullable = false): Type\AbstractType
     {
         return new Type\TypeString($nullable);
     }
@@ -25,9 +25,9 @@ class Type
     /**
      * @param bool $nullable (optional)
      *
-     * @return AbstractType
+     * @return Type\AbstractType
      */
-    public static function int(bool $nullable = false): AbstractType
+    public static function int(bool $nullable = false): Type\AbstractType
     {
         return new Type\TypeInt($nullable);
     }
@@ -35,9 +35,9 @@ class Type
     /**
      * @param bool $nullable (optional)
      *
-     * @return AbstractType
+     * @return Type\AbstractType
      */
-    public static function float(bool $nullable = false): AbstractType
+    public static function float(bool $nullable = false): Type\AbstractType
     {
         return new Type\TypeFloat($nullable);
     }
@@ -45,9 +45,9 @@ class Type
     /**
      * @param bool $nullable (optional)
      *
-     * @return AbstractType
+     * @return Type\AbstractType
      */
-    public static function bool(bool $nullable = false): AbstractType
+    public static function bool(bool $nullable = false): Type\AbstractType
     {
         return new Type\TypeBool($nullable);
     }
@@ -55,9 +55,9 @@ class Type
     /**
      * @param bool $nullable (optional)
      *
-     * @return AbstractType
+     * @return Type\AbstractType
      */
-    public static function date(bool $nullable = false): AbstractType
+    public static function date(bool $nullable = false): Type\AbstractType
     {
         return new Type\TypeDate($nullable);
     }
@@ -65,9 +65,9 @@ class Type
     /**
      * @param bool $nullable (optional)
      *
-     * @return AbstractType
+     * @return Type\AbstractType
      */
-    public static function dateTime(bool $nullable = false): AbstractType
+    public static function dateTime(bool $nullable = false): Type\AbstractType
     {
         return new Type\TypeDateTime($nullable);
     }
@@ -75,9 +75,9 @@ class Type
     /**
      * @param bool $nullable (optional)
      *
-     * @return AbstractType
+     * @return Type\AbstractType
      */
-    public static function json(bool $nullable = false): AbstractType
+    public static function json(bool $nullable = false): Type\AbstractType
     {
         return new Type\TypeJson($nullable);
     }
@@ -85,9 +85,9 @@ class Type
     /**
      * @param bool $nullable (optional)
      *
-     * @return AbstractType
+     * @return Type\AbstractType
      */
-    public static function bigInt(bool $nullable = false): AbstractType
+    public static function bigInt(bool $nullable = false): Type\AbstractType
     {
         return new Type\TypeBigInt($nullable);
     }
@@ -95,9 +95,9 @@ class Type
     /**
      * @param bool $nullable (optional)
      *
-     * @return AbstractType
+     * @return Type\AbstractType
      */
-    public static function intArray(bool $nullable = false): AbstractType
+    public static function intArray(bool $nullable = false): Type\AbstractType
     {
         return new Type\TypeIntArray($nullable);
     }
@@ -105,9 +105,9 @@ class Type
     /**
      * @param bool $nullable (optional)
      *
-     * @return AbstractType
+     * @return Type\AbstractType
      */
-    public static function stringArray(bool $nullable = false): AbstractType
+    public static function stringArray(bool $nullable = false): Type\AbstractType
     {
         return new Type\TypeStringArray($nullable);
     }
@@ -115,9 +115,9 @@ class Type
     /**
      * @param bool $nullable (optional)
      *
-     * @return AbstractType
+     * @return Type\AbstractType
      */
-    public static function binary(bool $nullable = false): AbstractType
+    public static function binary(bool $nullable = false): Type\AbstractType
     {
         return new Type\TypeBinary($nullable);
     }
@@ -125,18 +125,18 @@ class Type
     /**
      * @param array $enums (optional)
      *
-     * @return AbstractType
+     * @return Type\AbstractType
      */
-    public static function enum(array $enums = []): AbstractType
+    public static function enum(array $enums = []): Type\AbstractType
     {
         return new Type\TypeEnum($enums);
     }
 
     /**
      *
-     * @return AbstractType
+     * @return Type\AbstractType
      */
-    public static function bitmapBool(): AbstractType
+    public static function bitmapBool(): Type\AbstractType
     {
         return new Type\TypeBitmapBool();
     }
@@ -144,10 +144,20 @@ class Type
     /**
      * @param string $table (optional)
      *
-     * @return AbstractType
+     * @return Type\AbstractType
      */
-    public static function bitmapForeignKey(string $table = ''): AbstractType
+    public static function bitmapForeignKey(string $table = ''): Type\AbstractType
     {
         return new Type\TypeBitmapForeignKey($table);
+    }
+
+    /**
+     * @param bool $nullable (optional)
+     *
+     * @return Type\AbstractType
+     */
+    public static function compressedBinary(bool $nullable = false): Type\AbstractType
+    {
+        return new Type\TypeCompressedBinary($nullable);
     }
 }

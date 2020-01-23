@@ -2,8 +2,6 @@
 
 namespace Ejz\Type;
 
-use Ejz\AbstractType;
-
 class TypeDateTime extends AbstractType
 {
     private const DATE_TIME_FORMAT = 'Y-m-d H:i:s';

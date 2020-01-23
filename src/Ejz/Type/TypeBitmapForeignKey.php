@@ -2,8 +2,6 @@
 
 namespace Ejz\Type;
 
-use Ejz\AbstractType;
-
 class TypeBitmapForeignKey extends TypeInt
 {
     /** @var string */

@@ -2,8 +2,6 @@
 
 namespace Ejz\Type;
 
-use Ejz\AbstractType;
-
 class TypeDate extends AbstractType
 {
     private const DATE_FORMAT = 'Y-m-d';

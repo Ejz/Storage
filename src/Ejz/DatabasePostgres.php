@@ -8,6 +8,7 @@ use Amp\Iterator;
 use Amp\Postgres\Connection;
 use Amp\Postgres\ConnectionConfig;
 use Amp\Postgres\PgSqlCommandResult;
+use Ejz\Type\AbstractType;
 
 class DatabasePostgres implements DatabaseInterface
 {
@@ -883,6 +884,7 @@ class DatabasePostgres implements DatabaseInterface
                 (string) Type::stringArray() => 'TEXT[]',
                 (string) Type::binary() => 'BYTEA',
                 (string) Type::enum() => 'TEXT',
+                (string) Type::compressedBinary() => 'BYTEA',
             ];
         }
         return $map[(string) $type];
@@ -909,6 +911,7 @@ class DatabasePostgres implements DatabaseInterface
                 (string) Type::intArray() => "'{}'",
                 (string) Type::stringArray() => "'{}'",
                 (string) Type::binary() => "''::BYTEA",
+                (string) Type::compressedBinary() => "''::BYTEA",
             ];
         }
         if ($type->is(Type::enum())) {

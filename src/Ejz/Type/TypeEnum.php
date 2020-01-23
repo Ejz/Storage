@@ -2,7 +2,6 @@
 
 namespace Ejz\Type;
 
-use Ejz\AbstractType;
 use RuntimeException;
 
 class TypeEnum extends AbstractType

@@ -191,4 +191,72 @@ class TestCaseStorageBugs extends AbstractTestCase
             $this->assertTrue($c2 < $c1);
         }
     }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_handle_values_bug()
+    {
+        $storage = getStorage([
+            'table' => [
+                'fields' => [
+                    'field1' => Type::bool(),
+                    'field2' => Type::bool(),
+                ],
+                'bitmap' => [
+                    'fields' => [
+                        'field1' => Type::bitmapBool(),
+                    ],
+                ],
+            ],
+        ]);
+        $table = $storage->table();
+        $table->createSync();
+        $table->bitmapCreate();
+        $ids = [];
+        foreach (range(1, 100) as $_) {
+            $ids[] = $table->insertSync(['field1' => mt_rand(0, 1)]);
+        }
+        $table->bitmapPopulate();
+        $this->assertTrue(true);
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_new_type_compressed_binary()
+    {
+        $storage = getStorage([
+            'table' => [
+                'fields' => [
+                    'compressed' => Type::compressedBinary(),
+                ],
+            ],
+            'tablenull' => [
+                'fields' => [
+                    'compressed' => Type::compressedBinary(true),
+                ],
+            ],
+        ]);
+        $table = $storage->table();
+        $table->createSync();
+        $values = [
+            '',
+            'string',
+            '"!"\'',
+            str_repeat(md5(mt_rand()), 1E4),
+        ];
+        foreach ($values as $value) {
+            $id = $table->insertSync(['compressed' => $value]);
+            $bean = $table->get([$id])->generator()->current();
+            $this->assertTrue($bean->compressed === $value);
+        }
+        /* @TODO
+        $tablenull = $storage->tablenull();
+        $tablenull->createSync();
+        $id = $tablenull->insertSync(['compressed' => null]);
+        $bean = $tablenull->get([$id])->generator()->current();
+        $this->assertTrue($bean->compressed === null);
+        */
+    }
 }

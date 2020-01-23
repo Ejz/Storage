@@ -1,8 +1,6 @@
 <?php
 
-namespace Ejz;
-
-use Closure;
+namespace Ejz\Type;
 
 class AbstractType
 {
