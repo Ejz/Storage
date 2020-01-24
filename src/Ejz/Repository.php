@@ -455,7 +455,7 @@ class Repository
             foreach ($dbs as ['db' => $db, 'ids' => $ids]) {
                 $iterators[] = $db->get($table, $ids, $params);
             }
-            $iterator = count($iterators) === 1 ? $iterators[0] : Iterator\merge($iterators);
+            $iterator = count($iterators) === 1 ? $iterators[0] : Producer::merge($iterators, []);
             while (yield $iterator->advance()) {
                 [$id, $fields] = $v = $iterator->getCurrent();
                 $bean = $this->getBeanWithFields($id, $fields);

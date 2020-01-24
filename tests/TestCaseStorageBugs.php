@@ -18,7 +18,7 @@ class TestCaseStorageBugs extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_storage_primary_cluster_bug()
+    public function test_case_storage_bugs_primary_cluster()
     {
         $storage = getStorage([
             'table' => [
@@ -39,7 +39,7 @@ class TestCaseStorageBugs extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_storage_changed_bug_1()
+    public function test_case_storage_bugs_changed_1()
     {
         $storage = getStorage([
             'table' => [
@@ -61,7 +61,7 @@ class TestCaseStorageBugs extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_storage_changed_bug_2()
+    public function test_case_storage_bugs_changed_2()
     {
         $storage = getStorage([
             'table' => [
@@ -91,7 +91,7 @@ class TestCaseStorageBugs extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_storage_bean_insert_bug()
+    public function test_case_storage_bugs_bean_insert()
     {
         $storage = getStorage([
             'table' => [
@@ -113,7 +113,7 @@ class TestCaseStorageBugs extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_storage_bitmap_bug()
+    public function test_case_storage_bugs_bitmap()
     {
         $storage = getStorage([
             'table' => [
@@ -156,7 +156,7 @@ class TestCaseStorageBugs extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_storage_cursor_bug()
+    public function test_case_storage_bugs_cursor()
     {
         $storage = getStorage([
             'table' => [
@@ -195,7 +195,7 @@ class TestCaseStorageBugs extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_storage_handle_values_bug()
+    public function test_case_storage_bugs_handle_values()
     {
         $storage = getStorage([
             'table' => [
@@ -224,7 +224,7 @@ class TestCaseStorageBugs extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_storage_new_type_compressed_binary()
+    public function test_case_storage_bugs_new_type_compressed_binary()
     {
         $storage = getStorage([
             'table' => [
@@ -258,5 +258,45 @@ class TestCaseStorageBugs extends AbstractTestCase
         $bean = $tablenull->get([$id])->generator()->current();
         $this->assertTrue($bean->compressed === null);
         */
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_bugs_bitmap_iterate_order()
+    {
+        $storage = getStorage([
+            'table' => [
+                'fields' => [
+                    'string' => Type::bool(),
+                ],
+                'bitmap' => [
+                    'fields' => [
+                        'string' => Type::bitmapBool(),
+                    ],
+                ],
+            ] + Storage::getShardsClusterConfig(),
+        ]);
+        $table = $storage->table();
+        $table->createSync();
+        foreach (range(1, 1000) as $_) {
+            $table->insertSync(['string' => mt_rand(0, 1)]);
+        }
+        $table->bitmapCreate();
+        $table->bitmapPopulate();
+        $iterator = $table->search('*')->generator();
+        $values = iterator_to_array($iterator);
+        $count = 0;
+        $ids = array_flip(range(1, 450));
+        foreach ($values as $id => $bean) {
+            $this->assertTrue(isset($ids[$id]));
+            unset($ids[$id]);
+            $count++;
+            $this->assertTrue($count === $id);
+            if ($count === 450) {
+                break;
+            }
+        }
+        $this->assertTrue($ids === []);
     }
 }
