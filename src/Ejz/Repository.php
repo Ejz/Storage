@@ -449,8 +449,8 @@ class Repository
                 return;
             }
             $fields = array_values($this->getFields());
-            [$returnFields, $pk] = [true, [$this->getPk()]];
-            $params = compact('fields', 'pk', 'returnFields');
+            [$returnFields, $pk, $order] = [true, [$this->getPk()], true];
+            $params = compact('fields', 'returnFields', 'pk', 'order');
             $iterators = [];
             foreach ($dbs as ['db' => $db, 'ids' => $ids]) {
                 $iterators[] = $db->get($table, $ids, $params);

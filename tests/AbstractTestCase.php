@@ -29,6 +29,19 @@ abstract class AbstractTestCase extends TestCase
         $this->pool = \Container\getDatabasePool();
         $this->cache = \Container\getCache();
         $this->bitmap = \Container\getBitmap();
+        $names = $this->pool->names();
+        foreach ($names as $name) {
+            $db = $this->pool->db($name);
+            $tables = $db->tablesSync();
+            foreach ($tables as $table) {
+                $db->dropSync($table);
+            }
+        }
+        $list = $this->bitmap->LIST();
+        foreach ($list as $index) {
+            $list = $this->bitmap->DROP($index);
+        }
+        $this->cache->clear();
     }
 
     /**
@@ -36,13 +49,7 @@ abstract class AbstractTestCase extends TestCase
      */
     protected function tearDown(): void
     {
-        $this->pool->each(function ($db) {
-            foreach (wait($db->tables()) as $table) {
-                $this->bitmap->DROP($table);
-                wait($db->drop($table));
-            }
-            $db->close();
-        });
+        $this->pool->close();
     }
 
     /**

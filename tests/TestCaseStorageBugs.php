@@ -299,4 +299,51 @@ class TestCaseStorageBugs extends AbstractTestCase
         }
         $this->assertTrue($ids === []);
     }
+
+    /**
+     * @test
+     */
+    public function test_case_storage_bugs_order_after_sort()
+    {
+        $storage = getStorage([
+            'table' => [
+                'fields' => [
+                    'int' => Type::int(),
+                ],
+                'bitmap' => [
+                    'fields' => [],
+                ],
+                'getSortScore' => function ($values) {
+                    return $values['int'];
+                },
+            ] + Storage::getShardsClusterConfig(),
+        ]);
+        $table = $storage->table();
+        $table->createSync();
+        $ids = [];
+        foreach (range(1, 1000) as $_) {
+            $ids[] = $table->insertSync(['int' => mt_rand()]);
+        }
+        $allids = $ids;
+        $table->sort();
+        $table->bitmapCreate();
+        $table->bitmapPopulate();
+        $ids = [];
+        $min = PHP_INT_MAX;
+        $max = 0;
+        foreach ($table->search('*')->generator() as $id => $bean) {
+            $min = min($min, $bean->int);
+            $max = max($max, $bean->int);
+            $this->assertTrue($min <= $bean->int && $bean->int <= $max);
+            $ids[] = $id;
+            if (count($ids) === 500) {
+                break;
+            }
+        }
+        $this->assertEquals($ids, array_map('intval', range(1, 500)));
+        foreach ($table->search('*')->generator() as $id => $_) {
+            unset($allids[array_search($id, $allids)]);
+        }
+        $this->assertTrue($allids === []);
+    }
 }

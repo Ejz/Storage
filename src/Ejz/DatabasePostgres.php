@@ -551,12 +551,14 @@ class DatabasePostgres implements DatabaseInterface
                 'pk' => null,
                 'fields' => null,
                 'returnFields' => false,
+                'order' => false,
                 'config' => [],
             ];
             [
                 'pk' => $pk,
                 'fields' => $fields,
                 'returnFields' => $returnFields,
+                'order' => $order,
                 'config' => $config,
             ] = $params;
             $config += $this->config;
@@ -577,7 +579,7 @@ class DatabasePostgres implements DatabaseInterface
                     'returnFields' => $returnFields,
                     'limit' => $iterator_chunk_size,
                     'config' => compact('iterator_chunk_size'),
-                    'order' => false,
+                    'order' => $order,
                 ]);
                 while (yield $iterator->advance()) {
                     yield $emit($iterator->getCurrent());

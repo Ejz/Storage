@@ -2,8 +2,6 @@
 
 namespace Ejz\Type;
 
-use Ejz\AbstractType;
-
 class TypeBitmapBool extends TypeBool
 {
     /**
