@@ -228,9 +228,9 @@ class TestCaseStorage extends AbstractTestCase
             ],
         ]);
         $table = $storage->table();
-        wait($table->create());
-        $id1 = wait($table->insert(['field1' => 'text1']));
-        $id2 = wait($table->insert(['field1' => 'text2']));
+        $table->createSync();
+        $id1 = $table->insertSync(['field1' => 'text1']);
+        $id2 = $table->insertSync(['field1' => 'text2']);
         [$id1 => $bean1, $id2 => $bean2] = iterator_to_array($table->get([$id1, $id2])->generator());
         $values1 = $bean1->getValues();
         $values2 = $bean2->getValues();
@@ -722,6 +722,7 @@ class TestCaseStorage extends AbstractTestCase
         foreach ($table->iterate($params)->generator() as $bean) {
             $_ids[] = $bean->getId();
         }
+        sort($_ids);
         $this->assertEquals($ids, $_ids);
         arsort($ids);
         $ids = array_values($ids);
@@ -731,6 +732,9 @@ class TestCaseStorage extends AbstractTestCase
         foreach ($table->iterate($params)->generator() as $bean) {
             $_ids[] = $bean->getId();
         }
+        arsort($_ids);
+        $_ids = array_values($_ids);
+        $ids = array_values($ids);
         $this->assertEquals($ids, $_ids);
         $_ids = [];
         $iterator_chunk_size = mt_rand(1, 10);
@@ -744,10 +748,9 @@ class TestCaseStorage extends AbstractTestCase
         sort($ids);
         sort($_ids);
         $this->assertEquals($ids, $_ids);
-        $params = ['returnFields' => false];
         foreach ($table->iterate($params)->generator() as $id => $values) {
             $this->assertTrue($id > 0);
-            $this->assertTrue($values['text1'] === '');
+            $this->assertTrue($values->text1 === '');
         }
     }
 
@@ -829,14 +832,14 @@ class TestCaseStorage extends AbstractTestCase
                     'text1' => Type::int(),
                 ],
                 'getSortScore' => function ($values) {
-                    return $values['text1'];
+                    return $values->getValues()['text1'];
                 },
             ] + (mt_rand(0, 1) ? Storage::getShardsClusterConfig() : []),
         ]);
         $table = $storage->table();
         $table->createSync();
         $text1s = [];
-        foreach (range(1, 1000) as $_) {
+        foreach (range(1, array_rand(array_flip([10, 100, 1000]))) as $_) {
             $_ = mt_rand(1, 100);
             $text1s[] = $_;
             $table->insertSync(['text1' => $_]);
@@ -845,8 +848,15 @@ class TestCaseStorage extends AbstractTestCase
         $min = min($text1s);
         $max = max($text1s);
         $this->assertTrue($min < $max);
-        $this->assertTrue($table->iterate(['asc' => true])->generator()->current()->text1 === $max);
-        $this->assertTrue($table->iterate(['asc' => false])->generator()->current()->text1 === $min);
+        $collect = [[], []];
+        foreach ($storage->getPool()->names() as $name) {
+            $gen = $table->iterate(['asc' => true, 'poolFilter' => $name])->generator();
+            $collect[0][] = $gen->current()->text1;
+            $gen = $table->iterate(['asc' => false, 'poolFilter' => $name])->generator();
+            $collect[1][] = $gen->current()->text1;
+        }
+        $this->assertEquals(min($collect[1]), $min);
+        $this->assertEquals(max($collect[0]), $max);
     }
 
     /**

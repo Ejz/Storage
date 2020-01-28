@@ -9,17 +9,17 @@ use Amp\Promise;
 class Producer implements Iterator
 {
     /** @var \Amp\Producer */
-    private $producer;
+    private $iterator;
 
     /** @var int */
     private $size;
 
     /**
-     * @param callable $producer
+     * @param Iterator|callable $iterator
      */
-    public function __construct(callable $producer)
+    public function __construct($iterator)
     {
-        $this->producer = new \Amp\Producer($producer);
+        $this->iterator = is_callable($iterator) ? new \Amp\Producer($iterator) : $iterator;
     }
 
     /**
@@ -27,7 +27,7 @@ class Producer implements Iterator
      */
     public function advance(): Promise
     {
-        return $this->producer->advance();
+        return $this->iterator->advance();
     }
 
     /**
@@ -35,7 +35,7 @@ class Producer implements Iterator
      */
     public function getCurrent()
     {
-        return $this->producer->getCurrent();
+        return $this->iterator->getCurrent();
     }
 
     /**
@@ -59,77 +59,102 @@ class Producer implements Iterator
      */
     public function generator(): Generator
     {
-        $iterator = function ($producer) {
-            if (yield $producer->advance()) {
-                return $producer->getCurrent();
+        $iterator = function ($iterator) {
+            if (yield $iterator->advance()) {
+                return $iterator->getCurrent();
             }
         };
-        while (($yield = Promise\wait(\Amp\call($iterator, $this->producer))) !== null) {
+        while (($yield = Promise\wait(\Amp\call($iterator, $this->iterator))) !== null) {
             yield $yield[0] => $yield[1];
         }
     }
 
     /**
-     * @param array $iterators
-     * @param array $params
+     * @param Iterator $iterator
+     * @param array    $ids
      *
      * @return Iterator
      */
-    public static function merge(array $iterators, array $params): Iterator
+    public static function getIteratorWithIdsOrder(Iterator $iterator, array $ids): Iterator
     {
-        $emit = function ($emit) use ($iterators, $params) {
-            $params += [
-                'asc' => true,
-                'rand' => false,
-            ];
-            [
-                'asc' => $asc,
-                'rand' => $rand,
-            ] = $params;
-            $inc = $asc ? 1 : -1;
+        $emitter = new \Amp\Emitter();
+        $return = $emitter->iterate();
+        $collect = [];
+        $p1 = \Amp\call(function () use (&$collect, &$iterator, &$emitter) {
+            while ((yield $iterator->advance()) && $emitter !== null) {
+                [$id, $bean] = $iterator->getCurrent();
+                $collect[$id] = $bean;
+            }
+            $iterator = null;
+        });
+        $p2 = \Amp\call(function ($ids) use (&$collect, &$iterator, &$emitter) {
+            $pointer = 0;
+            $count = count($ids);
+            while ($iterator !== null && $emitter !== null && $pointer < $count) {
+                $id = $ids[$pointer];
+                if (isset($collect[$id])) {
+                    yield $emitter->emit([$id, $collect[$id]]);
+                    $pointer++;
+                } else {
+                    yield \Amp\delay(20);
+                }
+            }
+            if ($emitter === null) {
+                return;
+            }
+            for (; $pointer < $count; $pointer++) {
+                $id = $ids[$pointer];
+                if (isset($collect[$id])) {
+                    yield $emitter->emit([$id, $collect[$id]]);
+                }
+            }
+        }, $ids);
+        Promise\all([$p1, $p2])->onResolve(function ($exception) use (&$emitter) {
+            if ($exception) {
+                $emitter->fail($exception);
+                $emitter = null;
+            } else {
+                $emitter->complete();
+            }
+        });
+        return new self($return);
+    }
+
+    /**
+     * @param array     $iterators
+     * @param ?callable $score
+     *
+     * @return Iterator
+     */
+    public static function getIteratorWithSortedValues(array $iterators, ?callable $score): Iterator
+    {
+        $emit = function ($emit) use ($iterators, $score) {
             $values = [];
-            $ids = [];
-            $already = [];
-            do {
+            while (true) {
                 $results = yield array_map(function ($iterator) {
                     return $iterator->advance();
                 }, array_diff_key($iterators, $values));
                 foreach ($results as $key => $result) {
                     if ($result) {
                         $value = $iterators[$key]->getCurrent();
-                        if (!isset($already[$value[0]])) {
-                            $already[$value[0]] = true;
-                            $values[$key] = $value;
-                            $ids[$value[0]] = $key;
-                        }
+                        $values[$key] = $value;
                     } else {
                         unset($iterators[$key]);
                     }
                 }
                 if (!$values) {
-                    if (!$iterators) {
-                        break;
-                    }
-                    continue;
+                    break;
                 }
-                if ($rand) {
-                    foreach ($ids as $id => $k) {
-                        yield $emit($values[$k]);
-                        unset($values[$k]);
+                uasort($values, function ($v1, $v2) use ($score) {
+                    if ($score === null) {
+                        return $v1[0] > $v2[0];
                     }
-                    $ids = [];
-                    continue;
-                }
-                $_ids = array_keys($ids);
-                $id = $asc ? min($_ids) : max($_ids);
-                do {
-                    $k = $ids[$id];
-                    yield $emit($values[$k]);
-                    unset($values[$k]);
-                    unset($ids[$id]);
-                    $id += $inc;
-                } while (isset($ids[$id]));
-            } while (true);
+                    return $score($v1[1]) < $score($v2[1]);
+                });
+                $key = key($values);
+                yield $emit($values[$key]);
+                unset($values[$key]);
+            }
         };
         return new self($emit);
     }

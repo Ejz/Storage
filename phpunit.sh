@@ -25,11 +25,20 @@ if [ "$action" = "begin" -o "$action" = "start" ]; then
     $sudo docker run --name phpunit_REDIS -p "$in":6380:6379 -d redis
     echo REDIS_HOST="$in" >>"$dotenv"
     echo REDIS_PORT=6380 >>"$dotenv"
+    echo >>"$dotenv"
     #
     $sudo docker pull ejzspb/bitmap
-    $sudo docker run --name phpunit_BITMAP -p "$in":61001:61000 -d ejzspb/bitmap
-    echo BITMAP_HOST="$in" >>"$dotenv"
-    echo BITMAP_PORT=61001 >>"$dotenv"
+    BITMAP_ENVS="TEST0,TEST1,TEST2"
+    echo BITMAP_ENVS="$BITMAP_ENVS" >>"$dotenv"
+    i=0
+    for BITMAP in `echo "$BITMAP_ENVS" | tr ',' ' '`; do
+        i=$((i + 1))
+        p=$((i + 61000))
+        $sudo docker run --name phpunit_BITMAP_"$BITMAP" -p "$in":"$p":61000 -d ejzspb/bitmap
+        echo BITMAP_"$BITMAP"_HOST="$in" >>"$dotenv"
+        echo BITMAP_"$BITMAP"_PORT="$p" >>"$dotenv"
+    done
+    echo >>"$dotenv"
     #
     $sudo docker pull postgres:11
     DB_ENVS="TEST0,TEST1,TEST2"
@@ -46,6 +55,7 @@ if [ "$action" = "begin" -o "$action" = "start" ]; then
         echo DB_"$DB"_NAME=postgres >>"$dotenv"
         echo DB_"$DB"_PASSWORD=1 >>"$dotenv"
     done
+    echo >>"$dotenv"
     sleep 5
     #
     exit

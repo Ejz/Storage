@@ -413,7 +413,7 @@ class Repository
     }
 
     /**
-     * @param array  $ids
+     * @param array $ids
      *
      * @return Iterator
      */
@@ -426,15 +426,14 @@ class Repository
             $table = $this->getTable();
             $dbs = [];
             $meta = [];
+            $cacheValues = [];
             foreach ($ids as $id) {
                 if ($this->cache !== null) {
                     $ck = $table . '.' . $id;
                     $cache = $cache ?? $this->storage->getCache();
                     $v = $cache->get($ck);
                     if ($v !== null) {
-                        [$id, $fields] = $v;
-                        $bean = $this->getBeanWithFields($id, $fields);
-                        yield $emit([$id, $bean]);
+                        $cacheValues[] = $v;
                         continue;
                     }
                     $ct = [$table, $table . '.' . $id];
@@ -445,24 +444,23 @@ class Repository
                 $dbs[$name] = $dbs[$name] ?? ['db' => $db, 'ids' => []];
                 $dbs[$name]['ids'][] = $id;
             }
-            if (!$dbs) {
-                return;
-            }
-            $fields = array_values($this->getFields());
-            [$returnFields, $pk, $order] = [true, [$this->getPk()], true];
-            $params = compact('fields', 'returnFields', 'pk', 'order');
-            $iterators = [];
+            $iterators = [Iterator\fromIterable($cacheValues)];
             foreach ($dbs as ['db' => $db, 'ids' => $ids]) {
+                $params = $params ?? [
+                    'pk' => [$this->getPk()],
+                    'fields' => array_values($this->getFields()),
+                    'returnFields' => true,
+                ];
                 $iterators[] = $db->get($table, $ids, $params);
             }
-            $iterator = count($iterators) === 1 ? $iterators[0] : Producer::merge($iterators, []);
+            $iterator = Iterator\merge($iterators);
             while (yield $iterator->advance()) {
-                [$id, $fields] = $v = $iterator->getCurrent();
+                [$id, $fields] = $value = $iterator->getCurrent();
                 $bean = $this->getBeanWithFields($id, $fields);
-                if ($this->cache !== null) {
+                if (isset($meta[$id])) {
                     [$ck, $ct] = $meta[$id];
                     $cache = $cache ?? $this->storage->getCache();
-                    $cache->set($ck, $v, $this->cache['ttl'], $ct);
+                    $cache->set($ck, $value, $this->cache['ttl'], $ct);
                     foreach ($this->cache['fieldsToId'] as $f2id) {
                         $v = md5(serialize($bean->$f2id));
                         $ck = $table . '.' . $f2id . '.' . $v;
@@ -483,19 +481,13 @@ class Repository
     public function iterate(array $params = []): Iterator
     {
         $emit = function ($emit) use ($params) {
-            $params += [
-                'fields' => null,
+            $params = [
+                'pk' => [$this->getPk()],
+                'fields' => array_values($this->getFields()),
                 'returnFields' => true,
-                'poolFilter' => null,
-            ];
-            [
-                'fields' => $fields,
-                'returnFields' => $returnFields,
-                'poolFilter' => $poolFilter,
-            ] = $params;
-            $fields = $fields ?? array_values($this->getFields());
-            $pk = [$this->getPk()];
-            $params = compact('fields', 'pk') + $params;
+            ] + $params;
+            $poolFilter = $params['poolFilter'] ?? null;
+            unset($params['poolFilter']);
             $table = $this->getTable();
             $pool = $this->getReadablePool();
             if ($poolFilter !== null) {
@@ -505,11 +497,16 @@ class Repository
             foreach ($pool->names() as $name) {
                 $iterators[] = $pool->db($name)->iterate($table, $params);
             }
-            $iterator = count($iterators) === 1 ? $iterators[0] : Producer::merge($iterators, $params);
+            $iterator = Iterator\merge($iterators);
+            $ids = [];
             while (yield $iterator->advance()) {
                 [$id, $fields] = $iterator->getCurrent();
-                $ret = $returnFields ? $this->getBeanWithFields($id, $fields) : $fields;
-                yield $emit([$id, $ret]);
+                if (isset($ids[$id])) {
+                    continue;
+                }
+                $ids[$id] = true;
+                $bean = $this->getBeanWithFields($id, $fields);
+                yield $emit([$id, $bean]);
             }
         };
         return new Producer($emit);
@@ -543,6 +540,16 @@ class Repository
     }
 
     /**
+     * @param array $conditions
+     *
+     * @return Promise
+     */
+    public function exists(array $conditions): Promise
+    {
+        return $this->filter($conditions)->advance();
+    }
+
+    /**
      * @param string $query
      *
      * @return Iterator
@@ -553,12 +560,11 @@ class Repository
         $iterator_chunk_size = $this->config['iterator_chunk_size'];
         $emit = function ($emit) use ($size, $cursor, $iterator_chunk_size) {
             while ($size > 0) {
-                $bitmap = $bitmap ?? $this->storage->getBitmap();
-                $ids = $bitmap->CURSOR($cursor, 'LIMIT', $iterator_chunk_size);
-                $size -= $iterator_chunk_size;
-                $iterator = $this->get($ids);
+                $limit = min($size, $iterator_chunk_size);
+                $iterator = $this->bitmapIterator($cursor, $limit);
                 while (yield $iterator->advance()) {
                     yield $emit($iterator->getCurrent());
+                    $size--;
                 }
             }
         };
@@ -568,13 +574,40 @@ class Repository
     }
 
     /**
-     * @param array $conditions
+     * @param string $cursor
+     * @param int    $limit
      *
-     * @return Promise
+     * @return Iterator
      */
-    public function exists(array $conditions): Promise
+    public function bitmapIterator(string $cursor, int $limit): Iterator
     {
-        return $this->filter($conditions)->advance();
+        $inc = 0;
+        $getSortScore = $this->config['getSortScore'] ?? null;
+        if ($getSortScore !== null) {
+            $inc = count($this->pool->names());
+        }
+        $ids = $this->storage->getBitmap()->CURSOR($cursor, 'LIMIT', $limit + $inc);
+        $iterators = [];
+        foreach ($ids as $id) {
+            $db = $this->getReadablePool($id)->random();
+            $name = $db->getName();
+            $iterators[$name] = $iterators[$name] ?? [];
+            $iterators[$name][] = $id;
+        }
+        $iterators = array_map(function ($ids) {
+            $iterator = $this->get($ids);
+            $iterator = Producer::getIteratorWithIdsOrder($iterator, $ids);
+            return $iterator;
+        }, $iterators);
+        $iterator = Producer::getIteratorWithSortedValues($iterators, $getSortScore);
+        if ($inc > 0) {
+            $current = 0;
+            $iterator = Iterator\filter($iterator, function () use (&$current, $limit) {
+                $current++;
+                return $current <= $limit;
+            });
+        }
+        return $iterator;
     }
 
     /**
@@ -684,7 +717,7 @@ class Repository
             $scores = [];
             $generator = $this->iterate(['poolFilter' => $name])->generator();
             foreach ($generator as $id => $bean) {
-                $scores[$id] = $getSortScore($bean->getValues());
+                $scores[$id] = $getSortScore($bean);
             }
             foreach ($this->getSortChains($scores) as $ids) {
                 $max = max($ids);
@@ -715,17 +748,6 @@ class Repository
     {
         $table = $this->getTable();
         $this->storage->getBitmap()->DROP($table);
-    }
-
-    /**
-     * @param string $cursor
-     * @param int    $limit
-     *
-     * @return array
-     */
-    public function bitmapCursor(string $cursor, int $limit): array
-    {
-        return $this->storage->getBitmap()->CURSOR($cursor, 'LIMIT', $limit);
     }
 
     /**
