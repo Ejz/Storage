@@ -24,13 +24,14 @@ function getCache(): object
 /**
  * @return object
  */
-function getBitmap(): object
+function getBitmap(string $name): object
 {
-    $host = getenv('BITMAP_HOST');
-    $port = getenv('BITMAP_PORT');
+    $name = strtoupper($name);
+    $host = getenv("BITMAP_{$name}_HOST") ?: getenv('BITMAP_HOST');
+    $port = getenv("BITMAP_{$name}_PORT") ?: getenv('BITMAP_PORT');
     $persistent = false;
     $client = new \Ejz\RedisClient(compact('persistent', 'host', 'port'));
-    return new \Ejz\Bitmap($client);
+    return new \Ejz\Bitmap($name, $client);
 }
 
 /**
@@ -56,11 +57,24 @@ function getDatabase(string $name): object
 function getDatabasePool(): object
 {
     $envs = getenv('DB_ENVS');
-    $dbs = [];
+    $instances = [];
     foreach (explode(',', $envs) as $env) {
-        $dbs[] = getDatabase(strtolower($env));
+        $instances[] = getDatabase(strtolower($env));
     }
-    return new \Ejz\DatabasePool($dbs);
+    return new \Ejz\Pool($instances);
+}
+
+/**
+ * @return object
+ */
+function getBitmapPool(): object
+{
+    $envs = getenv('BITMAP_ENVS');
+    $instances = [];
+    foreach (explode(',', $envs) as $env) {
+        $instances[] = getBitmap(strtolower($env));
+    }
+    return new \Ejz\Pool($instances);
 }
 
 /**
@@ -70,8 +84,8 @@ function getDatabasePool(): object
  */
 function getStorage(array $repositories): object
 {
-    $pool = getDatabasePool();
+    $databasePool = getDatabasePool();
+    $bitmapPool = getBitmapPool();
     $cache = getCache();
-    $bitmap = getBitmap();
-    return new \Ejz\Storage($pool, $cache, $bitmap, $repositories);
+    return new \Ejz\Storage($databasePool, $bitmapPool, $cache, $repositories);
 }

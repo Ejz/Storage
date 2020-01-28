@@ -119,65 +119,69 @@ class Storage
         $readablePoolFilter = function ($smth, $names) use ($primary) {
             return [$names[$primary]];
         };
-        $writablePoolFilter = function ($smth, $name) {
+        $writablePoolFilter = function ($smth, $names) {
             return $names;
         };
         return compact('primaryPoolFilter', 'readablePoolFilter', 'writablePoolFilter');
     }
 
     /**
-     * @param ?string $field     (optional)
-     * @param bool    $fieldAsId (optional)
+     * @param ?string $field (optional)
+     * @param bool    $asId  (optional)
      *
      * @return array
      */
-    public static function getShardsClusterConfig(
-        ?string $field = null,
-        bool $fieldAsId = false
-    ): array {
-        $getPoolClosure = function ($readable) use ($field, $fieldAsId) {
-            return function ($id, $values, $names, $nargs) use ($readable, $field, $fieldAsId) {
-                $c = count($names);
-                $keys = array_keys($names);
-                if ($fieldAsId && isset($values[$field])) {
-                    $id = $values[$field];
-                }
-                if ($id !== null) {
-                    $id = abs($id);
-                    $id %= $c;
-                    $id -= 1;
-                    $id = $id < 0 ? $id + $c : $id;
-                    $key = $keys[$id];
-                    return [$names[$key]];
-                }
-                $values = $values ?? [];
-                $v = $field === null ? null : ($values[$field] ?? null);
-                if ($v !== null) {
-                    $crc = crc32($v);
-                    $crc %= $c;
-                    $key = $keys[$crc];
-                    return [$names[$key]];
-                }
-                if ($readable) {
-                    return $nargs === 0 ? $names : [];
-                }
+    public static function getShardsClusterConfig(?string $field = null, bool $asId = false): array
+    {
+        $readablePoolFilter = function ($smth, $names) use ($field, $asId) {
+            if ($smth === null) {
+                return $names;
+            }
+            $c = count($names);
+            $keys = array_keys($names);
+            if (is_numeric($smth)) {
+                $id = $smth;
+                id:
+                $id = abs($id);
+                $id %= $c;
+                $id -= 1;
+                $id = $id < 0 ? $id + $c : $id;
+                $key = $keys[$id];
+                return [$names[$key]];
+            }
+            if (!$smth instanceof AbstractBean) {
+                return [];
+            }
+            if ($field === null) {
                 return [$names[array_rand($names)]];
-            };
+            }
+            $values = $smth->getValues();
+            $value = $values[$field] ?? null;
+            if ($value === null) {
+                return [$names[array_rand($names)]];
+            }
+            if ($asId) {
+                $id = $value;
+                goto id;
+            }
+            $crc = crc32($value);
+            $crc %= $c;
+            $key = $keys[$crc];
+            return [$names[$key]];
         };
-        $getReadablePool = $getPoolClosure(true);
-        $getWritablePool = $getPoolClosure(false);
+        $writablePoolFilter = $readablePoolFilter;
         $getPkStartWith = function ($name, $names) {
-            $_ = (int) array_search($name, $names);
-            return $_ + 1;
+            $idx = (int) array_search($name, $names);
+            return $idx + 1;
         };
         $getPkIncrementBy = function ($name, $names) {
             return count($names);
         };
-        return compact([
-            'getReadablePool',
-            'getWritablePool',
-            'getPkStartWith',
+        return compact(
             'getPkIncrementBy',
-        ]);
+            'getPkStartWith',
+            'readablePoolFilter',
+            'writablePoolFilter'
+        );
     }
 }

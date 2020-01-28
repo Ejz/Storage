@@ -610,8 +610,8 @@ class TestCaseStorage extends AbstractTestCase
                     'fields' => [
                         'field1' => Type::string(),
                     ],
-                ],
-            ] + Storage::getPrimarySecondaryClusterConfig(0),
+                ] + Storage::getPrimarySecondaryClusterConfig(0),
+            ],
         ]);
         $table = $storage->table();
         $table->createSync();
@@ -632,23 +632,25 @@ class TestCaseStorage extends AbstractTestCase
     {
         $storage = \Container\getStorage([
             'table' => [
-                'fields' => [
-                    'field1' => Type::string(),
-                ],
-            ] + Storage::getShardsClusterConfig(),
+                'database' => [
+                    'fields' => [
+                        'field1' => Type::string(),
+                    ],
+                ] + Storage::getShardsClusterConfig(),
+            ],
         ]);
         $table = $storage->table();
         $table->createSync();
         foreach (range(1, 1000) as $_) {
-            wait($table->insert());
+            $table->insertSync();
         }
         $count = count($names = $table->getDatabasePool()->names());
         $diff = 0.3 * 1000 / $count;
         $min = 1000 / $count - $diff;
         $max = 1000 / $count + $diff;
         foreach ($names as $name) {
-            $db = $table->getDatabasePool()->db($name);
-            $c = wait($db->count($table->getTable()));
+            $db = $table->getDatabasePool()->instance($name);
+            $c = $db->countSync($table->getDatabaseTable());
             $this->assertTrue($min <= $c && $c <= $max);
         }
     }
@@ -658,53 +660,27 @@ class TestCaseStorage extends AbstractTestCase
      */
     public function test_case_storage_cluster_3()
     {
-        $names = $this->pool->names();
-        $table = 'table' . mt_rand();
-        $config = [
-            $table => [
-                'table' => $table,
-                'fields' => [
-                    'field1' => Type::string(),
-                ],
-            ] + Storage::getShardsClusterConfig('field1'),
-        ];
-        foreach ($names as $name) {
-            $config[$name] = [
-                'table' => $table,
-                'fields' => [
-                    'field1' => Type::string(),
-                ],
-                'getWritablePool' => function () use ($name) {
-                    return [$name];
-                },
-                'getReadablePool' => function () use ($name) {
-                    return [$name];
-                },
-            ];
-        }
-        $storage = \Container\getStorage($config);
-        $storageTable = $storage->$table();
-        wait($storageTable->create());
+        $storage = \Container\getStorage([
+            'table' => [
+                'database' => [
+                    'fields' => [
+                        'field1' => Type::string(),
+                    ],
+                ] + Storage::getShardsClusterConfig('field1'),
+            ],
+        ]);
+        $table = $storage->table();
+        $table->createSync();
         $ids = [];
-        foreach (range(1, 1000) as $_) {
-            $ids[] = wait($storageTable->insert(['field1' => mt_rand()]));
+        foreach (range(1, 100) as $_) {
+            $ids[] = $table->insertSync(['field1' => mt_rand()]);
         }
-        $count = count($names = $storageTable->getDatabasePool()->names());
-        $diff = 0.3 * 1000 / $count;
-        $min = 1000 / $count - $diff;
-        $max = 1000 / $count + $diff;
-        foreach ($names as $name) {
-            $db = $storageTable->getDatabasePool()->db($name);
-            $c = wait($db->count($storageTable->getTable()));
-            $this->assertTrue($min <= $c && $c <= $max);
-        }
-        $id = $ids[array_rand($ids)];
-        $field1 = $storageTable->get([$id])->generator()->current()->field1;
-        $this->assertTrue(!empty($field1));
-        $name = $this->call($storageTable, 'getReadablePool', $id, null)->random()->getName();
-        $this->assertTrue(!empty($name));
-        $f = $storage->$name()->get([$id])->generator()->current()->field1;
-        $this->assertTrue($field1 === $f);
+        $ids = array_flip($ids);
+        $id1 = array_rand($ids);
+        $field1 = $table->get([$id1])->generator()->current()->field1;
+        $id2 = $table->insertSync(['field1' => $field1]);
+        $size = $table->getDatabasePool()->size();
+        $this->assertTrue($id1 % $size === $id2 % $size);
     }
 
     /**
@@ -714,26 +690,28 @@ class TestCaseStorage extends AbstractTestCase
     {
         $config = [
             'table' => [
-                'fields' => [
-                    'field1' => Type::string(),
-                ],
-            ] + Storage::getShardsClusterConfig(),
+                'database' => [
+                    'fields' => [
+                        'field1' => Type::string(),
+                    ],
+                ] + Storage::getShardsClusterConfig(),
+            ],
         ];
         $storage = \Container\getStorage($config);
         $table = $storage->table();
         $table->createSync();
         $ids = [];
         foreach (range(1, 10) as $_) {
-            $ids[] = wait($table->insert(['field1' => 'foo']));
+            $ids[] = $table->insertSync(['field1' => 'foo']);
         }
         $id = $ids[array_rand($ids)];
         $bean = $table->get([$id])->generator()->current();
         $this->assertTrue($bean->field1 === 'foo');
         $bean->field1 = 'bar';
-        wait($bean->update());
+        $bean->updateSync();
         $bean = $table->get([$id])->generator()->current();
         $this->assertTrue($bean->field1 === 'bar');
-        wait($bean->delete());
+        $bean->deleteSync();
         $bean = $table->get([$id])->generator()->current();
         $this->assertTrue($bean === null);
     }
