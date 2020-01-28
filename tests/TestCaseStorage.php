@@ -4,14 +4,10 @@ namespace Tests;
 
 use Ejz\Type;
 use Ejz\Bean;
-use Ejz\Storage;
 use Ejz\Index;
+use Ejz\Storage;
+use Amp\Promise;
 use RuntimeException;
-
-use function Amp\Promise\wait;
-use function Amp\Promise\all;
-use function Container\getStorage;
-use function Container\getBitmap;
 
 class TestCaseStorage extends AbstractTestCase
 {
@@ -20,30 +16,32 @@ class TestCaseStorage extends AbstractTestCase
      */
     public function test_case_storage_create_1()
     {
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'table' => [
-                'fields' => $_fields = [
-                    'string' => Type::string(),
-                    'int' => Type::int(),
-                    'float' => Type::float(),
-                    'bool' => Type::bool(),
-                    'date' => Type::date(),
-                    'datetime' => Type::dateTime(),
-                    'json' => Type::json(),
-                    'bigint' => Type::bigInt(),
-                    'intarray' => Type::intArray(),
-                    'stringarray' => Type::stringArray(),
-                    'binary' => Type::binary(),
+                'database' => [
+                    'fields' => $_fields = [
+                        'string' => Type::string(),
+                        'int' => Type::int(),
+                        'float' => Type::float(),
+                        'bool' => Type::bool(),
+                        'date' => Type::date(),
+                        'datetime' => Type::dateTime(),
+                        'json' => Type::json(),
+                        'bigint' => Type::bigInt(),
+                        'intarray' => Type::intArray(),
+                        'stringarray' => Type::stringArray(),
+                        'binary' => Type::binary(),
+                    ],
                 ],
             ],
         ]);
         $this->assertTrue($storage instanceof Storage);
         $table = $storage->table();
-        wait($table->create());
-        $db = $table->getPool()->random();
-        $fields = wait($db->fields('table'));
+        $table->createSync();
+        $db = $table->getDatabasePool()->random();
+        $fields = $db->fieldsSync('table');
         $_fields = array_keys($_fields);
-        $_fields[] = $table->getPk();
+        $_fields[] = $table->getDatabasePk();
         sort($fields);
         sort($_fields);
         $this->assertEquals($_fields, $fields);
@@ -54,17 +52,19 @@ class TestCaseStorage extends AbstractTestCase
      */
     public function test_case_storage_create_2()
     {
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'table' => [
-                'table' => 'foo',
+                'database' => [
+                    'table' => 'foo',
+                ],
             ],
         ]);
         $this->assertTrue($storage instanceof Storage);
         $table = $storage->table();
-        wait($table->create());
-        $db = $table->getPool()->random();
-        $this->assertTrue(wait($db->tableExists('foo')));
-        $this->assertTrue(!wait($db->tableExists('table')));
+        $table->createSync();
+        $db = $table->getDatabasePool()->random();
+        $this->assertTrue($db->tableExistsSync('foo'));
+        $this->assertTrue(!$db->tableExistsSync('table'));
     }
 
     /**
@@ -72,16 +72,17 @@ class TestCaseStorage extends AbstractTestCase
      */
     public function test_case_storage_create_3()
     {
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'Table' => [
-                'pk' => 'foo',
+                'database' => [
+                    'pk' => 'foo',
+                ],
             ],
         ]);
-        $this->assertTrue($storage instanceof Storage);
         $table = $storage->Table();
-        wait($table->create());
-        $db = $table->getPool()->random();
-        $fields = wait($db->fields('table'));
+        $table->createSync();
+        $db = $table->getDatabasePool()->random();
+        $fields = $db->fieldsSync('table');
         $this->assertTrue($fields === ['foo']);
     }
 
@@ -90,22 +91,24 @@ class TestCaseStorage extends AbstractTestCase
      */
     public function test_case_storage_create_4()
     {
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'Table' => [
-                'fields' => [
-                    'f1' => Type::string(),
-                    'f2' => Type::string(),
-                ],
-                'indexes' => [
-                    'f1' => ['f1'],
-                    'f2' => ['f1', 'f2'],
+                'database' => [
+                    'fields' => [
+                        'f1' => Type::string(),
+                        'f2' => Type::string(),
+                    ],
+                    'indexes' => [
+                        'f1' => ['f1'],
+                        'f2' => ['f1', 'f2'],
+                    ],
                 ],
             ],
         ]);
         $table = $storage->Table();
-        wait($table->create());
-        $db = $table->getPool()->random();
-        $indexes = wait($db->indexes('table'));
+        $table->createSync();
+        $db = $table->getDatabasePool()->random();
+        $indexes = $db->indexesSync('table');
         $indexes = array_map(function ($fields) {
             return implode(',', $fields);
         }, $indexes);
@@ -119,32 +122,34 @@ class TestCaseStorage extends AbstractTestCase
      */
     public function test_case_storage_create_5()
     {
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'Table' => [
-                'table' => 't',
-                'fields' => [
-                    'f1' => Type::string(),
-                ],
-                'indexes' => [
-                    'f1' => [
-                        'fields' => ['f1'],
-                        'type' => Index::INDEX_TYPE_UNIQUE,
+                'database' => [
+                    'table' => 't',
+                    'fields' => [
+                        'f1' => Type::string(),
+                    ],
+                    'indexes' => [
+                        'f1' => [
+                            'fields' => ['f1'],
+                            'type' => Index::INDEX_TYPE_UNIQUE,
+                        ],
                     ],
                 ],
             ],
         ]);
         $table = $storage->Table();
-        wait($table->create());
-        $db = $table->getPool()->random();
-        $indexes = wait($db->indexes('t'));
+        $table->createSync();
+        $db = $table->getDatabasePool()->random();
+        $indexes = $db->indexesSync('t');
         $indexes = array_map(function ($fields) {
             return implode(',', $fields);
         }, $indexes);
         $indexes = array_flip($indexes);
         $this->assertTrue(isset($indexes['f1']));
-        wait($db->exec('INSERT INTO t (f1) VALUES (1)'));
-        wait(\Amp\Promise\any([$db->exec('INSERT INTO t (f1) VALUES (1)')]));
-        $c = count(wait($db->all('SELECT * FROM t')));
+        $db->execSync('INSERT INTO t (f1) VALUES (1)');
+        Promise\wait(Promise\any([$db->exec('INSERT INTO t (f1) VALUES (1)')]));
+        $c = count($db->allSync('SELECT * FROM t'));
         $this->assertTrue($c === 1);
     }
 
@@ -153,42 +158,48 @@ class TestCaseStorage extends AbstractTestCase
      */
     public function test_case_storage_create_6()
     {
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'parent' => [
-                'pk' => 'parent_id',
-                'fields' => [
-                    'text' => Type::string(true),
+                'database' => [
+                    'pk' => 'parent_id',
+                    'fields' => [
+                        'text' => Type::string(true),
+                    ],
                 ],
             ],
             'child' => [
-                'pk' => 'id',
-                'fields' => [
-                    'parent_id' => Type::bigInt(),
-                ],
-                'foreignKeys' => [
-                    'parent_id' => 'parent.parent_id',
+                'database' => [
+                    'pk' => 'id',
+                    'fields' => [
+                        'parent_id' => Type::bigInt(),
+                    ],
+                    'foreignKeys' => [
+                        'parent_id' => 'parent.parent_id',
+                    ],
                 ],
             ],
         ]);
         $parent = $storage->parent();
-        wait($parent->create());
+        $parent->createSync();
         $child = $storage->child();
-        wait($child->create());
-        $db = $storage->getPool()->random();
-        wait($db->exec('INSERT INTO "parent" DEFAULT VALUES'));
-        wait($db->exec('INSERT INTO "parent" DEFAULT VALUES'));
-        wait($db->exec('INSERT INTO "child" ("parent_id") VALUES (1), (2), (2)'));
+        $child->createSync();
+        $db = $storage->getDatabasePool()->random();
+        $db->execSync('INSERT INTO "parent" DEFAULT VALUES');
+        $db->execSync('INSERT INTO "parent" DEFAULT VALUES');
+        $db->execSync('INSERT INTO "child" ("parent_id") VALUES (1), (2), (2)');
         //
-        wait(\Amp\Promise\any([$db->exec('INSERT INTO "child" ("parent_id") VALUES (3)')]));
-        $c = count(wait($db->all('SELECT * FROM "child"')));
+        $promise = $db->exec('INSERT INTO "child" ("parent_id") VALUES (3)');
+        Promise\wait(Promise\any([$promise]));
+        $c = count($db->allSync('SELECT * FROM "child"'));
         $this->assertTrue($c === 3);
         //
-        wait(\Amp\Promise\any([$db->exec('UPDATE "child" SET "parent_id" = 3 WHERE "parent_id" = 2')]));
-        $c = count(wait($db->all('SELECT * FROM "child" WHERE "parent_id" = 3')));
+        $promise = $db->exec('UPDATE "child" SET "parent_id" = 3 WHERE "parent_id" = 2');
+        Promise\wait(Promise\any([$promise]));
+        $c = count($db->allSync('SELECT * FROM "child" WHERE "parent_id" = 3'));
         $this->assertTrue($c === 0);
         //
-        wait($db->exec('UPDATE "parent" SET "parent_id" = 3 WHERE "parent_id" = 2'));
-        $c = count(wait($db->all('SELECT * FROM "child" WHERE "parent_id" = 3')));
+        $db->execSync('UPDATE "parent" SET "parent_id" = 3 WHERE "parent_id" = 2');
+        $c = count($db->allSync('SELECT * FROM "child" WHERE "parent_id" = 3'));
         $this->assertTrue($c === 2);
     }
 
@@ -197,20 +208,26 @@ class TestCaseStorage extends AbstractTestCase
      */
     public function test_case_storage_crud_1()
     {
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'table' => [
-                'fields' => [
-                    'field1' => Type::string(),
-                    'field2' => Type::string(true),
-                    'field3' => Type::int(),
+                'database' => [
+                    'fields' => [
+                        'field1' => Type::string(),
+                        'field2' => Type::string(true),
+                        'field3' => Type::int(),
+                    ],
                 ],
             ],
         ]);
         $table = $storage->table();
-        wait($table->create());
-        $id = wait($table->insert());
+        $table->createSync();
+        $id = $table->insertSync();
         $this->assertTrue($id > 0);
-        [$id => $bean] = iterator_to_array($table->get([$id])->generator());
+        $id = $table->get([$id])->generator()->key();
+        $this->assertTrue($id > 0);
+        $this->assertTrue(iterator_to_array($table->get([])->generator()) === []);
+        $bean = $table->get([$id])->generator()->current();
+        $this->assertTrue(is_object($bean));
         $values = $bean->getValues();
         $this->assertEquals(['field1' => '', 'field2' => null, 'field3' => 0], $values);
     }
@@ -220,10 +237,12 @@ class TestCaseStorage extends AbstractTestCase
      */
     public function test_case_storage_crud_2()
     {
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'table' => [
-                'fields' => [
-                    'field1' => Type::string(),
+                'database' => [
+                    'fields' => [
+                        'field1' => Type::string(),
+                    ],
                 ],
             ],
         ]);
@@ -244,22 +263,24 @@ class TestCaseStorage extends AbstractTestCase
     public function test_case_storage_crud_exceptions_1()
     {
         $this->expectException(RuntimeException::class);
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'table' => [
-                'field1' => Type::string(),
+                'database' => [
+                    'field1' => Type::string(),
+                ],
             ],
         ]);
         $table = $storage->table();
-        wait($table->create());
+        $table->createSync();
         if (mt_rand(0, 1)) {
-            $bean = $table->getBean(1);
+            $bean = $table->getDatabaseBean(1);
         } else {
-            $bean = $table->getBean();
+            $bean = $table->getDatabaseBean();
             $bean->setId(1);
         }
         $this->assertTrue($bean instanceof Bean);
         $bean->field1 = 'foo';
-        wait($bean->insert());
+        $bean->insertSync();
     }
 
     /**
@@ -268,14 +289,15 @@ class TestCaseStorage extends AbstractTestCase
     public function test_case_storage_crud_exceptions_2()
     {
         $this->expectException(RuntimeException::class);
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'table' => [
                 'field1' => Type::string(),
             ],
         ]);
         $table = $storage->table();
-        wait($table->create());
-        $bean = $table->getBean();
+        $table->createSync();
+        $bean = $table->getDatabaseBean();
+        $this->assertTrue($bean instanceof Bean);
         $bean->field3 = 'foo';
     }
 
@@ -285,14 +307,14 @@ class TestCaseStorage extends AbstractTestCase
     public function test_case_storage_crud_exceptions_3()
     {
         $this->expectException(RuntimeException::class);
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'table' => [
                 'field1' => Type::string(),
             ],
         ]);
         $table = $storage->table();
-        wait($table->create());
-        $bean = $table->getBean();
+        $table->createSync();
+        $bean = $table->getDatabaseBean();
         $bean->field1 = 'foo';
         $bean->update((bool) mt_rand(0, 1));
     }
@@ -303,14 +325,14 @@ class TestCaseStorage extends AbstractTestCase
     public function test_case_storage_crud_exceptions_4()
     {
         $this->expectException(RuntimeException::class);
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'table' => [
                 'field1' => Type::string(),
             ],
         ]);
         $table = $storage->table();
-        wait($table->create());
-        $bean = $table->getBean();
+        $table->createSync();
+        $bean = $table->getDatabaseBean();
         $bean->delete();
     }
 
@@ -320,14 +342,14 @@ class TestCaseStorage extends AbstractTestCase
     public function test_case_storage_crud_exceptions_5()
     {
         $this->expectException(RuntimeException::class);
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'table' => [
                 'field1' => Type::string(),
             ],
         ]);
         $table = $storage->table();
-        wait($table->create());
-        wait($table->insert(['foo' => 'bar']));
+        $table->createSync();
+        $table->insertSync(['foo' => 'bar']);
     }
 
     /**
@@ -335,17 +357,19 @@ class TestCaseStorage extends AbstractTestCase
      */
     public function test_case_storage_crud_update()
     {
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'table' => [
-                'fields' => [
-                    'field1' => Type::string(),
-                    'field2' => Type::int(),
+                'database' => [
+                    'fields' => [
+                        'field1' => Type::string(),
+                        'field2' => Type::int(),
+                    ],
                 ],
             ],
         ]);
         $table = $storage->table();
-        wait($table->create());
-        $id = wait($table->insert());
+        $table->createSync();
+        $id = $table->insertSync();
         $bean = $table->get([$id])->generator()->current();
         $this->assertTrue($bean->field1 === '');
         $this->assertTrue($bean->field2 === 0);
@@ -355,7 +379,8 @@ class TestCaseStorage extends AbstractTestCase
         $this->assertTrue($bean->field2 === 10);
         $this->assertTrue($bean->getValues()['field1'] === '1');
         $this->assertTrue($bean->getValues()['field2'] === 10);
-        $this->assertTrue(wait($bean->update()));
+        $this->assertTrue($bean->updateSync());
+        $this->assertFalse($bean->updateSync());
         unset($bean);
         $bean = $table->get([$id])->generator()->current();
         $this->assertTrue($bean->field1 === '1');
@@ -367,24 +392,26 @@ class TestCaseStorage extends AbstractTestCase
      */
     public function test_case_storage_crud_delete()
     {
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'table' => [
-                'fields' => [
-                    'field1' => Type::string(),
+                'database' => [
+                    'fields' => [
+                        'field1' => Type::string(),
+                    ],
                 ],
             ],
         ]);
         $table = $storage->table();
-        wait($table->create());
-        $id = wait($table->insert(['field1' => 'foo']));
+        $table->createSync();
+        $id = $table->insertSync(['field1' => 'foo']);
         $bean = $table->get([$id])->generator()->current();
         $this->assertTrue($bean->field1 === 'foo');
-        $this->assertTrue(wait($bean->delete()));
-        $this->assertFalse(wait($bean->delete()));
+        $this->assertTrue($bean->deleteSync());
+        $this->assertFalse($bean->deleteSync());
         $_ = iterator_to_array($table->get([$id])->generator());
         $this->assertTrue($_ === []);
-        $id = wait($table->insert());
-        $this->assertTrue(wait($table->delete([$id])) === $storage->getPool()->size());
+        $id = $table->insertSync();
+        $this->assertTrue($table->deleteSync([$id]) === $storage->getDatabasePool()->size());
     }
 
     /**
@@ -392,18 +419,20 @@ class TestCaseStorage extends AbstractTestCase
      */
     public function test_case_storage_crud_insert()
     {
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'table' => [
-                'fields' => [
-                    'field1' => Type::string(),
+                'database' => [
+                    'fields' => [
+                        'field1' => Type::string(),
+                    ],
                 ],
             ],
         ]);
         $table = $storage->table();
-        wait($table->create());
-        $bean = $table->getBean();
+        $table->createSync();
+        $bean = $table->getDatabaseBean();
         $bean->field1 = 'foo';
-        $id = wait($bean->insert());
+        $id = $bean->insertSync();
         $this->assertTrue($id > 0);
         $bean = $table->get([$id])->generator()->current();
         $this->assertTrue($bean->field1 === 'foo');
@@ -414,22 +443,24 @@ class TestCaseStorage extends AbstractTestCase
      */
     public function test_case_storage_json()
     {
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'table' => [
-                'fields' => [
-                    'json' => Type::json(),
+                'database' => [
+                    'fields' => [
+                        'json' => Type::json(),
+                    ],
                 ],
             ],
         ]);
         $table = $storage->table();
-        wait($table->create());
+        $table->createSync();
         $values = [
             'string',
             ['string'],
             ['foo' => 'bar'],
         ];
         foreach ($values as $value) {
-            $id = wait($table->insert(['json' => $value]));
+            $id = $table->insertSync(['json' => $value]);
             $bean = $table->get([$id])->generator()->current();
             $this->assertTrue(serialize($bean->json) === serialize($value));
         }
@@ -440,22 +471,24 @@ class TestCaseStorage extends AbstractTestCase
      */
     public function test_case_storage_binary()
     {
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'table' => [
-                'fields' => [
-                    'binary' => Type::binary(),
+                'database' => [
+                    'fields' => [
+                        'binary' => Type::binary(),
+                    ],
                 ],
             ],
         ]);
         $table = $storage->table();
-        wait($table->create());
+        $table->createSync();
         $values = [
             '',
             chr(0),
             str_repeat(chr(1), 1E7) . str_repeat(chr(2), 1E7),
         ];
         foreach ($values as $value) {
-            $id = wait($table->insert(['binary' => $value]));
+            $id = $table->insertSync(['binary' => $value]);
             $bean = $table->get([$id])->generator()->current();
             $this->assertTrue(serialize($bean->binary) === serialize($value));
         }
@@ -466,15 +499,17 @@ class TestCaseStorage extends AbstractTestCase
      */
     public function test_case_storage_string_array()
     {
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'table' => [
-                'fields' => [
-                    'array' => Type::stringArray(),
+                'database' => [
+                    'fields' => [
+                        'array' => Type::stringArray(),
+                    ],
                 ],
             ],
         ]);
         $table = $storage->table();
-        wait($table->create());
+        $table->createSync();
         $values = [
             [['foo']],
             [['']],
@@ -488,7 +523,7 @@ class TestCaseStorage extends AbstractTestCase
         foreach ($values as $value) {
             $value0 = $value[0];
             $value1 = $value[1] ?? $value0;
-            $id = wait($table->insert(['array' => $value0]));
+            $id = $table->insertSync(['array' => $value0]);
             $bean = $table->get([$id])->generator()->current();
             $this->assertTrue(serialize($bean->array) === serialize($value1));
         }
@@ -499,15 +534,17 @@ class TestCaseStorage extends AbstractTestCase
      */
     public function test_case_storage_int_array()
     {
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'table' => [
-                'fields' => [
-                    'array' => Type::intArray(),
+                'database' => [
+                    'fields' => [
+                        'array' => Type::intArray(),
+                    ],
                 ],
             ],
         ]);
         $table = $storage->table();
-        wait($table->create());
+        $table->createSync();
         $values = [
             [[0]],
             [[''], [0]],
@@ -522,7 +559,7 @@ class TestCaseStorage extends AbstractTestCase
             $value0 = $value[0];
             $value1 = $value[1] ?? $value0;
             $value1 = array_map('intval', $value1);
-            $id = wait($table->insert(['array' => $value0]));
+            $id = $table->insertSync(['array' => $value0]);
             $bean = $table->get([$id])->generator()->current();
             $this->assertTrue(serialize($bean->array) === serialize($value1));
         }
@@ -533,16 +570,18 @@ class TestCaseStorage extends AbstractTestCase
      */
     public function test_case_storage_enum()
     {
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'table' => [
-                'fields' => [
-                    'enum' => Type::enum(['foo', 'bar']),
+                'database' => [
+                    'fields' => [
+                        'enum' => Type::enum(['foo', 'bar']),
+                    ],
                 ],
             ],
         ]);
         $table = $storage->table();
-        wait($table->create());
-        $id = wait($table->insert());
+        $table->createSync();
+        $id = $table->insertSync();
         $bean = $table->get([$id])->generator()->current();
         $this->assertTrue($bean->enum === 'foo');
         $values = [
@@ -554,7 +593,7 @@ class TestCaseStorage extends AbstractTestCase
         foreach ($values as $value) {
             $value0 = $value[0];
             $value1 = $value[1] ?? $value0;
-            $id = wait($table->insert(['enum' => $value0]));
+            $id = $table->insertSync(['enum' => $value0]);
             $bean = $table->get([$id])->generator()->current();
             $this->assertTrue(serialize($bean->enum) === serialize($value1));
         }
@@ -565,21 +604,24 @@ class TestCaseStorage extends AbstractTestCase
      */
     public function test_case_storage_cluster_1()
     {
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'table' => [
-                'fields' => [
-                    'field1' => Type::string(),
+                'database' => [
+                    'fields' => [
+                        'field1' => Type::string(),
+                    ],
                 ],
             ] + Storage::getPrimarySecondaryClusterConfig(0),
         ]);
         $table = $storage->table();
-        wait($table->create());
-        wait($table->insert());
-        $pool = $table->getPool();
+        $table->createSync();
+        $table->insertSync();
+        $pool = $table->getDatabasePool();
         $names = $pool->names();
-        $fields = wait($pool->db($names[0])->fields($table->getTable()));
+        $tbl = $table->getDatabaseTable();
+        $fields = $pool->instance($names[0])->fieldsSync($tbl);
         $this->assertTrue(count($fields) === 2);
-        $fields = wait($pool->db($names[1])->fields($table->getTable()));
+        $fields = $pool->instance($names[1])->fieldsSync($tbl);
         $this->assertTrue(count($fields) === 1);
     }
 
@@ -588,7 +630,7 @@ class TestCaseStorage extends AbstractTestCase
      */
     public function test_case_storage_cluster_2()
     {
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'table' => [
                 'fields' => [
                     'field1' => Type::string(),
@@ -596,16 +638,16 @@ class TestCaseStorage extends AbstractTestCase
             ] + Storage::getShardsClusterConfig(),
         ]);
         $table = $storage->table();
-        wait($table->create());
+        $table->createSync();
         foreach (range(1, 1000) as $_) {
             wait($table->insert());
         }
-        $count = count($names = $table->getPool()->names());
+        $count = count($names = $table->getDatabasePool()->names());
         $diff = 0.3 * 1000 / $count;
         $min = 1000 / $count - $diff;
         $max = 1000 / $count + $diff;
         foreach ($names as $name) {
-            $db = $table->getPool()->db($name);
+            $db = $table->getDatabasePool()->db($name);
             $c = wait($db->count($table->getTable()));
             $this->assertTrue($min <= $c && $c <= $max);
         }
@@ -640,19 +682,19 @@ class TestCaseStorage extends AbstractTestCase
                 },
             ];
         }
-        $storage = getStorage($config);
+        $storage = \Container\getStorage($config);
         $storageTable = $storage->$table();
         wait($storageTable->create());
         $ids = [];
         foreach (range(1, 1000) as $_) {
             $ids[] = wait($storageTable->insert(['field1' => mt_rand()]));
         }
-        $count = count($names = $storageTable->getPool()->names());
+        $count = count($names = $storageTable->getDatabasePool()->names());
         $diff = 0.3 * 1000 / $count;
         $min = 1000 / $count - $diff;
         $max = 1000 / $count + $diff;
         foreach ($names as $name) {
-            $db = $storageTable->getPool()->db($name);
+            $db = $storageTable->getDatabasePool()->db($name);
             $c = wait($db->count($storageTable->getTable()));
             $this->assertTrue($min <= $c && $c <= $max);
         }
@@ -677,9 +719,9 @@ class TestCaseStorage extends AbstractTestCase
                 ],
             ] + Storage::getShardsClusterConfig(),
         ];
-        $storage = getStorage($config);
+        $storage = \Container\getStorage($config);
         $table = $storage->table();
-        wait($table->create());
+        $table->createSync();
         $ids = [];
         foreach (range(1, 10) as $_) {
             $ids[] = wait($table->insert(['field1' => 'foo']));
@@ -701,7 +743,7 @@ class TestCaseStorage extends AbstractTestCase
      */
     public function test_case_storage_iterate_1()
     {
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'table' => [
                 'fields' => [
                     'text1' => Type::string(),
@@ -759,7 +801,7 @@ class TestCaseStorage extends AbstractTestCase
      */
     public function test_case_storage_filter()
     {
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'table' => [
                 'fields' => [
                     'text1' => Type::string(),
@@ -786,7 +828,7 @@ class TestCaseStorage extends AbstractTestCase
      */
     public function test_case_storage_reid()
     {
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'table' => [
                 'fields' => [
                     'text1' => Type::string(),
@@ -808,7 +850,7 @@ class TestCaseStorage extends AbstractTestCase
      */
     public function test_case_storage_sort_chains()
     {
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'table' => [],
         ]);
         $table = $storage->table();
@@ -826,7 +868,7 @@ class TestCaseStorage extends AbstractTestCase
      */
     public function test_case_storage_table_sort()
     {
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'table' => [
                 'fields' => [
                     'text1' => Type::int(),
@@ -849,7 +891,7 @@ class TestCaseStorage extends AbstractTestCase
         $max = max($text1s);
         $this->assertTrue($min < $max);
         $collect = [[], []];
-        foreach ($storage->getPool()->names() as $name) {
+        foreach ($storage->getDatabasePool()->names() as $name) {
             $gen = $table->iterate(['asc' => true, 'poolFilter' => $name])->generator();
             $collect[0][] = $gen->current()->text1;
             $gen = $table->iterate(['asc' => false, 'poolFilter' => $name])->generator();
@@ -866,7 +908,7 @@ class TestCaseStorage extends AbstractTestCase
     {
         $cacheTtl = 3;
         $tbl = 'table' . mt_rand();
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'table' => [
                 'table' => $tbl,
                 'fields' => [
@@ -883,7 +925,7 @@ class TestCaseStorage extends AbstractTestCase
         $id = $table->insertSync(['text1' => 'foo']);
         $text1 = $table->get([$id])->generator()->current()->text1;
         $this->assertTrue($text1 === 'foo');
-        wait(all($table->getPool()->exec("UPDATE {$tbl} SET text1 = ? WHERE {$pk} = ?", 'bar', $id)));
+        wait(all($table->getDatabasePool()->exec("UPDATE {$tbl} SET text1 = ? WHERE {$pk} = ?", 'bar', $id)));
         $text1 = $table->get([$id])->generator()->current()->text1;
         $this->assertTrue($text1 === 'foo');
         sleep($cacheTtl - 1);
@@ -899,7 +941,7 @@ class TestCaseStorage extends AbstractTestCase
      */
     public function test_case_storage_cache_2()
     {
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'table' => [
                 'fields' => [
                     'text1' => Type::string(),
@@ -923,7 +965,7 @@ class TestCaseStorage extends AbstractTestCase
      */
     public function test_case_storage_cache_3()
     {
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'table' => [
                 'fields' => [
                     'text1' => Type::string(),
@@ -948,7 +990,7 @@ class TestCaseStorage extends AbstractTestCase
     {
         $cacheTtl = 3;
         $tbl = 'table' . mt_rand();
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'table' => [
                 'table' => $tbl,
                 'fields' => [
@@ -968,7 +1010,7 @@ class TestCaseStorage extends AbstractTestCase
         $this->assertTrue($text1 === 'foo1');
         $text1 = $table->filter(['text1' => 'foo1'])->generator()->current()->text1;
         $this->assertTrue($text1 === 'foo1');
-        wait(all($table->getPool()->exec("UPDATE {$tbl} SET text1 = ? WHERE {$pk} = ?", 'bar1', $id)));
+        wait(all($table->getDatabasePool()->exec("UPDATE {$tbl} SET text1 = ? WHERE {$pk} = ?", 'bar1', $id)));
         $text1 = $table->filter(['text1' => 'foo1'])->generator()->current()->text1;
         $this->assertTrue($text1 === 'foo1');
         sleep($cacheTtl + 1);
@@ -981,7 +1023,7 @@ class TestCaseStorage extends AbstractTestCase
     public function test_case_storage_bitmap_1()
     {
         $bitmap = getBitmap();
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'table' => [
                 'fields' => [],
                 'bitmap' => [
@@ -1015,7 +1057,7 @@ class TestCaseStorage extends AbstractTestCase
     public function test_case_storage_bitmap_2()
     {
         $bitmap = getBitmap();
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'table' => [
                 'fields' => [
                     'boolean' => Type::bool(),
@@ -1049,7 +1091,7 @@ class TestCaseStorage extends AbstractTestCase
     {
         $rnd = (bool) mt_rand(0, 1);
         $bitmap = getBitmap();
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'table1' => [
                 'bitmap' => [],
             ],
@@ -1062,7 +1104,7 @@ class TestCaseStorage extends AbstractTestCase
         $storage->bitmapPopulate();
         $storage->sort();
         $this->assertTrue(true);
-        $db = $storage->getPool()->random();
+        $db = $storage->getDatabasePool()->random();
         $this->assertTrue(wait($db->tableExists('table1')));
         $this->assertTrue(wait($db->tableExists('table2')));
         $this->assertTrue(in_array('table1', $bitmap->LIST()));

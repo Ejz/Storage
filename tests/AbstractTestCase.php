@@ -12,34 +12,38 @@ use function Amp\Promise\wait;
 
 abstract class AbstractTestCase extends TestCase
 {
-    /** DatabasePool */
-    protected $pool;
+    /** Pool */
+    protected $databasePool;
+
+    /** Pool */
+    protected $bitmapPool;
 
     /** RedisCache */
     protected $cache;
-
-    /** Bitmap */
-    protected $bitmap;
 
     /**
      * @return void
      */
     protected function setUp(): void
     {
-        $this->pool = \Container\getDatabasePool();
+        $this->databasePool = \Container\getDatabasePool();
+        $this->bitmapPool = \Container\getBitmapPool();
         $this->cache = \Container\getCache();
-        $this->bitmap = \Container\getBitmap();
-        $names = $this->pool->names();
+        $names = $this->databasePool->names();
         foreach ($names as $name) {
-            $db = $this->pool->db($name);
+            $db = $this->databasePool->instance($name);
             $tables = $db->tablesSync();
             foreach ($tables as $table) {
                 $db->dropSync($table);
             }
         }
-        $list = $this->bitmap->LIST();
-        foreach ($list as $index) {
-            $list = $this->bitmap->DROP($index);
+        $names = []; // $this->bitmapPool->names();
+        foreach ($names as $name) {
+            $bitmap = $this->bitmapPool->instance($name);
+            $list = $bitmap->LIST();
+            foreach ($list as $index) {
+                $bitmap->DROP($index);
+            }
         }
         $this->cache->clear();
     }
@@ -49,7 +53,7 @@ abstract class AbstractTestCase extends TestCase
      */
     protected function tearDown(): void
     {
-        $this->pool->close();
+        $this->databasePool->close();
     }
 
     /**

@@ -8,15 +8,35 @@ use Ejz\Type\AbstractType;
 
 class Bitmap
 {
+    /** @var string */
+    protected $name;
+
     /** @var RedisClient */
     protected $client;
 
     /**
      * @param RedisClient $client
      */
-    public function __construct(RedisClient $client)
+    public function __construct(string $name, RedisClient $client)
     {
+        $this->name = $name;
         $this->client = $client;
+    }
+
+    /**
+     * @return string
+     */
+    public function getName(): string
+    {
+        return $this->name;
+    }
+
+    /**
+     * @return string
+     */
+    public function __toString(): string
+    {
+        return $this->getName();
     }
 
     /**

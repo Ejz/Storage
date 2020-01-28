@@ -635,24 +635,22 @@ class DatabasePostgres implements DatabaseInterface
     private function getCreateCommands(Repository $repository): array
     {
         $q = $this->config['quote'];
-        $rand = function () {
-            return mt_rand();
-        };
         $enq = function ($fields) use ($q) {
             return implode(', ', array_map(function ($field) use ($q) {
                 return $q . $field . $q;
             }, $fields));
         };
-        $table = $repository->getTable();
+        $table = $repository->getDatabaseTable();
         [$fields, $indexes, $foreignKeys] = [[], [], []];
-        if ($repository->isPrimaryTable($this->getName())) {
-            $fields = $repository->getFields();
-            $indexes = $repository->getIndexes();
-            $foreignKeys = $repository->getForeignKeys();
+        $primary = $repository->getPrimaryDatabasePool()->names();
+        if (in_array($this->getName(), $primary)) {
+            $fields = $repository->getDatabaseFields();
+            $indexes = $repository->getDatabaseIndexes();
+            $foreignKeys = $repository->getDatabaseForeignKeys();
         }
-        $pk = $repository->getPk();
-        $pkStartWith = $repository->getPkStartWith($this->getName());
-        $pkIncrementBy = $repository->getPkIncrementBy($this->getName());
+        $pk = $repository->getDatabasePk();
+        $pkStartWith = $repository->getDatabasePkStartWith($this->getName());
+        $pkIncrementBy = $repository->getDatabasePkIncrementBy($this->getName());
         $seq = $table . '_seq';
         $commands = [];
         // CREATE TABLE
@@ -739,9 +737,10 @@ class DatabasePostgres implements DatabaseInterface
     private function getInsertCommand(Repository $repository, array $fields): array
     {
         $q = $this->config['quote'];
-        $table = $repository->getTable();
-        $pk = $repository->getPk();
-        if (!$repository->isPrimaryTable($this->getName())) {
+        $table = $repository->getDatabaseTable();
+        $pk = $repository->getDatabasePk();
+        $primary = $repository->getPrimaryDatabasePool()->names();
+        if (!in_array($this->getName(), $primary)) {
             $fields = [];
         }
         [$columns, $values, $args] = [[], [], []];
@@ -785,8 +784,8 @@ class DatabasePostgres implements DatabaseInterface
     private function getUpdateCommand(Repository $repository, array $ids, array $fields): array
     {
         $q = $this->config['quote'];
-        $table = $repository->getTable();
-        $pk = $repository->getPk();
+        $table = $repository->getDatabaseTable();
+        $pk = $repository->getDatabasePk();
         [$args, $update] = [[], []];
         foreach ($fields as $field) {
             $f = $q . $field->getName() . $q;
@@ -826,8 +825,8 @@ class DatabasePostgres implements DatabaseInterface
     private function getDeleteCommand(Repository $repository, array $ids): array
     {
         $q = $this->config['quote'];
-        $table = $repository->getTable();
-        $pk = $repository->getPk();
+        $table = $repository->getDatabaseTable();
+        $pk = $repository->getDatabasePk();
         $_ = implode(', ', array_fill(0, count($ids), '?'));
         $command = "DELETE FROM {$q}{$table}{$q} WHERE {$q}{$pk}{$q} IN ({$_})";
         return [$command, $ids];
@@ -943,192 +942,16 @@ class DatabasePostgres implements DatabaseInterface
     }
 
     /**
-     * @param array ...$args
+     * @param string $name
+     * @param array  $arguments
      *
      * @return mixed
      */
-    public function execSync(...$args)
+    public function __call(string $name, array $arguments)
     {
-        return Promise\wait($this->exec(...$args));
-    }
-
-    /**
-     * @param array ...$args
-     *
-     * @return mixed
-     */
-    public function allSync(...$args)
-    {
-        return Promise\wait($this->all(...$args));
-    }
-
-    /**
-     * @param array ...$args
-     *
-     * @return mixed
-     */
-    public function oneSync(...$args)
-    {
-        return Promise\wait($this->one(...$args));
-    }
-
-    /**
-     * @param array ...$args
-     *
-     * @return mixed
-     */
-    public function valSync(...$args)
-    {
-        return Promise\wait($this->val(...$args));
-    }
-
-    /**
-     * @param array ...$args
-     *
-     * @return mixed
-     */
-    public function colSync(...$args)
-    {
-        return Promise\wait($this->col(...$args));
-    }
-
-    /**
-     * @param array ...$args
-     *
-     * @return mixed
-     */
-    public function tablesSync(...$args)
-    {
-        return Promise\wait($this->tables(...$args));
-    }
-
-    /**
-     * @param array ...$args
-     *
-     * @return mixed
-     */
-    public function tableExistsSync(...$args)
-    {
-        return Promise\wait($this->tableExists(...$args));
-    }
-
-    /**
-     * @param array ...$args
-     *
-     * @return mixed
-     */
-    public function fieldsSync(...$args)
-    {
-        return Promise\wait($this->fields(...$args));
-    }
-
-    /**
-     * @param array ...$args
-     *
-     * @return mixed
-     */
-    public function countSync(...$args)
-    {
-        return Promise\wait($this->count(...$args));
-    }
-
-    /**
-     * @param array ...$args
-     *
-     * @return mixed
-     */
-    public function indexesSync(...$args)
-    {
-        return Promise\wait($this->indexes(...$args));
-    }
-
-    /**
-     * @param array ...$args
-     *
-     * @return mixed
-     */
-    public function pkSync(...$args)
-    {
-        return Promise\wait($this->pk(...$args));
-    }
-
-    /**
-     * @param array ...$args
-     *
-     * @return mixed
-     */
-    public function minSync(...$args)
-    {
-        return Promise\wait($this->min(...$args));
-    }
-
-    /**
-     * @param array ...$args
-     *
-     * @return mixed
-     */
-    public function maxSync(...$args)
-    {
-        return Promise\wait($this->max(...$args));
-    }
-
-    /**
-     * @param array ...$args
-     *
-     * @return mixed
-     */
-    public function truncateSync(...$args)
-    {
-        return Promise\wait($this->truncate(...$args));
-    }
-
-    /**
-     * @param array ...$args
-     *
-     * @return mixed
-     */
-    public function dropSync(...$args)
-    {
-        return Promise\wait($this->drop(...$args));
-    }
-
-    /**
-     * @param array ...$args
-     *
-     * @return mixed
-     */
-    public function createSync(...$args)
-    {
-        return Promise\wait($this->create(...$args));
-    }
-
-    /**
-     * @param array ...$args
-     *
-     * @return mixed
-     */
-    public function insertSync(...$args)
-    {
-        return Promise\wait($this->insert(...$args));
-    }
-
-    /**
-     * @param array ...$args
-     *
-     * @return mixed
-     */
-    public function updateSync(...$args)
-    {
-        return Promise\wait($this->update(...$args));
-    }
-
-    /**
-     * @param array ...$args
-     *
-     * @return mixed
-     */
-    public function deleteSync(...$args)
-    {
-        return Promise\wait($this->delete(...$args));
+        if (substr($name, -4) === 'Sync') {
+            $name = substr($name, 0, -4);
+            return Promise\wait($this->$name(...$arguments));
+        }
     }
 }

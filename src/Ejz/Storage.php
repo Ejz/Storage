@@ -9,36 +9,36 @@ class Storage
 {
     protected const INVALID_REPOSITORY_ERROR = 'INVALID_REPOSITORY_ERROR: %s';
 
-    /** @var DatabasePool */
-    protected $pool;
+    /** @var Pool */
+    protected $databasePool;
+
+    /** @var Pool */
+    protected $bitmapPool;
 
     /** @var RedisCache */
     protected $cache;
 
-    /** @var Bitmap */
-    protected $bitmap;
-
     /** @var array */
     protected $repositories;
-
+    
     /** @var array */
     protected $cached;
 
     /**
-     * @param DatabasePool $pool
-     * @param RedisCache   $cache
-     * @param Bitmap       $bitmap
-     * @param array        $repositories
+     * @param Pool       $databasePool
+     * @param Pool       $bitmapPool
+     * @param RedisCache $cache
+     * @param array      $repositories
      */
     public function __construct(
-        DatabasePool $pool,
+        Pool $databasePool,
+        Pool $bitmapPool,
         RedisCache $cache,
-        Bitmap $bitmap,
         array $repositories
     ) {
-        $this->pool = $pool;
+        $this->databasePool = $databasePool;
+        $this->bitmapPool = $bitmapPool;
         $this->cache = $cache;
-        $this->bitmap = $bitmap;
         $this->repositories = $repositories;
         $this->cached = [];
     }
@@ -46,9 +46,17 @@ class Storage
     /**
      * @return DatabasePool
      */
-    public function getPool(): DatabasePool
+    public function getDatabasePool(): Pool
     {
-        return $this->pool;
+        return $this->databasePool;
+    }
+
+    /**
+     * @return DatabasePool
+     */
+    public function getBitmapPool(): Pool
+    {
+        return $this->bitmapPool;
     }
 
     /**
@@ -60,14 +68,6 @@ class Storage
     }
 
     /**
-     * @return Bitmap
-     */
-    public function getBitmap(): Bitmap
-    {
-        return $this->bitmap;
-    }
-
-    /**
      * @return array
      */
     public function getRepositories(): array
@@ -76,16 +76,27 @@ class Storage
     }
 
     /**
-     * @param string $table
+     * @param string $name
      * @param array  $arguments
      *
-     * @return Repository
+     * @return mixed
      */
-    public function __call(string $name, array $arguments): Repository
+    public function __call(string $name, array $arguments)
     {
         $cached = $this->cached[$name] ?? null;
         if ($cached !== null) {
             return $cached;
+        }
+        if (substr($name, -4) === 'Sync') {
+            $name = substr($name, 0, -4);
+            return Promise\wait($this->$name(...$arguments));
+        }
+        if (in_array($name, ['create', 'drop'])) {
+            $promises = [];
+            foreach (array_keys($this->repositories) as $_) {
+                $promises[$_] = $this->$_()->$name();
+            }
+            return Promise\all($promises);
         }
         $config = $this->repositories[$name] ?? null;
         if ($config === null) {
@@ -96,102 +107,22 @@ class Storage
     }
 
     /**
-     * @return Promise
-     */
-    public function create(): Promise
-    {
-        $promises = [];
-        foreach (array_keys($this->repositories) as $name) {
-            $promises[$name] = $this->$name()->create();
-        }
-        return Promise\all($promises);
-    }
-
-    /**
-     * @param array ...$args
-     *
-     * @return mixed
-     */
-    public function createSync(...$args)
-    {
-        return Promise\wait($this->create(...$args));
-    }
-
-    /**
-     * @return Promise
-     */
-    public function drop(): Promise
-    {
-        $promises = [];
-        foreach (array_keys($this->repositories) as $name) {
-            $promises[$name] = $this->$name()->drop();
-        }
-        return Promise\all($promises);
-    }
-
-    /**
-     * @param array ...$args
-     *
-     * @return mixed
-     */
-    public function dropSync(...$args)
-    {
-        return Promise\wait($this->drop(...$args));
-    }
-
-    /**
-     * @return array
-     */
-    public function sort(): array
-    {
-        $return = [];
-        foreach (array_keys($this->repositories) as $name) {
-            $return[$name] = $this->$name()->sort();
-        }
-        return $return;
-    }
-
-    /**
-     */
-    public function bitmapCreate()
-    {
-        foreach (array_keys($this->repositories) as $name) {
-            $this->$name()->bitmapCreate();
-        }
-    }
-
-    /**
-     */
-    public function bitmapDrop()
-    {
-        foreach (array_keys($this->repositories) as $name) {
-            $this->$name()->bitmapDrop();
-        }
-    }
-
-    /**
-     */
-    public function bitmapPopulate()
-    {
-        foreach (array_keys($this->repositories) as $name) {
-            $this->$name()->bitmapPopulate();
-        }
-    }
-
-    /**
      * @param int $primary
      *
      * @return array
      */
     public static function getPrimarySecondaryClusterConfig(int $primary): array
     {
-        $isPrimaryTable = function ($name, $names) use ($primary) {
-            return array_search($name, $names) === $primary;
-        };
-        $getReadablePool = function ($id, $values, $names, $nargs) use ($primary) {
+        $primaryPoolFilter = function ($smth, $names) use ($primary) {
             return [$names[$primary]];
         };
-        return compact('isPrimaryTable', 'getReadablePool');
+        $readablePoolFilter = function ($smth, $names) use ($primary) {
+            return [$names[$primary]];
+        };
+        $writablePoolFilter = function ($smth, $name) {
+            return $names;
+        };
+        return compact('primaryPoolFilter', 'readablePoolFilter', 'writablePoolFilter');
     }
 
     /**

@@ -5,7 +5,7 @@ namespace Ejz;
 use Amp\Promise;
 use RuntimeException;
 
-class BitmapBean extends Bean
+class BitmapBean extends AbstractBean
 {
     /* -- -- -- */
     private const ERROR_ADD_WITHOUT_ID = 'ERROR_ADD_WITHOUT_ID';
