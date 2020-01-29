@@ -24,6 +24,9 @@ class DatabasePostgres implements DatabaseInterface
     /** @var ?Connection */
     protected $connection;
 
+    /** @var string */
+    private const METHOD_NOT_FOUND = 'METHOD_NOT_FOUND: %s';
+
     /**
      * @param string $name
      * @param string $dsn
@@ -857,8 +860,8 @@ class DatabasePostgres implements DatabaseInterface
     private function getReidCommand(Repository $repository, int $id1, int $id2): array
     {
         $q = $this->config['quote'];
-        $table = $repository->getTable();
-        $pk = $repository->getPk();
+        $table = $repository->getDatabaseTable();
+        $pk = $repository->getDatabasePk();
         $command = "UPDATE {$q}{$table}{$q} SET {$q}{$pk}{$q} = ? WHERE {$q}{$pk}{$q} = ?";
         return [$command, [$id2, $id1]];
     }
@@ -953,5 +956,6 @@ class DatabasePostgres implements DatabaseInterface
             $name = substr($name, 0, -4);
             return Promise\wait($this->$name(...$arguments));
         }
+        throw new RuntimeException(sprintf(self::METHOD_NOT_FOUND, $name));
     }
 }

@@ -16,12 +16,8 @@ class DatabaseBean extends AbstractBean
     /** @var string */
     private const ERROR_DELETE_WITHOUT_ID = 'ERROR_DELETE_WITHOUT_ID';
 
-    
-    
-
-    // private const ERROR_DELETE_WITHOUT_ID = 'ERROR_DELETE_WITHOUT_ID';
-    // private const ERROR_REID_WITHOUT_ID = 'ERROR_REID_WITHOUT_ID';
-    // /* -- -- -- */
+    /** @var string */
+    private const ERROR_REID_WITHOUT_ID = 'ERROR_REID_WITHOUT_ID';
 
     /**
      * @return string
@@ -88,23 +84,20 @@ class DatabaseBean extends AbstractBean
         });
     }
 
-    
-
-    // /**
-    //  * @param int $id
-    //  *
-    //  * @return Promise
-    //  */
-    // public function reid(int $id): Promise
-    // {
-    //     if ($this->_id === null) {
-    //         $message = self::ERROR_REID_WITHOUT_ID;
-    //         throw new RuntimeException($message);
-    //     }
-    //     return \Amp\call(function ($id) {
-    //         $result = yield $this->_repository->reid($this->_id, $id);
-    //         $this->setId($id);
-    //         return $result;
-    //     }, $id);
-    // }
+    /**
+     * @param int $id
+     *
+     * @return Promise
+     */
+    public function reid(int $id): Promise
+    {
+        if ($this->_id === null) {
+            throw new RuntimeException(self::ERROR_REID_WITHOUT_ID);
+        }
+        return \Amp\call(function ($id) {
+            $result = yield $this->_repository->reid($this->_id, $id);
+            $this->id = $id;
+            return $result;
+        }, $id);
+    }
 }

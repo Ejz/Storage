@@ -7,33 +7,8 @@ use Ejz\Producer;
 use Ejz\Storage;
 use Ejz\Type;
 
-use function Container\getStorage;
-
 class TestCaseProducer extends AbstractTestCase
 {
-    /**
-     * @test
-     */
-    public function test_case_producer_is_cacheable()
-    {
-        $cache = \Container\getCache();
-        $values = [1, 2.1, '3', null, true, false, [], ['foo'], ['foo' => 'bar'], new \stdClass()];
-        $iterator = Iterator\fromIterable($values, 50);
-        \Amp\Promise\wait($iterator->advance());
-        $cur = $iterator->getCurrent();
-        $this->assertTrue($cur === 1);
-        $cache->set('_', $iterator);
-        $iterator = $cache->get('_');
-        var_dump($iterator);
-        \Amp\Promise\wait($iterator->advance());
-        $cur = $iterator->getCurrent();
-        $this->assertTrue($cur === 2.1);
-        return;
-        // $i = Producer::getIteratorWithIdsOrder(, [1, 3, 2]);
-        // $values = iterator_to_array($i->generator());
-        // $this->assertEquals([1 => ['a'], 2 => ['b'], 3 => ['c']], $values);
-    }
-
     /**
      * @test
      */
@@ -50,15 +25,17 @@ class TestCaseProducer extends AbstractTestCase
      */
     public function test_case_producer_get_iterator_with_ids_order_2()
     {
-        $storage = getStorage([
+        $storage = \Container\getStorage([
             'table' => [
-                'fields' => [
-                    'score' => Type::int(),
-                ],
-                'getSortScore' => function ($bean) {
-                    return $bean->score;
-                },
-            ] + Storage::getShardsClusterConfig(),
+                'database' => [
+                    'fields' => [
+                        'score' => Type::int(),
+                    ],
+                    'getSortScore' => function ($bean) {
+                        return $bean->score;
+                    },
+                ] + Storage::getShardsClusterConfig(),
+            ],
         ]);
         $table = $storage->table();
         $table->createSync();

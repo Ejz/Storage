@@ -14,12 +14,18 @@ class Producer implements Iterator
     /** @var int */
     private $size;
 
+    /** @var ?string */
+    private $cursor;
+
+    /** @var ?array */
+    private $iterators;
+
     /**
-     * @param Iterator|callable $iterator
+     * @param mixed $iterator (optional)
      */
-    public function __construct($iterator)
+    public function __construct($iterator = null)
     {
-        $this->iterator = is_callable($iterator) ? new \Amp\Producer($iterator) : $iterator;
+        $this->setIterator($iterator);
     }
 
     /**
@@ -28,6 +34,14 @@ class Producer implements Iterator
     public function advance(): Promise
     {
         return $this->iterator->advance();
+    }
+
+    /**
+     * @return bool
+     */
+    public function advanceSync(): bool
+    {
+        return Promise\wait($this->iterator->advance());
     }
 
     /**
@@ -53,6 +67,77 @@ class Producer implements Iterator
     {
         $this->size = $size;
     }
+
+    /**
+     * @return string
+     */
+    public function getCursor(): ?string
+    {
+        return $this->cursor;
+    }
+
+    /**
+     * @param string $cursor
+     */
+    public function setCursor(?string $cursor)
+    {
+        $this->cursor = $cursor;
+    }
+
+    /**
+     * @param mixed $iterator
+     */
+    public function setIterator($iterator)
+    {
+        $this->iterator = $iterator;
+        if (is_callable($this->iterator)) {
+            $this->iterator = new \Amp\Producer($this->iterator);
+        }
+    }
+
+    /**
+     * @return mixed
+     */
+    public function getIterator()
+    {
+        return $this->iterator;
+    }
+
+    public function setBitmap($bitmap)
+    {
+        $this->bitmap = $bitmap;
+    }
+
+    /**
+     * @return array
+     */
+    public function getSearchIteratorState(): array
+    {
+        if ($this->iterators === null) {
+            $searchState = $this->bitmap->getSearchIteratorState($this->cursor);
+            return $searchState + ['size' => $this->size, 'cursor' => $this->cursor];
+        }
+        return array_map(function ($iterator) {
+            return $iterator->getSearchIteratorState();
+        }, $this->iterators);
+    }
+
+    // /**
+    //  * @param array $searchState
+    //  */
+    // public function setSearchState(array $searchState)
+    // {
+    //     $this->searchState = $searchState;
+    // }
+
+    // /**
+    //  */
+    // public function moveSearchStatePointer()
+    // {
+    //     var_dump($this->searchState);
+    //     // var_dump(debug_print_backtrace());
+    //     $this->searchState['pointer']++;
+    // }
 
     /**
      * @return Generator
@@ -121,12 +206,12 @@ class Producer implements Iterator
     }
 
     /**
-     * @param array     $iterators
-     * @param ?callable $score
+     * @param array    $iterators
+     * @param callable $score
      *
      * @return Iterator
      */
-    public static function getIteratorWithSortedValues(array $iterators, ?callable $score): Iterator
+    public static function getIteratorWithSortedValues(array $iterators, callable $score): Iterator
     {
         $emit = function ($emit) use ($iterators, $score) {
             $values = [];
@@ -146,17 +231,26 @@ class Producer implements Iterator
                     break;
                 }
                 uasort($values, function ($v1, $v2) use ($score) {
-                    if ($score === null) {
+                    $s1 = $score($v1[1]);
+                    $s2 = $score($v2[1]);
+                    if (!$s1 && !$s2) {
                         return $v1[0] > $v2[0];
                     }
-                    return $score($v1[1]) < $score($v2[1]);
+                    return $s1 < $s2;
                 });
                 $key = key($values);
                 yield $emit($values[$key]);
                 unset($values[$key]);
             }
         };
-        return new self($emit);
+        $iterator = new self($emit);
+        $iterator->setIterators($iterators);
+        return $iterator;
+    }
+
+    public function setIterators($iterators)
+    {
+        $this->iterators = $iterators;
     }
 }
 

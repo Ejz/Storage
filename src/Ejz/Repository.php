@@ -95,6 +95,38 @@ class Repository
     }
 
     /**
+     * @param int   $id
+     * @param array $values (optional)
+     *
+     * @return Promise
+     */
+    public function add(int $id, array $values = []): Promise
+    {
+        $bean = $this->getBitmapBeanWithValues($id, $values);
+        return $this->addBean($bean);
+    }
+
+    /**
+     * @param BitmapBean $bean
+     *
+     * @return Promise
+     */
+    public function addBean(BitmapBean $bean): Promise
+    {
+        $deferred = new Deferred();
+        $pool = $this->getWritableBitmapPool($bean->id);
+        $index = $this->getBitmapIndex();
+        $promises = $pool->add($index, $bean->id, $bean->getFields());
+        Promise\all($promises)->onResolve(function ($err, $res) use ($deferred) {
+            $ids = $err ? [0] : ($res ?: [0]);
+            $min = min($ids);
+            $max = max($ids);
+            $deferred->resolve($min === $max ? $min : null);
+        });
+        return $deferred->promise();
+    }
+
+    /**
      * @param array $ids
      *
      * @return Iterator
@@ -207,6 +239,45 @@ class Repository
             $deferred->resolve($err ? 0 : array_sum($res));
         });
         return $deferred->promise();
+    }
+
+    /**
+     * @param array $params (optional)
+     *
+     * @return Iterator
+     */
+    public function iterate(array $params = []): Iterator
+    {
+        $emit = function ($emit) use ($params) {
+            $params = [
+                'pk' => [$this->getDatabasePk()],
+                'fields' => array_values($this->getDatabaseFields()),
+                'returnFields' => true,
+            ] + $params;
+            $poolFilter = $params['poolFilter'] ?? null;
+            unset($params['poolFilter']);
+            $table = $this->getDatabaseTable();
+            $pool = $this->getReadableDatabasePool();
+            if ($poolFilter !== null) {
+                $pool = $pool->filter($poolFilter);
+            }
+            $iterators = [];
+            foreach ($pool->names() as $name) {
+                $iterators[] = $pool->instance($name)->iterate($table, $params);
+            }
+            $iterator = Iterator\merge($iterators);
+            $ids = [];
+            while (yield $iterator->advance()) {
+                [$id, $fields] = $iterator->getCurrent();
+                if (isset($ids[$id])) {
+                    continue;
+                }
+                $ids[$id] = true;
+                $bean = $this->getDatabaseBeanWithFields($id, $fields);
+                yield $emit([$id, $bean]);
+            }
+        };
+        return new Producer($emit);
     }
 
     // /**
@@ -370,263 +441,154 @@ class Repository
         $this->config['database']['foreignKeys'] = $collect;
     }
 
-    // /**
-    //  * @param array $params (optional)
-    //  *
-    //  * @return Iterator
-    //  */
-    // public function iterate(array $params = []): Iterator
-    // {
-    //     $emit = function ($emit) use ($params) {
-    //         $params = [
-    //             'pk' => [$this->getPk()],
-    //             'fields' => array_values($this->getDatabaseFields()),
-    //             'returnFields' => true,
-    //         ] + $params;
-    //         $poolFilter = $params['poolFilter'] ?? null;
-    //         unset($params['poolFilter']);
-    //         $table = $this->getTable();
-    //         $pool = $this->getReadablePool();
-    //         if ($poolFilter !== null) {
-    //             $pool = $pool->filter($poolFilter);
-    //         }
-    //         $iterators = [];
-    //         foreach ($pool->names() as $name) {
-    //             $iterators[] = $pool->instance($name)->iterate($table, $params);
-    //         }
-    //         $iterator = Iterator\merge($iterators);
-    //         $ids = [];
-    //         while (yield $iterator->advance()) {
-    //             [$id, $fields] = $iterator->getCurrent();
-    //             if (isset($ids[$id])) {
-    //                 continue;
-    //             }
-    //             $ids[$id] = true;
-    //             $bean = $this->getBeanWithFields($id, $fields);
-    //             yield $emit([$id, $bean]);
-    //         }
-    //     };
-    //     return new Producer($emit);
-    // }
+    /**
+     * @param array $conditions
+     *
+     * @return Iterator
+     */
+    public function filter(array $conditions): Iterator
+    {
+        if (
+            $this->config['cache'] !== null &&
+            count($conditions) === 1 &&
+            in_array($f = key($conditions), $this->config['cache']['fieldsToId'])
+        ) {
+            $value = current($conditions);
+            if (!is_array($value)) {
+                $table = $this->getDatabaseTable();
+                $v = md5(serialize($value));
+                $ck = $table . '.' . $f . '.' . $v;
+                $id = $this->storage->getCache()->get($ck);
+                if ($id !== null) {
+                    return $this->get([$id]);
+                }
+            }
+        }
+        $where = new Condition($conditions);
+        return $this->iterate(compact('where'));
+    }
 
-    // /**
-    //  * @param array $conditions
-    //  *
-    //  * @return Iterator
-    //  */
-    // public function filter(array $conditions): Iterator
-    // {
-    //     if (
-    //         $this->cache !== null &&
-    //         count($conditions) === 1 &&
-    //         in_array($f = key($conditions), $this->cache['fieldsToId'])
-    //     ) {
-    //         $value = current($conditions);
-    //         if (!is_array($value)) {
-    //             $table = $this->getTable();
-    //             $v = md5(serialize($value));
-    //             $ck = $table . '.' . $f . '.' . $v;
-    //             $id = $this->storage->getCache()->get($ck);
-    //             if ($id !== null) {
-    //                 return $this->get([$id]);
-    //             }
-    //         }
-    //     }
-    //     $where = new Condition($conditions);
-    //     return $this->iterate(compact('where'));
-    // }
+    /**
+     * @param array $conditions
+     *
+     * @return Promise
+     */
+    public function exists(array $conditions): Promise
+    {
+        return $this->filter($conditions)->advance();
+    }
 
-    // /**
-    //  * @param array $conditions
-    //  *
-    //  * @return Promise
-    //  */
-    // public function exists(array $conditions): Promise
-    // {
-    //     return $this->filter($conditions)->advance();
-    // }
+    /**
+     * @param int $id1
+     * @param int $id2
+     *
+     * @return Promise
+     */
+    public function reid(int $id1, int $id2): Promise
+    {
+        $pool1 = $this->getWritableDatabasePool($id1);
+        $pool2 = $this->getWritableDatabasePool($id2);
+        $names1 = $pool1->names();
+        $names2 = $pool2->names();
+        if (!$names1 || array_diff($names1, $names2)) {
+            return new Success(false);
+        }
+        $deferred = new Deferred();
+        $promises = $pool1->reid($this, $id1, $id2);
+        Promise\all($promises)->onResolve(function ($err) use ($deferred) {
+            $deferred->resolve(!$err);
+        });
+        return $deferred->promise();
+    }
 
-    // /**
-    //  * @param string $query
-    //  *
-    //  * @return Iterator
-    //  */
-    // public function search(string $query): Iterator
-    // {
-    //     [$size, $cursor] = $this->bitmapSearch($query);
-    //     $iterator_chunk_size = $this->config['iterator_chunk_size'];
-    //     $emit = function ($emit) use ($size, $cursor, $iterator_chunk_size) {
-    //         while ($size > 0) {
-    //             $limit = min($size, $iterator_chunk_size);
-    //             $iterator = $this->bitmapIterator($cursor, $limit);
-    //             while (yield $iterator->advance()) {
-    //                 yield $emit($iterator->getCurrent());
-    //                 $size--;
-    //             }
-    //         }
-    //     };
-    //     $iterator = new Producer($emit);
-    //     $iterator->setSize($size);
-    //     return $iterator;
-    // }
+    /**
+     * @return bool
+     */
+    public function sort(): bool
+    {
+        $ok = 0;
+        $names = $this->getReadableDatabasePool()->names();
+        foreach ($names as $name) {
+            $scores = [];
+            $generator = $this->iterate(['poolFilter' => $name])->generator();
+            foreach ($generator as $id => $bean) {
+                $scores[$id] = $this->getSortScore($bean);
+            }
+            foreach ($this->getSortChains($scores) as $ids) {
+                $max = max($ids);
+                $ids[] = -$max;
+                array_unshift($ids, -$max);
+                for ($i = count($ids); $i > 1; $i--) {
+                    [$id1, $id2] = [$ids[$i - 2], $ids[$i - 1]];
+                    if (!$this->reidSync($id1, $id2)) {
+                        break 2;
+                    }
+                }
+            }
+            $ok++;
+        }
+        return $ok === count($names);
+    }
 
-    // /**
-    //  * @param string $cursor
-    //  * @param int    $limit
-    //  *
-    //  * @return Iterator
-    //  */
-    // public function bitmapIterator(string $cursor, int $limit): Iterator
-    // {
-    //     $inc = 0;
-    //     $getSortScore = $this->config['getSortScore'] ?? null;
-    //     if ($getSortScore !== null) {
-    //         $inc = count($this->pool->names());
-    //     }
-    //     $ids = $this->storage->getBitmap()->CURSOR($cursor, 'LIMIT', $limit + $inc);
-    //     $iterators = [];
-    //     foreach ($ids as $id) {
-    //         $db = $this->getReadablePool($id)->random();
-    //         $name = $db->getName();
-    //         $iterators[$name] = $iterators[$name] ?? [];
-    //         $iterators[$name][] = $id;
-    //     }
-    //     $iterators = array_map(function ($ids) {
-    //         $iterator = $this->get($ids);
-    //         $iterator = Producer::getIteratorWithIdsOrder($iterator, $ids);
-    //         return $iterator;
-    //     }, $iterators);
-    //     $iterator = Producer::getIteratorWithSortedValues($iterators, $getSortScore);
-    //     if ($inc > 0) {
-    //         $current = 0;
-    //         $iterator = Iterator\filter($iterator, function () use (&$current, $limit) {
-    //             $current++;
-    //             return $current <= $limit;
-    //         });
-    //     }
-    //     return $iterator;
-    // }
+    /**
+     */
+    public function bitmapPopulate()
+    {
+        $this->bitmapPool->dropSync($this->getBitmapIndex());
+        $this->bitmapPool->createSync($this);
+        foreach ($this->iterate()->generator() as $bean) {
+            $this->getBitmapBeanFromDatabaseBean($bean)->addSync();
+        }
+    }
 
-    
+    /**
+     * @param string|array $query
+     *
+     * @return Iterator
+     */
+    public function search($query): Iterator
+    {
+        $pool = $this->getReadableBitmapPool();
+        $index = $this->getBitmapIndex();
+        $iterators = $pool->search($this, $query);
+        $size = 0;
+        foreach ($iterators as $iterator) {
+            $size += $iterator->getSize();
+        }
+        $iterator = Producer::getIteratorWithSortedValues($iterators, [$this, 'getSortScore']);
+        $iterator->setSize($size);
+        return $iterator;
+    }
 
-    // /**
-    //  * @param int $id1
-    //  * @param int $id2
-    //  *
-    //  * @return Promise
-    //  */
-    // public function reid(int $id1, int $id2): Promise
-    // {
-    //     $pool1 = $this->getWritableDatabasePool($id1);
-    //     $pool2 = $this->getWritableDatabasePool($id2);
-    //     $names1 = $pool1->names();
-    //     $names2 = $pool2->names();
-    //     if (!$names1 || array_diff($names1, $names2)) {
-    //         return new Success(false);
-    //     }
-    //     $deferred = new Deferred();
-    //     $promises = $pool1->reid($this, $id1, $id2);
-    //     Promise\all($promises)->onResolve(function ($err) use ($deferred) {
-    //         $deferred->resolve(!$err);
-    //     });
-    //     return $deferred->promise();
-    // }
-
-    // /**
-    //  * @return bool
-    //  */
-    // public function sort(): bool
-    // {
-    //     $getSortScore = $this->config['getSortScore'] ?? null;
-    //     if ($getSortScore === null) {
-    //         return false;
-    //     }
-    //     $names = $this->pool->names();
-    //     $ok = 0;
-    //     foreach ($names as $name) {
-    //         $scores = [];
-    //         $generator = $this->iterate(['poolFilter' => $name])->generator();
-    //         foreach ($generator as $id => $bean) {
-    //             $scores[$id] = $getSortScore($bean);
-    //         }
-    //         foreach ($this->getSortChains($scores) as $ids) {
-    //             $max = max($ids);
-    //             $ids[] = -$max;
-    //             array_unshift($ids, -$max);
-    //             for ($i = count($ids); $i > 1; $i--) {
-    //                 [$id1, $id2] = [$ids[$i - 2], $ids[$i - 1]];
-    //                 if (!$this->reidSync($id1, $id2)) {
-    //                     break 2;
-    //                 }
-    //             }
-    //         }
-    //         $ok++;
-    //     }
-    //     return $ok === count($names);
-    // }
-
-    // /**
-    //  * @param string $query
-    //  *
-    //  * @return array
-    //  */
-    // public function bitmapSearch(string $query): array
-    // {
-    //     $table = $this->getTable();
-    //     $result = $this->storage->getBitmap()->SEARCH($table, $query, 'WITHCURSOR');
-    //     return [$result[0] ?? 0, $result[1] ?? null];
-    // }
-
-    // /**
-    //  */
-    // public function bitmapPopulate()
-    // {
-    //     $handleValues = $this->bitmap['handleValues'] ?? null;
-    //     $generator = $this->bitmap === null ? [] : $this->iterate()->generator();
-    //     $table = $this->getTable();
-    //     $keys = array_keys($this->getBitmapFields());
-    //     foreach ($generator as $id => $bean) {
-    //         $values = $bean->getValues();
-    //         if ($handleValues !== null) {
-    //             $values = $handleValues($values);
-    //         } else {
-    //             $values = array_intersect_key($values, array_flip($keys));
-    //         }
-    //         $this->getBitmapBean($id, $values)->add();
-    //     }
-    // }
-
-    
-
-    // /**
-    //  * @param array $scores
-    //  *
-    //  * @return array
-    //  */
-    // private function getSortChains(array $scores): array
-    // {
-    //     $ids1 = array_keys($scores);
-    //     arsort($scores);
-    //     $ids2 = array_keys($scores);
-    //     $ids = array_combine($ids1, $ids2);
-    //     $ids = array_filter($ids, function ($v, $k) {
-    //         return $v != $k;
-    //     }, ARRAY_FILTER_USE_BOTH);
-    //     $chains = [];
-    //     while ($ids) {
-    //         $chain = [];
-    //         reset($ids);
-    //         $ex = key($ids);
-    //         do {
-    //             $chain[] = $ex;
-    //             @ $_ = $ids[$ex];
-    //             unset($ids[$ex]);
-    //             @ $ex = $_;
-    //         } while (isset($ids[$ex]));
-    //         $chains[] = array_reverse($chain);
-    //     }
-    //     return $chains;
-    // }
+    /**
+     * @param array $scores
+     *
+     * @return array
+     */
+    private function getSortChains(array $scores): array
+    {
+        $ids1 = array_keys($scores);
+        arsort($scores);
+        $ids2 = array_keys($scores);
+        $ids = array_combine($ids1, $ids2);
+        $ids = array_filter($ids, function ($v, $k) {
+            return $v != $k;
+        }, ARRAY_FILTER_USE_BOTH);
+        $chains = [];
+        while ($ids) {
+            $chain = [];
+            reset($ids);
+            $ex = key($ids);
+            do {
+                $chain[] = $ex;
+                @ $_ = $ids[$ex];
+                unset($ids[$ex]);
+                @ $ex = $_;
+            } while (isset($ids[$ex]));
+            $chains[] = array_reverse($chain);
+        }
+        return $chains;
+    }
 
     /**
      * @param string $name
@@ -679,7 +641,10 @@ class Repository
                 }
                 return $fields;
             },
-            //
+            'getSortScore' => function ($bean) {
+                $getSortScore = $this->config['database']['getSortScore'] ?? null;
+                return $getSortScore !== null ? $getSortScore($bean) : 0;
+            },
             'getDatabasePk' => function () {
                 return $this->config['database']['pk'];
             },
@@ -723,7 +688,7 @@ class Repository
                 $bean = $this->config['database']['bean'] ?? DatabaseBean::class;
                 return new $bean($this, $id, $fields);
             },
-            'getBitmapBean' => function ($id = null, $values = []) {
+            'getBitmapBean' => function ($id, $values = []) {
                 return $this->getBitmapBeanWithValues($id, $values);
             },
             'getBitmapBeanWithValues' => function ($id, $values) {
@@ -734,6 +699,17 @@ class Repository
             'getBitmapBeanWithFields' => function ($id, $fields) {
                 $bean = $this->config['bitmap']['bean'] ?? BitmapBean::class;
                 return new $bean($this, $id, $fields);
+            },
+            'getBitmapBeanFromDatabaseBean' => function ($bean) {
+                $id = (int) $bean->id;
+                $getValues = $this->config['bitmap']['getValues'] ?? null;
+                if ($getValues === null) {
+                    $keys = array_keys($this->config['bitmap']['fields']);
+                    $values = array_intersect_key($bean->getValues(), array_flip($keys));
+                } else {
+                    $values = $getValues($bean);
+                }
+                return $this->getBitmapBeanWithValues($id, $values);
             },
         ];
         $method = $this->_map[$name] ?? null;

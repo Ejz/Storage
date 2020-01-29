@@ -7,10 +7,6 @@ use RuntimeException;
 
 class BitmapBean extends AbstractBean
 {
-    /* -- -- -- */
-    private const ERROR_ADD_WITHOUT_ID = 'ERROR_ADD_WITHOUT_ID';
-    /* -- -- -- */
-
     /**
      * @param Repository $repository
      * @param int        $id
@@ -22,13 +18,10 @@ class BitmapBean extends AbstractBean
     }
 
     /**
+     * @return Promise
      */
-    public function add()
+    public function add(): Promise
     {
-        if ($this->_id === null) {
-            $message = self::ERROR_ADD_WITHOUT_ID;
-            throw new RuntimeException($message);
-        }
-        return $this->_repository->bitmapAddBean($this);
+        return $this->_repository->addBean($this);
     }
 }

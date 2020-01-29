@@ -14,7 +14,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
      */
     public function test_case_database_postgres_common_1()
     {
-        $db = $this->pool->random();
+        $db = $this->databasePool->random();
         wait($db->exec('CREATE TABLE t (tt TEXT)'));
         $n = wait($db->exec('INSERT INTO t (tt) VALUES (\'bar\')'));
         $this->assertTrue($n === 1);
@@ -29,7 +29,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
      */
     public function test_case_database_postgres_common_2()
     {
-        $db = $this->pool->random();
+        $db = $this->databasePool->random();
         wait($db->exec('CREATE TABLE t (t1 TEXT, t2 TEXT)'));
         $n = wait($db->exec('INSERT INTO t (t1, t2) VALUES (?, ?)', 'arg1', 'arg2'));
         $this->assertTrue($n === 1);
@@ -53,7 +53,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
      */
     public function test_case_database_postgres_one()
     {
-        $db = $this->pool->random();
+        $db = $this->databasePool->random();
         wait($db->exec('CREATE TABLE t (t1 TEXT, t2 TEXT)'));
         wait($db->exec('INSERT INTO t (t1, t2) VALUES (1, 2)'));
         wait($db->exec('INSERT INTO t (t1, t2) VALUES (3, 4)'));
@@ -68,7 +68,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
      */
     public function test_case_database_postgres_val()
     {
-        $db = $this->pool->random();
+        $db = $this->databasePool->random();
         wait($db->exec('CREATE TABLE t (t1 TEXT, t2 TEXT)'));
         wait($db->exec('INSERT INTO t (t1, t2) VALUES (1, 2)'));
         \Amp\Loop::run(function () use ($db) {
@@ -82,7 +82,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
      */
     public function test_case_database_postgres_col()
     {
-        $db = $this->pool->random();
+        $db = $this->databasePool->random();
         wait($db->exec('CREATE TABLE t (t1 INT, t2 TEXT)'));
         wait($db->exec('INSERT INTO t (t1, t2) VALUES (1, 2)'));
         wait($db->exec('INSERT INTO t (t1, t2) VALUES (3, 4)'));
@@ -97,7 +97,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
      */
     public function test_case_database_postgres_tables()
     {
-        $db = $this->pool->random();
+        $db = $this->databasePool->random();
         wait($db->exec('CREATE TABLE t1 (t1 TEXT, t2 TEXT)'));
         wait($db->exec('CREATE TABLE t2 (t1 TEXT, t2 TEXT)'));
         $this->assertTrue(in_array('t1', wait($db->tables())));
@@ -115,7 +115,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
      */
     public function test_case_database_postgres_fields()
     {
-        $db = $this->pool->random();
+        $db = $this->databasePool->random();
         wait($db->exec('CREATE TABLE t1 (t1 TEXT, ti INT NOT NULL, pk1 INT NOT NULL, pk2 INT NOT NULL)'));
         wait($db->exec('CREATE TABLE t2 (t2 TEXT)'));
         wait($db->exec('CREATE TABLE t3 ()'));
@@ -135,7 +135,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
      */
     public function test_case_database_postgres_indexes()
     {
-        $db = $this->pool->random();
+        $db = $this->databasePool->random();
         wait($db->exec('CREATE TABLE t1 (t1_field TEXT, t2_field INT NOT NULL)'));
         wait($db->exec('CREATE TABLE t2 (t2 TEXT)'));
         wait($db->exec('CREATE TABLE t3 ()'));
@@ -158,7 +158,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
      */
     public function test_case_database_postgres_pk()
     {
-        $db = $this->pool->random();
+        $db = $this->databasePool->random();
         wait($db->exec('CREATE TABLE t0 (t0 TEXT)'));
         wait($db->exec('CREATE TABLE t1 (t1 TEXT, pk1 INT NOT NULL)'));
         wait($db->exec('CREATE TABLE t2 (t1 TEXT, pk1 INT NOT NULL, pk2 INT NOT NULL)'));
@@ -179,7 +179,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
      */
     public function test_case_database_postgres_min_max()
     {
-        $db = $this->pool->random();
+        $db = $this->databasePool->random();
         //
         wait($db->exec('CREATE TABLE t1 (pk INT NOT NULL)'));
         wait($db->exec('ALTER TABLE ONLY t1 ADD CONSTRAINT pk_pkey PRIMARY KEY (pk)'));
@@ -218,7 +218,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
      */
     public function test_case_database_postgres_rand_intervals()
     {
-        $db = $this->pool->random();
+        $db = $this->databasePool->random();
         //
         $intervals = $this->call($db, 'getIntervalsForRandIterator', 1, 3, 3);
         $this->assertEquals([[1, 1], [2, 2], [3, 3]], $intervals);
@@ -235,7 +235,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
      */
     public function test_case_database_postgres_iterate_trait()
     {
-        $db = $this->pool->random();
+        $db = $this->databasePool->random();
         wait($db->exec('CREATE TABLE t1 (pk1 INT NOT NULL)'));
         wait($db->exec('ALTER TABLE ONLY t1 ADD CONSTRAINT pk_pkey PRIMARY KEY (pk1)'));
         $ids = [];
@@ -265,7 +265,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
      */
     public function test_case_database_postgres_iterate_1()
     {
-        $db = $this->pool->random();
+        $db = $this->databasePool->random();
         wait($db->exec('CREATE TABLE t1 (pk1 INT NOT NULL)'));
         wait($db->exec('ALTER TABLE ONLY t1 ADD CONSTRAINT pk_pkey PRIMARY KEY (pk1)'));
         $ids = [];
@@ -307,7 +307,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
      */
     public function test_case_database_postgres_iterate_2()
     {
-        $db = $this->pool->random();
+        $db = $this->databasePool->random();
         wait($db->exec('CREATE TABLE t1 (pk1 INT NOT NULL)'));
         wait($db->exec('ALTER TABLE ONLY t1 ADD CONSTRAINT pk_pkey PRIMARY KEY (pk1)'));
         $ids = [];
@@ -329,7 +329,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
      */
     public function test_case_database_postgres_iterate_3()
     {
-        $db = $this->pool->random();
+        $db = $this->databasePool->random();
         wait($db->exec('CREATE TABLE t1 (pk1 TEXT NOT NULL)'));
         wait($db->exec('ALTER TABLE ONLY t1 ADD CONSTRAINT pk_pkey PRIMARY KEY (pk1)'));
         $ids = [];
@@ -347,7 +347,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
      */
     public function test_case_database_postgres_get()
     {
-        $db = $this->pool->random();
+        $db = $this->databasePool->random();
         wait($db->exec('CREATE TABLE t1 (pk1 INT NOT NULL)'));
         wait($db->exec('ALTER TABLE ONLY t1 ADD CONSTRAINT pk_pkey PRIMARY KEY (pk1)'));
         foreach (range(1, 1000) as $id) {
@@ -368,7 +368,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
      */
     public function test_case_database_postgres_get_fields()
     {
-        $db = $this->pool->random();
+        $db = $this->databasePool->random();
         wait($db->exec('CREATE TABLE t1 (pk1 INT NOT NULL, "text" TEXT NOT NULL)'));
         wait($db->exec('ALTER TABLE ONLY t1 ADD CONSTRAINT pk_pkey PRIMARY KEY (pk1)'));
         $string = '"foo"';
