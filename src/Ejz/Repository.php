@@ -26,6 +26,9 @@ class Repository
     /** @var Pool */
     protected $bitmapPool;
 
+    /** @var array */
+    protected $searchIteratorStates;
+
     /** @var string */
     private const METHOD_NOT_FOUND = 'METHOD_NOT_FOUND: %s';
 
@@ -133,7 +136,9 @@ class Repository
      */
     public function get(array $ids): Iterator
     {
-        $emit = function ($emit) use ($ids) {
+        $emitter = new \Amp\Emitter();
+        $iterator = $emitter->iterate();
+        $coroutine = \Amp\call(function ($ids) use (&$emitter) {
             $table = $this->getDatabaseTable();
             $dbs = [];
             $meta = [];
@@ -164,8 +169,12 @@ class Repository
                 ];
                 $iterators[] = $db->get($table, $ids, $params);
             }
-            $iterator = Iterator\merge($iterators);
-            while (yield $iterator->advance()) {
+            if (count($iterators) > 1) {
+                $iterator = Iterator\merge($iterators);
+            } else {
+                [$iterator] = $iterators;
+            }
+            while ((yield $iterator->advance()) && $emitter !== null) {
                 [$id, $fields] = $value = $iterator->getCurrent();
                 $bean = $this->getDatabaseBeanWithFields($id, $fields);
                 if (isset($meta[$id])) {
@@ -178,10 +187,18 @@ class Repository
                         $cache->set($ck, $id, $this->config['cache']['ttl'], $ct);
                     }
                 }
-                yield $emit([$id, $bean]);
+                yield $emitter->emit([$id, $bean]);
             }
-        };
-        return new Producer($emit);
+        }, $ids);
+        $coroutine->onResolve(function ($exception) use (&$emitter) {
+            if ($exception) {
+                $emitter->fail($exception);
+                $emitter = null;
+            } else {
+                $emitter->complete();
+            }
+        });
+        return new Emitter($iterator);
     }
 
     /**
@@ -280,35 +297,6 @@ class Repository
         return new Producer($emit);
     }
 
-    // /**
-    //  * @param array $values (optional)
-    //  *
-    //  * @return bool
-    //  */
-    // public function bitmapInsert(int $id, array $values = []): Promise
-    // {
-    //     $bean = $this->getBitmapBean($id, $values);
-    //     return $this->bitmapInsertBean($bean);
-    // }
-
-    // /**
-    //  * @param BitmapBean $bean
-    //  *
-    //  * @return Promise
-    //  */
-    // public function bitmapInsertBean(BitmapBean $bean): Promise
-    // {
-    //     $id = $bean->id;
-    //     $deferred = new Deferred();
-    //     $index = $this->getBitmapIndex();
-    //     $pool = $this->getWritableBitmapPool($id, $bean->getValues());
-    //     $promises = $pool->insert($index, $id, $bean->getFields());
-    //     Promise\all($promises)->onResolve(function ($err) use ($deferred, $id) {
-    //         $deferred->resolve($err ? 0 : $id);
-    //     });
-    //     return $deferred->promise();
-    // }
-
     /**
      */
     private function normalize()
@@ -321,6 +309,10 @@ class Repository
             $count1 = count(array_filter(array_keys($array), 'is_string'));
             return $count0 === $count1;
         };
+        //
+        //
+        //
+        $this->searchIteratorStates = [];
         //
         //
         //
@@ -549,15 +541,99 @@ class Repository
     public function search($query): Iterator
     {
         $pool = $this->getReadableBitmapPool();
-        $index = $this->getBitmapIndex();
-        $iterators = $pool->search($this, $query);
         $size = 0;
-        foreach ($iterators as $iterator) {
+        $cursors = [];
+        $iterators = $pool->each(function ($instance) use ($query, &$size, &$cursors) {
+            $query = is_string($query) ? $query : ($query[$instance->getName()] ?? []);
+            $iterator = $instance->search($this, $query);
             $size += $iterator->getSize();
-        }
-        $iterator = Producer::getIteratorWithSortedValues($iterators, [$this, 'getSortScore']);
+            $cursors[] = $iterator->getCursor();
+            return $iterator;
+        });
+        $cursor = md5(implode('', $cursors));
+        $iterator = $this->getSearchIterator($cursor, $iterators);
         $iterator->setSize($size);
+        $iterator->setCursor($cursor);
+        $iterator->setContext(['repository' => $this, 'iterators' => $iterators]);
         return $iterator;
+    }
+
+    /**
+     * @param array  $iterators
+     * @param string $cursor
+     *
+     * @return Iterator
+     */
+    public function getSearchIterator(string $cursor, array $iterators): Iterator
+    {
+        $emitter = new \Amp\Emitter();
+        $iterator = $emitter->iterate();
+        $iterator = new Emitter($iterator);
+        $coroutine = \Amp\call(function ($cursor, $iterators) use (&$emitter) {
+            $score = [$this, 'getSortScore'];
+            $values = [];
+            $ids = [];
+            $this->setSearchIteratorState($cursor, []);
+            $iterator = Iterator\merge($iterators);
+            while ((yield $iterator->advance()) && $emitter !== null) {
+                yield $emitter->emit($iterator->getCurrent());
+                // yield $emit($iterator->getCurrent());
+            }
+            return;
+            while (true) {
+                // print_r(array_keys(array_diff_key($iterators, $values)));
+                $results = yield array_map(function ($iterator) {
+                    return $iterator->advance();
+                }, array_diff_key($iterators, $values));
+                // var_dump($results);
+                // var_dump($iterators['TEST0']->getSearchIteratorState()['pointer']);
+                // var_dump($iterators['TEST1']->getSearchIteratorState()['pointer']);
+                // var_dump($iterators['TEST2']->getSearchIteratorState()['pointer']);
+                foreach ($results as $key => $result) {
+                    if ($result) {
+                        $value = $iterators[$key]->getCurrent();
+                        $values[$key] = $value;
+                        $ids[$key] = $value[0];
+                    } else {
+                        unset($iterators[$key]);
+                    }
+                }
+                if (!$values) {
+                    break;
+                }
+                uasort($values, function ($v1, $v2) use ($score) {
+                    $s1 = $score($v1[1]);
+                    $s2 = $score($v2[1]);
+                    if (!$s1 && !$s2) {
+                        return $v1[0] > $v2[0];
+                    }
+                    return $s1 < $s2;
+                });
+                $key = key($values);
+                yield $emit($values[$key]);
+                unset($values[$key], $ids[$key]);
+                $this->setSearchIteratorState($cursor, $ids);
+            }
+        }, $cursor, $iterators);
+        $coroutine->onResolve(function ($exception) use (&$emitter) {
+            if ($exception) {
+                $emitter->fail($exception);
+                $emitter = null;
+            } else {
+                $emitter->complete();
+            }
+        });
+        return $iterator;
+    }
+
+    public function setSearchIteratorState($cursor, $state)
+    {
+        $this->searchIteratorStates[$cursor] = $state;
+    }
+
+    public function getSearchIteratorState($cursor)
+    {
+        return $this->searchIteratorStates[$cursor];
     }
 
     /**

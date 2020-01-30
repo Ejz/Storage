@@ -119,6 +119,9 @@ class Bitmap
      */
     public function search(Repository $repository, $query): Iterator
     {
+        $emitter = new \Amp\Emitter();
+        $iterator = $emitter->iterate();
+        $iterator = new Emitter($iterator);
         if (is_string($query)) {
             $index = $repository->getBitmapIndex();
             $result = $this->client->SEARCH($index, $query, 'WITHCURSOR');
@@ -126,51 +129,81 @@ class Bitmap
             $left = $size;
             $ids = null;
         } else {
-            $state = $query[$this->name] + [
-                'pointer' => 0,
-                'ids' => [],
-                'left' => null,
-            ];
             [
                 'size' => $size,
                 'cursor' => $cursor,
                 'pointer' => $pointer,
                 'ids' => $ids,
                 'left' => $left,
-            ] = $state;
-            $left = $left ?? $size;
+            ] = $query;
             if ($pointer > 0) {
                 $ids = array_slice($ids, $pointer);
             }
             $left += count($ids);
         }
-        $me = new Producer();
-        $emit = function ($emit) use ($left, $cursor, $repository, $ids) {
+        $iterator->setSize($size);
+        $iterator->setCursor($cursor);
+        $iterator->setContext($this);
+        $coroutine = \Amp\call(function ($left, $cursor, $repository, $ids) use (&$emitter) {
+            $state = ['left' => $left, 'pointer' => 0, 'ids' => $ids ?? []];
+            $this->setSearchIteratorState($cursor, $state);
             while ($left > 0) {
-                $ids = $ids ?? $this->client->CURSOR($cursor, 'LIMIT', 10);
+                $ids = yield \Amp\call(function ($ids, $cursor, $left) {
+                    var_dump($left);
+                    // yield \Amp\delay(100);
+                    var_dump($cursor);
+                    return $ids ?? $this->client->CURSOR($cursor, 'LIMIT', 10);
+                }, $ids, $cursor, $left);
+                // $ids = $ids ?? $this->client->CURSOR($cursor, 'LIMIT', 10);
                 $left -= count($ids);
                 $state = ['left' => $left, 'pointer' => 0, 'ids' => $ids];
                 $this->setSearchIteratorState($cursor, $state);
                 $iterator = $repository->get($ids);
-                $iterator = Producer::getIteratorWithIdsOrder($iterator, $ids);
-                while (yield $iterator->advance()) {
+                // $iterator = Emitter::getIteratorWithIdsOrder($iterator, $ids);
+                while ((yield $iterator->advance()) && $emitter !== null) {
+                    var_dump('emit:before:' . $this->name . ':' . $iterator->getCurrent()[0]);
+                    // yield $emit($iterator->getCurrent());
+                    yield $emitter->emit($iterator->getCurrent());
+                    var_dump('emit:after:' . $this->name . ':' . $iterator->getCurrent()[0]);
                     $this->moveSearchIteratorStatePointer($cursor);
-                    yield $emit($iterator->getCurrent());
                 }
                 $ids = null;
             }
-            $this->setSearchIteratorState($cursor, ['left' => 0]);
-        };
-        $me->setIterator($emit);
-        $me->setSize($size);
-        $me->setCursor($cursor);
-        $me->setBitmap($this);
-        return $me;
+            $state = ['left' => 0, 'pointer' => 0, 'ids' => []];
+            $this->setSearchIteratorState($cursor, $state);
+        }, $left, $cursor, $repository, $ids);
+        // $emit = function ($emit) use ($left, $cursor, $repository, $ids) {
+            
+        // };
+        $coroutine->onResolve(function ($exception) use (&$emitter) {
+            if ($exception) {
+                $emitter->fail($exception);
+                $emitter = null;
+            } else {
+                $emitter->complete();
+            }
+        });
+        return $iterator;
+        
+        // $iterator = new Producer($emit);
+        
+        // return $iterator;
     }
 
-    public function getSearchIteratorState($cursor)
+    /**
+     * @param string $cursor
+     *
+     * @return array
+     */
+    public function getSearchIteratorState(?string $cursor): array
     {
-        return $this->searchIteratorStates[$cursor];
+        if ($cursor === null) {
+            return [];
+        }
+        $state = $this->searchIteratorStates[$cursor];
+        // $state['cursor'] = $cursor;
+        return $state;
+        // return  ? $this->searchIteratorStates[$cursor] : [];
     }
 
     public function setSearchIteratorState($cursor, $state)
@@ -178,9 +211,17 @@ class Bitmap
         $this->searchIteratorStates[$cursor] = $state;
     }
 
+    // public function resetSearchIteratorState($cursor)
+    // {
+    //     $state = ['left' => 0, 'pointer' => 0, 'ids' => []];
+    //     $this->searchIteratorStates[$cursor] = $state;
+    // }
+
     public function moveSearchIteratorStatePointer($cursor)
     {
+        // var_dump($cursor);
         $this->searchIteratorStates[$cursor]['pointer']++;
+        // var_dump($this->searchIteratorStates[$cursor]['pointer']);
     }
 
     /**
@@ -204,14 +245,14 @@ class Bitmap
                 $ids = $ids ?? $client->CURSOR($cursor, 'LIMIT', 10);
                 $left -= count($ids);
                 $iterator = $repository->get($ids);
-                $iterator = Producer::getIteratorWithIdsOrder($iterator, $ids);
+                // $iterator = Producer::getIteratorWithIdsOrder($iterator, $ids);
                 while (yield $iterator->advance()) {
                     yield $emit($iterator->getCurrent());
                 }
                 unset($ids);
             }
         };
-        $iterator = new Producer($emit, true);
+        // $iterator = new Producer($emit, true);
         $iterator->setSize($size);
         return $iterator;
     }

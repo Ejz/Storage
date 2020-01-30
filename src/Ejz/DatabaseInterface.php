@@ -119,18 +119,18 @@ interface DatabaseInterface
      * @param string $table
      * @param array  $params (optional)
      *
-     * @return Iterator
+     * @return Emitter
      */
-    public function iterate(string $table, array $params = []): Iterator;
+    public function iterate(string $table, array $params = []): Emitter;
 
     /**
      * @param string $table
      * @param array  $ids
      * @param array  $params (optional)
      *
-     * @return Iterator
+     * @return Emitter
      */
-    public function get(string $table, array $ids, array $params = []): Iterator;
+    public function get(string $table, array $ids, array $params = []): Emitter;
 
     /**
      * @param Repository $repository

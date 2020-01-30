@@ -247,10 +247,8 @@ class TestCaseDatabasePostgres extends AbstractTestCase
         $params = ['config' => ['iterator_chunk_size' => mt_rand(1, 4)]];
         $iterator = $db->iterate('t1', $params);
         \Amp\Loop::run(function () use ($iterator, &$result) {
-            yield $iterator->advance();
-            $result[] = $iterator->getCurrent()[0];
-            yield $iterator->advance();
-            $result[] = $iterator->getCurrent()[0];
+            $result[] = (yield $iterator->pull())[0];
+            $result[] = (yield $iterator->pull())[0];
         });
         $this->assertTrue($result === [1, 2]);
         $result = [];
@@ -358,6 +356,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
         $_ = iterator_to_array($db->get('t2', [1E6])->generator());
         $this->assertTrue($_ === []);
         $_ = iterator_to_array($db->get('t1', [1, 2], ['fields' => []])->generator());
+        var_dump($_);
         $this->assertTrue($_ === [1 => [], 2 => []]);
         $_ = iterator_to_array($db->get('t1', range(1, 1000), ['fields' => []])->generator());
         $this->assertTrue($_ === array_fill_keys(range(1, 1000), []));

@@ -403,11 +403,15 @@ class DatabasePostgres implements DatabaseInterface
      * @param string $table
      * @param array  $params (optional)
      *
-     * @return Iterator
+     * @return Emitter
      */
-    public function iterate(string $table, array $params = []): Iterator
+    public function iterate(string $table, array $params = []): Emitter
     {
-        $emit = function ($emit) use ($table, $params) {
+        $emitter = new Emitter();
+        // $emitter = new \Amp\Emitter();
+        // $iterator = $emitter->iterate();
+        // $iterator = new Emitter($iterator);
+        $coroutine = \Amp\call(function ($table, $params, $emitter) {
             $params += [
                 'fields' => null,
                 'returnFields' => false,
@@ -462,14 +466,14 @@ class DatabasePostgres implements DatabaseInterface
                 $c = count($intervals);
                 while ($c) {
                     $key = array_rand($intervals);
-                    if (!$intervals[$key] instanceof Iterator) {
+                    if (!$intervals[$key] instanceof Emitter) {
                         [$min, $max] = $intervals[$key];
                         $asc = (bool) mt_rand(0, 1);
                         $params = compact('asc', 'min', 'max') + $params;
                         $intervals[$key] = $this->iterate($table, $params);
                     }
-                    if (yield $intervals[$key]->advance()) {
-                        yield $emit($intervals[$key]->getCurrent());
+                    if (($value = yield $intervals[$key]->pull()) !== null) {
+                        yield $emitter->push($value);
                     } else {
                         unset($intervals[$key]);
                         $c--;
@@ -528,16 +532,20 @@ class DatabasePostgres implements DatabaseInterface
                         $v = $returnFields ? clone $f : $f->getValue();
                     }
                     unset($v);
-                    yield $emit([$id, $row]);
+                    yield $emitter->push([$id, $row]);
                 }
-                if (!$c || $c < $lim) {
+                if (!$c || $c < $lim || $emitter === null) {
                     break;
                 }
                 ${$asc ? 'min' : 'max'} = $id;
                 $first = false;
             }
-        };
-        return new Producer($emit);
+        }, $table, $params, $emitter);
+        $coroutine->onResolve(function () use ($emitter) {
+            $emitter->finish();
+        });
+        return $emitter;
+        // return new Producer($emit);
     }
 
     /**
@@ -545,11 +553,14 @@ class DatabasePostgres implements DatabaseInterface
      * @param array  $ids
      * @param array  $params (optional)
      *
-     * @return Iterator
+     * @return Emitter
      */
-    public function get(string $table, array $ids, array $params = []): Iterator
+    public function get(string $table, array $ids, array $params = []): Emitter
     {
-        $emit = function ($emit) use ($table, $ids, $params) {
+        // $emitter = new \Amp\Emitter();
+        // $iterator = $emitter->iterate();
+        $emitter = new Emitter();
+        $coroutine = \Amp\call(function ($table, $ids, $params, $emitter) {
             $params += [
                 'pk' => null,
                 'fields' => null,
@@ -575,7 +586,7 @@ class DatabasePostgres implements DatabaseInterface
             }
             [$pk] = $pk;
             foreach (array_chunk($ids, $iterator_chunk_size) as $chunk) {
-                $iterator = $this->iterate($table, [
+                $_ = $this->iterate($table, [
                     'where' => new Condition([$pk => $chunk]),
                     'pk' => [$pk],
                     'fields' => $fields,
@@ -584,12 +595,31 @@ class DatabasePostgres implements DatabaseInterface
                     'config' => compact('iterator_chunk_size'),
                     'order' => $order,
                 ]);
-                while (yield $iterator->advance()) {
-                    yield $emit($iterator->getCurrent());
+                while (($value = yield $_->pull()) !== null) {
+                    yield $emitter->push($value);
                 }
+                // yield $emitter->from($_);
+                // while (($value = yield $emitter->pull()) !== null) {
+                //     yield $emitter->emit($iterator->getCurrent());
+                // }
             }
-        };
-        return new Producer($emit);
+        }, $table, $ids, $params, $emitter);
+        $coroutine->onResolve(function () use ($emitter) {
+            $emitter->finish();
+        });
+        return $emitter;
+        // $coroutine->onResolve(function ($exception) use (&$emitter) {
+        //     if ($exception) {
+        //         $emitter->fail($exception);
+        //         $emitter = null;
+        //     } else {
+        //         $emitter->complete();
+        //     }
+        // });
+        // $emit = function ($emit) use ($table, $ids, $params) {
+            
+        // };
+        // return new Producer($emit);
     }
 
     /**

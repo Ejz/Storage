@@ -1159,18 +1159,74 @@ class TestCaseStorage extends AbstractTestCase
             $table->insertSync(['boolean' => mt_rand(0, 1)]);
         }
         $table->bitmapPopulate();
-        $iterator = $table->getBitmapPool()->random()->search($table, '*');
-        @ $pointer = (int) $iterator->getSearchIteratorState()['pointer'];
+        //
+        //
+        //
+        $bitmap = $table->getBitmapPool()->random();
+        $iterator = $bitmap->search($table, '*');
+        $this->assertTrue(!empty($iterator->getSearchIteratorState()));
+        $state = $iterator->getSearchIteratorState();
+        $this->assertTrue(isset($state['pointer']));
+        $pointer = $state['pointer'];
         $this->assertTrue($pointer === 0);
         $iterator->advanceSync();
-        @ $pointer = (int) $iterator->getSearchIteratorState()['pointer'];
-        $this->assertTrue($pointer > 0);
-        $iterator = $table->search('*');
-        $pointers = array_column($iterator->getSearchIteratorState(), 'pointer');
-        $this->assertTrue(array_sum($pointers) === 0);
-        $iterator->advanceSync();
-        $pointers = array_column($iterator->getSearchIteratorState(), 'pointer');
-        $this->assertTrue(array_sum($pointers) > 0);
+        $state = $iterator->getSearchIteratorState();
+        $pointer = $state['pointer'];
+        $this->assertTrue($pointer === 1);
+        $iterator->getCurrent();
+        $_state = $iterator->getSearchIteratorState();
+        $this->assertEquals($_state, $state);
+        $inc = mt_rand(1, 7);
+        foreach (range(1, $inc) as $_) {
+            $iterator->advanceSync();
+        }
+        $state = $iterator->getSearchIteratorState();
+        $pointer = $state['pointer'];
+        $this->assertEquals(1 + $inc, $pointer);
+        //
+        //
+        //
+        $bitmap = $table->getBitmapPool()->random();
+        $iterator = $bitmap->search($table, '*');
+        $i = $_i = mt_rand(1, 6);
+        foreach ($iterator->generator() as $id => $bean) {
+            $i--;
+            if (!$i) {
+                break;
+            }
+        }
+        $pointer = $iterator->getSearchIteratorState()['pointer'];
+        $this->assertTrue($pointer === $_i);
+        //
+        //
+        //
+        $bitmap = $table->getBitmapPool()->random();
+        $iterator = $bitmap->search($table, '*');
+        $ids = array_keys(iterator_to_array($iterator->generator()));
+        $this->assertTrue($ids === range(1, 100));
+        $iterator = $bitmap->search($table, '*');
+        $values = [];
+        foreach ($iterator->generator() as $id => $bean) {
+            $values[] = $bean->boolean;
+        }
+        $iterator = $bitmap->search($table, '*');
+        if (mt_rand(0, 1)) {
+            $state = $iterator->getSearchIteratorState();
+            $this->assertTrue($state['size'] === $state['left'] + count($state['ids']));
+            $iterator = $bitmap->search($table, $state);
+        }
+        $ids = [];
+        $_values = [];
+        while ($iterator->advanceSync()) {
+            $ids[] = $iterator->getCurrent()[0];
+            $_values[] = $iterator->getCurrent()[1]->boolean;
+            if (mt_rand(0, 1)) {
+                $state = $iterator->getSearchIteratorState();
+                $iterator = $bitmap->search($table, $state);
+            }
+        }
+        $this->assertTrue($ids === range(1, 100));
+        $this->assertEquals($values, $_values);
     }
 
     /**
@@ -1199,26 +1255,53 @@ class TestCaseStorage extends AbstractTestCase
         $table = $storage->table();
         $table->createSync();
         $all = [];
-        foreach (range(1, 2) as $_) {
+        foreach (range(1, 100) as $_) {
             $all[] = $table->insertSync([
                 'boolean' => mt_rand(0, 1),
                 'int' => mt_rand(1, 100),
             ]);
         }
         sort($all);
+        // return;
+        // var_dump($all);
         $table->sort();
         $table->bitmapPopulate();
         $iterator = $table->search('*');
+        $state = $iterator->getSearchIteratorState();
+        print_r(array_map(function ($_) {
+            return $_['pointer'];
+        }, $state));
+        // var_dump($state);
+        // $pointer = array_sum(array_column($state, 'pointer'));
+        // $this->assertTrue($pointer === 0);
+        $iterator->advanceSync();
+        $state = $iterator->getSearchIteratorState();
+        print_r(array_map(function ($_) {
+            return $_['pointer'];
+        }, $state));
+        return;
+        var_dump($state);
+        $pointer = array_sum(array_column($state, 'pointer'));
+        $this->assertTrue($pointer === 1);
+        return;
+
+        $iterator->advanceSync();
+        $pointer = $state['pointer'];
+        // $iterator = $table->search($iterator->getSearchIteratorState());
         $ids = [];
         while ($iterator->advanceSync()) {
             [$id, $bean] = $iterator->getCurrent();
             $ids[] = $id;
-            if (mt_rand(0, 1)) {
-                $iterator = $table->search($iterator->getSearchIteratorState());
-            }
+            // var_dump($iterator->getSearchIteratorState());
+            $iterator = $table->search($iterator->getSearchIteratorState());
+            // if (mt_rand(0, 1)) {
+                // continue;
+            // }
+            // var_dump($id);
         }
         sort($ids);
         $this->assertEquals($all, $ids);
+        // print_r($ids);
     }
 
     /**
