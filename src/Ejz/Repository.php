@@ -26,9 +26,6 @@ class Repository
     /** @var Pool */
     protected $bitmapPool;
 
-    /** @var array */
-    protected $searchIteratorStates;
-
     /** @var string */
     private const METHOD_NOT_FOUND = 'METHOD_NOT_FOUND: %s';
 
@@ -132,13 +129,12 @@ class Repository
     /**
      * @param array $ids
      *
-     * @return Iterator
+     * @return Emitter
      */
-    public function get(array $ids): Iterator
+    public function get(array $ids): Emitter
     {
-        $emitter = new \Amp\Emitter();
-        $iterator = $emitter->iterate();
-        $coroutine = \Amp\call(function ($ids) use (&$emitter) {
+        $emitter = new Emitter();
+        $coroutine = \Amp\call(function ($ids, $emitter) {
             $table = $this->getDatabaseTable();
             $dbs = [];
             $meta = [];
@@ -160,7 +156,7 @@ class Repository
                 $dbs[$name] = $dbs[$name] ?? ['db' => $db, 'ids' => []];
                 $dbs[$name]['ids'][] = $id;
             }
-            $iterators = [Iterator\fromIterable($cached)];
+            $iterators = [Emitter::fromIterable($cached)];
             foreach ($dbs as ['db' => $db, 'ids' => $ids]) {
                 $params = $params ?? [
                     'pk' => [$this->getDatabasePk()],
@@ -170,12 +166,12 @@ class Repository
                 $iterators[] = $db->get($table, $ids, $params);
             }
             if (count($iterators) > 1) {
-                $iterator = Iterator\merge($iterators);
+                $iterator = Emitter::merge($iterators);
             } else {
                 [$iterator] = $iterators;
             }
-            while ((yield $iterator->advance()) && $emitter !== null) {
-                [$id, $fields] = $value = $iterator->getCurrent();
+            while (($value = yield $iterator->pull()) !== null) {
+                [$id, $fields] = $value;
                 $bean = $this->getDatabaseBeanWithFields($id, $fields);
                 if (isset($meta[$id])) {
                     [$ck, $ct] = $meta[$id];
@@ -187,18 +183,13 @@ class Repository
                         $cache->set($ck, $id, $this->config['cache']['ttl'], $ct);
                     }
                 }
-                yield $emitter->emit([$id, $bean]);
+                yield $emitter->push([$id, $bean]);
             }
-        }, $ids);
-        $coroutine->onResolve(function ($exception) use (&$emitter) {
-            if ($exception) {
-                $emitter->fail($exception);
-                $emitter = null;
-            } else {
-                $emitter->complete();
-            }
+        }, $ids, $emitter);
+        $coroutine->onResolve(function () use ($emitter) {
+            $emitter->finish();
         });
-        return new Emitter($iterator);
+        return $emitter;
     }
 
     /**
@@ -261,11 +252,12 @@ class Repository
     /**
      * @param array $params (optional)
      *
-     * @return Iterator
+     * @return Emitter
      */
-    public function iterate(array $params = []): Iterator
+    public function iterate(array $params = []): Emitter
     {
-        $emit = function ($emit) use ($params) {
+        $emitter = new Emitter();
+        $coroutine = \Amp\call(function ($params, $emitter) {
             $params = [
                 'pk' => [$this->getDatabasePk()],
                 'fields' => array_values($this->getDatabaseFields()),
@@ -282,19 +274,30 @@ class Repository
             foreach ($pool->names() as $name) {
                 $iterators[] = $pool->instance($name)->iterate($table, $params);
             }
-            $iterator = Iterator\merge($iterators);
+            if (count($iterators) > 1) {
+                $iterator = Emitter::merge($iterators);
+            } else {
+                [$iterator] = $iterators;
+            }
             $ids = [];
-            while (yield $iterator->advance()) {
-                [$id, $fields] = $iterator->getCurrent();
+            while (($value = yield $iterator->pull()) !== null) {
+                [$id, $fields] = $value;
                 if (isset($ids[$id])) {
                     continue;
                 }
                 $ids[$id] = true;
                 $bean = $this->getDatabaseBeanWithFields($id, $fields);
-                yield $emit([$id, $bean]);
+                yield $emitter->push([$id, $bean]);
             }
-        };
-        return new Producer($emit);
+        }, $params, $emitter);
+        $coroutine->onResolve(function () use ($emitter) {
+            $emitter->finish();
+        });
+        return $emitter;
+        // $emit = function ($emit) use ($params) {
+            
+        // };
+        // return new Producer($emit);
     }
 
     /**
@@ -436,9 +439,9 @@ class Repository
     /**
      * @param array $conditions
      *
-     * @return Iterator
+     * @return Emitter
      */
-    public function filter(array $conditions): Iterator
+    public function filter(array $conditions): Emitter
     {
         if (
             $this->config['cache'] !== null &&
@@ -467,7 +470,10 @@ class Repository
      */
     public function exists(array $conditions): Promise
     {
-        return $this->filter($conditions)->advance();
+        return \Amp\call(function ($conditions) {
+            $value = yield $this->filter($conditions)->pull();
+            return $value !== null;
+        }, $conditions);
     }
 
     /**
@@ -484,6 +490,11 @@ class Repository
         $names2 = $pool2->names();
         if (!$names1 || array_diff($names1, $names2)) {
             return new Success(false);
+        }
+        if ($this->config['cache'] !== null) {
+            $table = $this->getDatabaseTable();
+            $cache = $this->storage->getCache();
+            $cache->drop($table . '.' . $id1);
         }
         $deferred = new Deferred();
         $promises = $pool1->reid($this, $id1, $id2);
@@ -536,25 +547,20 @@ class Repository
     /**
      * @param string|array $query
      *
-     * @return Iterator
+     * @return Emitter
      */
-    public function search($query): Iterator
+    public function search($query): Emitter
     {
         $pool = $this->getReadableBitmapPool();
         $size = 0;
-        $cursors = [];
-        $iterators = $pool->each(function ($instance) use ($query, &$size, &$cursors) {
+        $iterators = $pool->each(function ($instance) use ($query, &$size) {
             $query = is_string($query) ? $query : ($query[$instance->getName()] ?? []);
             $iterator = $instance->search($this, $query);
             $size += $iterator->getSize();
-            $cursors[] = $iterator->getCursor();
             return $iterator;
         });
-        $cursor = md5(implode('', $cursors));
-        $iterator = $this->getSearchIterator($cursor, $iterators);
+        $iterator = $this->getSearchIterator($iterators);
         $iterator->setSize($size);
-        $iterator->setCursor($cursor);
-        $iterator->setContext(['repository' => $this, 'iterators' => $iterators]);
         return $iterator;
     }
 
@@ -562,78 +568,56 @@ class Repository
      * @param array  $iterators
      * @param string $cursor
      *
-     * @return Iterator
+     * @return Emitter
      */
-    public function getSearchIterator(string $cursor, array $iterators): Iterator
+    public function getSearchIterator(array $iterators): Emitter
     {
-        $emitter = new \Amp\Emitter();
-        $iterator = $emitter->iterate();
-        $iterator = new Emitter($iterator);
-        $coroutine = \Amp\call(function ($cursor, $iterators) use (&$emitter) {
+        $emitter = new Emitter();
+        $emitter->setContext(['emitters' => $iterators]);
+        $coroutine = \Amp\call(function ($iterators, $emitter) {
             $score = [$this, 'getSortScore'];
             $values = [];
+            $state = [];
             $ids = [];
-            $this->setSearchIteratorState($cursor, []);
-            $iterator = Iterator\merge($iterators);
-            while ((yield $iterator->advance()) && $emitter !== null) {
-                yield $emitter->emit($iterator->getCurrent());
-                // yield $emit($iterator->getCurrent());
-            }
-            return;
             while (true) {
-                // print_r(array_keys(array_diff_key($iterators, $values)));
-                $results = yield array_map(function ($iterator) {
-                    return $iterator->advance();
-                }, array_diff_key($iterators, $values));
-                // var_dump($results);
-                // var_dump($iterators['TEST0']->getSearchIteratorState()['pointer']);
-                // var_dump($iterators['TEST1']->getSearchIteratorState()['pointer']);
-                // var_dump($iterators['TEST2']->getSearchIteratorState()['pointer']);
-                foreach ($results as $key => $result) {
-                    if ($result) {
-                        $value = $iterators[$key]->getCurrent();
-                        $values[$key] = $value;
-                        $ids[$key] = $value[0];
-                    } else {
-                        unset($iterators[$key]);
+                do {
+                    $results = yield array_map(function ($iterator) {
+                        return $iterator->pull();
+                    }, $diff = array_diff_key($iterators, $values));
+                    foreach ($results as $key => $value) {
+                        if ($value === null) {
+                            unset($iterators[$key]);
+                            unset($diff[$key]);
+                        } elseif (!isset($ids[$value[0]])) {
+                            $ids[$value[0]] = true;
+                            $values[$key] = $value;
+                            $state[$key] = $value[0];
+                            unset($diff[$key]);
+                        }
                     }
-                }
+                } while ($diff);
                 if (!$values) {
                     break;
                 }
                 uasort($values, function ($v1, $v2) use ($score) {
-                    $s1 = $score($v1[1]);
-                    $s2 = $score($v2[1]);
-                    if (!$s1 && !$s2) {
-                        return $v1[0] > $v2[0];
+                    $s1 = (int) $score($v1[1]);
+                    $s2 = (int) $score($v2[1]);
+                    if ($s1 === $s2) {
+                        return $v1[0] - $v2[0];
                     }
-                    return $s1 < $s2;
+                    return $s2 - $s1;
                 });
                 $key = key($values);
-                yield $emit($values[$key]);
-                unset($values[$key], $ids[$key]);
-                $this->setSearchIteratorState($cursor, $ids);
+                $emitter->setContext($state, 'ids');
+                yield $emitter->push($values[$key]);
+                unset($values[$key], $state[$key]);
+                $emitter->setContext($state, 'ids');
             }
-        }, $cursor, $iterators);
-        $coroutine->onResolve(function ($exception) use (&$emitter) {
-            if ($exception) {
-                $emitter->fail($exception);
-                $emitter = null;
-            } else {
-                $emitter->complete();
-            }
+        }, $iterators, $emitter);
+        $coroutine->onResolve(function ($e) use ($emitter) {
+            $emitter->finish();
         });
-        return $iterator;
-    }
-
-    public function setSearchIteratorState($cursor, $state)
-    {
-        $this->searchIteratorStates[$cursor] = $state;
-    }
-
-    public function getSearchIteratorState($cursor)
-    {
-        return $this->searchIteratorStates[$cursor];
+        return $emitter;
     }
 
     /**

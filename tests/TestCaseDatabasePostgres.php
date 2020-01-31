@@ -356,7 +356,6 @@ class TestCaseDatabasePostgres extends AbstractTestCase
         $_ = iterator_to_array($db->get('t2', [1E6])->generator());
         $this->assertTrue($_ === []);
         $_ = iterator_to_array($db->get('t1', [1, 2], ['fields' => []])->generator());
-        var_dump($_);
         $this->assertTrue($_ === [1 => [], 2 => []]);
         $_ = iterator_to_array($db->get('t1', range(1, 1000), ['fields' => []])->generator());
         $this->assertTrue($_ === array_fill_keys(range(1, 1000), []));

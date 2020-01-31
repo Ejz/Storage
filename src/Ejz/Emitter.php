@@ -18,6 +18,8 @@ class Emitter
 
     private $finished = false;
 
+    private $stats = ['push' => 0, 'pull' => 0];
+
     public function push($value): Promise
     {
         if ($this->pull) {
@@ -25,11 +27,13 @@ class Emitter
             $deferred = $this->pull[$key];
             unset($this->pull[$key]);
             $deferred->resolve($value);
+            $this->stats['push']++;
             return new Success();
         }
         if ($this->finished) {
             throw new RuntimeException(self::EMITTER_IS_FINISHED);
         }
+        $this->stats['push']++;
         $this->values[$this->pos0] = $value;
         $this->pos0++;
         $deferred = new \Amp\Deferred();
@@ -47,11 +51,13 @@ class Emitter
             $value = $this->values[$this->pos1];
             unset($this->values[$this->pos1]);
             $this->pos1++;
+            $this->stats['pull']++;
             return new Success($value);
         }
         if ($this->finished) {
             return new Success(null);
         }
+        $this->stats['pull']++;
         $deferred = new \Amp\Deferred();
         $this->pull[] = $deferred;
         return $deferred->promise();
@@ -68,6 +74,11 @@ class Emitter
             $deferred->resolve(null);
         }
         $this->pull = [];
+    }
+
+    public function resetStats()
+    {
+        $this->stats = ['push' => 0, 'pull' => 0];
     }
 
     // public function advance(): Promise
@@ -133,6 +144,14 @@ class Emitter
     }
 
     /**
+     * @return mixed
+     */
+    public function pullSync()
+    {
+        return Promise\wait($this->pull());
+    }
+
+    /**
      * @return Promise
      */
     public function advance1(): Promise
@@ -191,9 +210,13 @@ class Emitter
     /**
      * @param mixed $context
      */
-    public function setContext($context)
+    public function setContext($context, $key = null)
     {
-        $this->context = $context;
+        if ($key === null) {
+            $this->context = $context;
+        } else {
+            $this->context[$key] = $context;
+        }
     }
 
     /**
@@ -201,7 +224,7 @@ class Emitter
      */
     public function generator(): Generator
     {
-        while (($value = Promise\wait($this->pull())) !== null) {
+        while (($value = $this->pullSync()) !== null) {
             yield $value[0] => $value[1];
         }
     }
@@ -209,29 +232,21 @@ class Emitter
     /**
      * @return array
      */
-    public function getSearchIteratorState(): array
+    public function getSearchState(): array
     {
-        if ($this->context instanceof Bitmap) {
-            $state = $this->context->getSearchIteratorState($this->cursor);
-            return ['size' => $this->size, 'cursor' => $this->cursor] + $state;
+        $ctx = $this->context;
+        if (isset($ctx['cursor'])) {
+            $ids = $ctx['ids'];
+            $ids = array_keys(array_filter($ids, 'is_int'));
+            $ctx['ids'] = $ids;
+            return $ctx + ['size' => $this->size];
         }
-        [
-            'repository' => $repository,
-            'iterators' => $iterators,
-        ] = $this->context;
-        $ids = $repository->getSearchIteratorState($this->cursor);
         $collect = [];
-        foreach ($iterators as $name => $iterator) {
-            $state = $iterator->getSearchIteratorState();
+        $ids = $ctx['ids'] ?? [];
+        foreach (($ctx['emitters'] ?? []) as $name => $emitter) {
+            $state = $emitter->getSearchState();
             if (isset($ids[$name])) {
-                $_pointer = $state['pointer'] ?? 0;
-                $_ids = $state['ids'] ?? [];
-                if ($_pointer > 0) {
-                    $_ids = array_slice($_ids, $_pointer);
-                }
-                array_unshift($_ids, $ids[$name]);
-                $state['ids'] = $_ids;
-                $state['pointer'] = 0;
+                array_unshift($state['ids'], $ids[$name]);
             }
             $collect[$name] = $state;
         }
@@ -239,52 +254,77 @@ class Emitter
     }
 
     /**
-     * @param Iterator $iterator
-     * @param array    $ids
+     * @param Emitter $iterator
+     * @param array   $ids
      *
-     * @return Iterator
+     * @return Emitter
      */
-    public static function getIteratorWithIdsOrder(Iterator $iterator, array $ids): Iterator
+    public static function getIteratorWithIdsOrder(self $iterator, array $ids): self
     {
-        $emitter = new \Amp\Emitter();
-        $return = $emitter->iterate();
-        $return = new self($return);
+        $emitter = new self();
         $collect = [];
-        $c1 = \Amp\call(function () use (&$collect, &$iterator, &$emitter) {
-            while ((yield $iterator->advance()) && $emitter !== null) {
-                [$id, $bean] = $iterator->getCurrent();
+        $c1 = \Amp\call(function () use (&$collect, &$iterator) {
+            while (($value = yield $iterator->pull()) !== null) {
+                [$id, $bean] = $value;
                 $collect[$id] = $bean;
             }
             $iterator = null;
         });
-        $c2 = \Amp\call(function ($ids) use (&$collect, &$iterator, &$emitter) {
+        $c2 = \Amp\call(function ($ids, $emitter) use (&$collect, &$iterator) {
             $pointer = 0;
             $count = count($ids);
-            while ($iterator !== null && $emitter !== null && $pointer < $count) {
+            while ($iterator !== null && $pointer < $count) {
                 $id = $ids[$pointer];
                 if (isset($collect[$id])) {
-                    yield $emitter->emit([$id, $collect[$id]]);
+                    yield $emitter->push([$id, $collect[$id]]);
                     $pointer++;
                 } else {
                     yield \Amp\delay(20);
                 }
             }
-            for (; $emitter !== null && $pointer < $count; $pointer++) {
+            for (; $pointer < $count; $pointer++) {
                 $id = $ids[$pointer];
                 if (isset($collect[$id])) {
-                    yield $emitter->emit([$id, $collect[$id]]);
+                    yield $emitter->push([$id, $collect[$id]]);
                 }
             }
-        }, $ids);
-        Promise\all([$c1, $c2])->onResolve(function ($exception) use (&$emitter) {
-            if ($exception) {
-                $emitter->fail($exception);
-                $emitter = null;
-            } else {
-                $emitter->complete();
-            }
+        }, $ids, $emitter);
+        Promise\all([$c1, $c2])->onResolve(function () use ($emitter) {
+            $emitter->finish();
         });
-        return $return;
+        return $emitter;
+    }
+
+    public static function fromIterable(iterable $iterable): self
+    {
+        $emitter = new self();
+        $coroutine = \Amp\call(function ($iterable, $emitter) {
+            foreach ($iterable as $value) {
+                yield $emitter->push($value);
+            }
+        }, $iterable, $emitter);
+        $coroutine->onResolve(function () use ($emitter) {
+            $emitter->finish();
+        });
+        return $emitter;
+    }
+
+    
+    public static function merge(array $iterators): self
+    {
+        $emitter = new self();
+        $coroutines = [];
+        foreach ($iterators as $iterator) {
+            $coroutines[] = \Amp\call(function ($iterator, $emitter) {
+                while (($value = yield $iterator->pull()) !== null) {
+                    yield $emitter->push($value);
+                }
+            }, $iterator, $emitter);
+        }
+        Promise\all($coroutines)->onResolve(function () use ($emitter) {
+            $emitter->finish();
+        });
+        return $emitter;
     }
 }
 

@@ -9,6 +9,7 @@ use Amp\Postgres\Connection;
 use Amp\Postgres\ConnectionConfig;
 use Amp\Postgres\PgSqlCommandResult;
 use Ejz\Type\AbstractType;
+use RuntimeException;
 
 class DatabasePostgres implements DatabaseInterface
 {
@@ -335,6 +336,7 @@ class DatabasePostgres implements DatabaseInterface
             }
             $q = $this->config['quote'];
             yield $this->exec("DROP TABLE {$q}{$table}{$q} CASCADE");
+            yield $this->exec("DROP SEQUENCE IF EXISTS {$q}{$table}_seq{$q} CASCADE");
             return true;
         }, $table);
     }
@@ -557,8 +559,6 @@ class DatabasePostgres implements DatabaseInterface
      */
     public function get(string $table, array $ids, array $params = []): Emitter
     {
-        // $emitter = new \Amp\Emitter();
-        // $iterator = $emitter->iterate();
         $emitter = new Emitter();
         $coroutine = \Amp\call(function ($table, $ids, $params, $emitter) {
             $params += [

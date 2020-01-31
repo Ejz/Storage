@@ -3,7 +3,8 @@
 namespace Tests;
 
 use Ejz\Type;
-use Ejz\Bean;
+use Ejz\DatabaseBean;
+use Ejz\BitmapBean;
 use Ejz\Index;
 use Ejz\Storage;
 use Amp\Promise;
@@ -278,7 +279,7 @@ class TestCaseStorage extends AbstractTestCase
             $bean = $table->getDatabaseBean();
             $bean->setId(1);
         }
-        $this->assertTrue($bean instanceof Bean);
+        $this->assertTrue($bean instanceof DatabaseBean);
         $bean->field1 = 'foo';
         $bean->insertSync();
     }
@@ -297,7 +298,7 @@ class TestCaseStorage extends AbstractTestCase
         $table = $storage->table();
         $table->createSync();
         $bean = $table->getDatabaseBean();
-        $this->assertTrue($bean instanceof Bean);
+        $this->assertTrue($bean instanceof DatabaseBean);
         $bean->field3 = 'foo';
     }
 
@@ -1164,39 +1165,36 @@ class TestCaseStorage extends AbstractTestCase
         //
         $bitmap = $table->getBitmapPool()->random();
         $iterator = $bitmap->search($table, '*');
-        $this->assertTrue(!empty($iterator->getSearchIteratorState()));
-        $state = $iterator->getSearchIteratorState();
-        $this->assertTrue(isset($state['pointer']));
-        $pointer = $state['pointer'];
-        $this->assertTrue($pointer === 0);
-        $iterator->advanceSync();
-        $state = $iterator->getSearchIteratorState();
-        $pointer = $state['pointer'];
-        $this->assertTrue($pointer === 1);
-        $iterator->getCurrent();
-        $_state = $iterator->getSearchIteratorState();
-        $this->assertEquals($_state, $state);
+        $this->assertTrue(!empty($iterator->getSearchState()));
+        $state = $iterator->getSearchState();
+        $this->assertTrue($state['size'] === 100);
+        $this->assertTrue($state['left'] + count($state['ids']) === 100);
+        $iterator->pullSync();
+        $state = $iterator->getSearchState();
+        $this->assertTrue($state['left'] + count($state['ids']) === 99);
+        //
+        //
+        //
         $inc = mt_rand(1, 7);
         foreach (range(1, $inc) as $_) {
-            $iterator->advanceSync();
+            $iterator->pullSync();
         }
-        $state = $iterator->getSearchIteratorState();
-        $pointer = $state['pointer'];
-        $this->assertEquals(1 + $inc, $pointer);
+        $state = $iterator->getSearchState();
+        $this->assertTrue($state['left'] + count($state['ids']) === 99 - $inc);
         //
         //
         //
         $bitmap = $table->getBitmapPool()->random();
         $iterator = $bitmap->search($table, '*');
-        $i = $_i = mt_rand(1, 6);
-        foreach ($iterator->generator() as $id => $bean) {
+        $i = $_i = mt_rand(0, 7);
+        foreach (($i ? $iterator->generator() : []) as $id => $bean) {
             $i--;
             if (!$i) {
                 break;
             }
         }
-        $pointer = $iterator->getSearchIteratorState()['pointer'];
-        $this->assertTrue($pointer === $_i);
+        $state = $iterator->getSearchState();
+        $this->assertTrue($state['left'] + count($state['ids']) === 100 - $_i);
         //
         //
         //
@@ -1211,17 +1209,17 @@ class TestCaseStorage extends AbstractTestCase
         }
         $iterator = $bitmap->search($table, '*');
         if (mt_rand(0, 1)) {
-            $state = $iterator->getSearchIteratorState();
+            $state = $iterator->getSearchState();
             $this->assertTrue($state['size'] === $state['left'] + count($state['ids']));
             $iterator = $bitmap->search($table, $state);
         }
         $ids = [];
         $_values = [];
-        while ($iterator->advanceSync()) {
-            $ids[] = $iterator->getCurrent()[0];
-            $_values[] = $iterator->getCurrent()[1]->boolean;
+        while (($value = $iterator->pullSync()) !== null) {
+            $ids[] = $value[0];
+            $_values[] = $value[1]->boolean;
             if (mt_rand(0, 1)) {
-                $state = $iterator->getSearchIteratorState();
+                $state = $iterator->getSearchState();
                 $iterator = $bitmap->search($table, $state);
             }
         }
@@ -1242,7 +1240,7 @@ class TestCaseStorage extends AbstractTestCase
                         'int' => Type::int(),
                     ],
                     'getSortScore' => function ($bean) {
-                        return $bean->int;
+                        return 1000 - $bean->id;
                     },
                 ] + Storage::getShardsClusterConfig(),
                 'bitmap' => [
@@ -1262,46 +1260,49 @@ class TestCaseStorage extends AbstractTestCase
             ]);
         }
         sort($all);
-        // return;
-        // var_dump($all);
         $table->sort();
         $table->bitmapPopulate();
+        //
+        //
+        //
         $iterator = $table->search('*');
-        $state = $iterator->getSearchIteratorState();
-        print_r(array_map(function ($_) {
-            return $_['pointer'];
-        }, $state));
-        // var_dump($state);
-        // $pointer = array_sum(array_column($state, 'pointer'));
-        // $this->assertTrue($pointer === 0);
-        $iterator->advanceSync();
-        $state = $iterator->getSearchIteratorState();
-        print_r(array_map(function ($_) {
-            return $_['pointer'];
-        }, $state));
-        return;
-        var_dump($state);
-        $pointer = array_sum(array_column($state, 'pointer'));
-        $this->assertTrue($pointer === 1);
-        return;
-
-        $iterator->advanceSync();
-        $pointer = $state['pointer'];
-        // $iterator = $table->search($iterator->getSearchIteratorState());
+        $state = $iterator->getSearchState();
+        $calc = function ($state) {
+            $count0 = 0;
+            $count1 = 0;
+            foreach ($state as $s) {
+                $count0 += count($s['ids']) + $s['left'];
+                $count1 += $s['size'];
+            }
+            return [$count0, $count1];
+        };
+        $this->assertTrue($calc($state)[0] === 100);
+        $this->assertTrue($calc($state)[1] === 100);
+        $iterator->pullSync();
+        $state = $iterator->getSearchState();
+        $this->assertTrue($calc($state)[0] === 99);
+        $this->assertTrue($calc($state)[1] === 100);
+        $inc = mt_rand(1, 70);
+        foreach (range(1, $inc) as $_) {
+            $iterator->pullSync();
+        }
+        $state = $iterator->getSearchState();
+        $this->assertTrue($calc($state)[0] === 99 - $inc);
+        $this->assertTrue($calc($state)[1] === 100);
+        //
+        //
+        //
+        $iterator = $table->search('*');
         $ids = [];
-        while ($iterator->advanceSync()) {
-            [$id, $bean] = $iterator->getCurrent();
+        while (($value = $iterator->pullSync()) !== null) {
+            [$id, $bean] = $value;
             $ids[] = $id;
-            // var_dump($iterator->getSearchIteratorState());
-            $iterator = $table->search($iterator->getSearchIteratorState());
-            // if (mt_rand(0, 1)) {
-                // continue;
-            // }
-            // var_dump($id);
+            if (mt_rand(0, 1)) {
+                $iterator = $table->search($iterator->getSearchState());
+            }
         }
         sort($ids);
         $this->assertEquals($all, $ids);
-        // print_r($ids);
     }
 
     /**
@@ -1310,7 +1311,6 @@ class TestCaseStorage extends AbstractTestCase
     public function test_case_storage_massive_create()
     {
         $rnd = (bool) mt_rand(0, 1);
-        $bitmap = getBitmap();
         $storage = \Container\getStorage([
             'table1' => [
                 'bitmap' => [],
@@ -1320,20 +1320,14 @@ class TestCaseStorage extends AbstractTestCase
             ],
         ]);
         $storage->createSync();
-        $storage->bitmapCreate();
-        $storage->bitmapPopulate();
-        $storage->sort();
-        $this->assertTrue(true);
-        $db = $storage->getDatabasePool()->random();
-        $this->assertTrue(wait($db->tableExists('table1')));
-        $this->assertTrue(wait($db->tableExists('table2')));
-        $this->assertTrue(in_array('table1', $bitmap->LIST()));
-        $this->assertTrue($rnd xor !in_array('table2', $bitmap->LIST()));
+        $storage->table1()->bitmapPopulate();
+        $storage->table2()->bitmapPopulate();
+        $storage->table1()->sort();
+        $storage->table2()->sort();
+        $bitmap = $storage->getBitmapPool()->random();
+        $list = $bitmap->listSync();
+        $this->assertTrue(in_array('table1', $list));
+        $this->assertTrue($rnd xor !in_array('table2', $list));
         $storage->dropSync();
-        $storage->bitmapDrop();
-        $this->assertTrue(!wait($db->tableExists('table1')));
-        $this->assertTrue(!wait($db->tableExists('table2')));
-        $this->assertTrue(!in_array('table1', $bitmap->LIST()));
-        $this->assertTrue(!in_array('table2', $bitmap->LIST()));
     }
 }

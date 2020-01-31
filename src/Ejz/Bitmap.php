@@ -17,9 +17,6 @@ class Bitmap
     /** @var RedisClient */
     protected $client;
 
-    /** @var array */
-    protected $searchIteratorStates;
-
     /** @var string */
     private const METHOD_NOT_FOUND = 'METHOD_NOT_FOUND: %s';
 
@@ -30,7 +27,6 @@ class Bitmap
     {
         $this->name = $name;
         $this->client = $client;
-        $this->searchIteratorStates = [];
     }
 
     /**
@@ -115,146 +111,49 @@ class Bitmap
      * @param string       $index
      * @param string|array $query
      *
-     * @return Iterator
+     * @return Emitter
      */
-    public function search(Repository $repository, $query): Iterator
+    public function search(Repository $repository, $query): Emitter
     {
-        $emitter = new \Amp\Emitter();
-        $iterator = $emitter->iterate();
-        $iterator = new Emitter($iterator);
+        $emitter = new Emitter();
         if (is_string($query)) {
             $index = $repository->getBitmapIndex();
             $result = $this->client->SEARCH($index, $query, 'WITHCURSOR');
             [$size, $cursor] = [$result[0] ?? 0, $result[1] ?? null];
             $left = $size;
-            $ids = null;
+            $ids = [];
         } else {
             [
                 'size' => $size,
                 'cursor' => $cursor,
-                'pointer' => $pointer,
                 'ids' => $ids,
                 'left' => $left,
             ] = $query;
-            if ($pointer > 0) {
-                $ids = array_slice($ids, $pointer);
-            }
             $left += count($ids);
         }
-        $iterator->setSize($size);
-        $iterator->setCursor($cursor);
-        $iterator->setContext($this);
-        $coroutine = \Amp\call(function ($left, $cursor, $repository, $ids) use (&$emitter) {
-            $state = ['left' => $left, 'pointer' => 0, 'ids' => $ids ?? []];
-            $this->setSearchIteratorState($cursor, $state);
+        $emitter->setSize($size);
+        $emitter->setContext(compact('cursor', 'ids', 'left'));
+        $coroutine = \Amp\call(function ($left, $cursor, $repository, $ids, $emitter) {
             while ($left > 0) {
-                $ids = yield \Amp\call(function ($ids, $cursor, $left) {
-                    var_dump($left);
-                    // yield \Amp\delay(100);
-                    var_dump($cursor);
-                    return $ids ?? $this->client->CURSOR($cursor, 'LIMIT', 10);
-                }, $ids, $cursor, $left);
-                // $ids = $ids ?? $this->client->CURSOR($cursor, 'LIMIT', 10);
+                $ids = $ids ?: $this->client->CURSOR($cursor, 'LIMIT', 10);
                 $left -= count($ids);
-                $state = ['left' => $left, 'pointer' => 0, 'ids' => $ids];
-                $this->setSearchIteratorState($cursor, $state);
+                $_ids = array_flip($ids);
+                $emitter->setContext($left, 'left');
+                $emitter->setContext($_ids, 'ids');
                 $iterator = $repository->get($ids);
-                // $iterator = Emitter::getIteratorWithIdsOrder($iterator, $ids);
-                while ((yield $iterator->advance()) && $emitter !== null) {
-                    var_dump('emit:before:' . $this->name . ':' . $iterator->getCurrent()[0]);
-                    // yield $emit($iterator->getCurrent());
-                    yield $emitter->emit($iterator->getCurrent());
-                    var_dump('emit:after:' . $this->name . ':' . $iterator->getCurrent()[0]);
-                    $this->moveSearchIteratorStatePointer($cursor);
+                $iterator = Emitter::getIteratorWithIdsOrder($iterator, $ids);
+                while (($value = yield $iterator->pull()) !== null) {
+                    yield $emitter->push($value);
+                    $_ids[$value[0]] = null;
+                    $emitter->setContext($_ids, 'ids');
                 }
-                $ids = null;
+                $ids = [];
             }
-            $state = ['left' => 0, 'pointer' => 0, 'ids' => []];
-            $this->setSearchIteratorState($cursor, $state);
-        }, $left, $cursor, $repository, $ids);
-        // $emit = function ($emit) use ($left, $cursor, $repository, $ids) {
-            
-        // };
-        $coroutine->onResolve(function ($exception) use (&$emitter) {
-            if ($exception) {
-                $emitter->fail($exception);
-                $emitter = null;
-            } else {
-                $emitter->complete();
-            }
+        }, $left, $cursor, $repository, $ids, $emitter);
+        $coroutine->onResolve(function ($e) use ($emitter) {
+            $emitter->finish();
         });
-        return $iterator;
-        
-        // $iterator = new Producer($emit);
-        
-        // return $iterator;
-    }
-
-    /**
-     * @param string $cursor
-     *
-     * @return array
-     */
-    public function getSearchIteratorState(?string $cursor): array
-    {
-        if ($cursor === null) {
-            return [];
-        }
-        $state = $this->searchIteratorStates[$cursor];
-        // $state['cursor'] = $cursor;
-        return $state;
-        // return  ? $this->searchIteratorStates[$cursor] : [];
-    }
-
-    public function setSearchIteratorState($cursor, $state)
-    {
-        $this->searchIteratorStates[$cursor] = $state;
-    }
-
-    // public function resetSearchIteratorState($cursor)
-    // {
-    //     $state = ['left' => 0, 'pointer' => 0, 'ids' => []];
-    //     $this->searchIteratorStates[$cursor] = $state;
-    // }
-
-    public function moveSearchIteratorStatePointer($cursor)
-    {
-        // var_dump($cursor);
-        $this->searchIteratorStates[$cursor]['pointer']++;
-        // var_dump($this->searchIteratorStates[$cursor]['pointer']);
-    }
-
-    /**
-     * @param Repository $repository
-     * @param int        $size
-     * @param string     $cursor
-     * @param array      $ids
-     *
-     * @return Iterator
-     */
-    public function restoreSearch(
-        Repository $repository,
-        int $size,
-        int $left,
-        string $cursor,
-        array $ids
-    ): Iterator {
-        $client = $this->client;
-        $emit = function ($emit) use ($repository, $left, $cursor, $ids, $client) {
-            while ($left > 0) {
-                $ids = $ids ?? $client->CURSOR($cursor, 'LIMIT', 10);
-                $left -= count($ids);
-                $iterator = $repository->get($ids);
-                // $iterator = Producer::getIteratorWithIdsOrder($iterator, $ids);
-                while (yield $iterator->advance()) {
-                    yield $emit($iterator->getCurrent());
-                }
-                unset($ids);
-            }
-        };
-        // $iterator = new Producer($emit, true);
-        $iterator->setSize($size);
-        return $iterator;
+        return $emitter;
     }
 
     /**

@@ -11,13 +11,35 @@ class TestCaseDatabasePool extends AbstractTestCase
      */
     public function test_case_database_pool_common_1()
     {
-        $pool = $this->pool;
+        $pool = $this->databasePool;
         wait(\Amp\Promise\all($pool->exec('create table t()')));
         wait(\Amp\Promise\any($pool->exec('create table t()')));
         $names = $pool->names();
-        $this->assertTrue($pool->db(mt_rand()) === null);
-        $pool->db($names[0])->drop('t');
+        $this->assertTrue($pool->instance(mt_rand()) === null);
+        $pool->instance($names[0])->drop('t');
         $tables = wait(\Amp\Promise\all($pool->tables()));
+        $this->assertTrue(!in_array('t', $tables[$names[0]]));
+        $this->assertTrue(in_array('t', $tables[$names[1]]));
+        $this->assertTrue(in_array('t', $tables[$names[2]]));
+        wait(\Amp\Promise\some($pool->exec('create table t()')));
+        $tables = wait(\Amp\Promise\all($pool->tables()));
+        $this->assertTrue(in_array('t', $tables[$names[0]]));
+        $this->assertTrue(in_array('t', $tables[$names[1]]));
+        $this->assertTrue(in_array('t', $tables[$names[2]]));
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_database_pool_common_2()
+    {
+        $pool = $this->databasePool;
+        $pool->execSync('create table t()');
+        wait(\Amp\Promise\any($pool->exec('create table t()')));
+        $names = $pool->names();
+        $this->assertTrue($pool->instance(mt_rand()) === null);
+        $pool->instance($names[0])->drop('t');
+        $tables = $pool->tablesSync();
         $this->assertTrue(!in_array('t', $tables[$names[0]]));
         $this->assertTrue(in_array('t', $tables[$names[1]]));
         $this->assertTrue(in_array('t', $tables[$names[2]]));
