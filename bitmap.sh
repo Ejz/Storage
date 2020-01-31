@@ -7,8 +7,10 @@ cd "$this_dir"
 if [ "$1" -a -f "$1" ]; then
     export $(cat "$1" | xargs)
     shift
-else
+elif [ -f ".env" ]; then
     export $(cat .env | xargs)
+elif [ -f ".env.phpunit" ]; then
+    export $(cat .env.phpunit | xargs)
 fi
 
 ENV="$1"
