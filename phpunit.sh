@@ -28,7 +28,7 @@ if [ "$action" = "begin" -o "$action" = "start" ]; then
     echo >>"$dotenv"
     #
     $sudo docker pull ejzspb/bitmap
-    BITMAP_ENVS="TEST0,TEST1,TEST2"
+    BITMAP_ENVS="TEST0"
     echo BITMAP_ENVS="$BITMAP_ENVS" >>"$dotenv"
     i=0
     for BITMAP in `echo "$BITMAP_ENVS" | tr ',' ' '`; do

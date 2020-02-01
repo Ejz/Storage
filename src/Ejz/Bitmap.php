@@ -68,7 +68,7 @@ class Bitmap
     {
         $index = $repository->getBitmapIndex();
         $fields = $repository->getBitmapFields();
-        $args = $fields ? ['FIELDS'] : [];
+        $args = ['FIELDS', '_shard', 'STRING'];
         foreach ($fields as $name => $field) {
             $args[] = $name;
             $type = $field->getType();
@@ -85,12 +85,14 @@ class Bitmap
      * @param string $index
      * @param int    $id
      * @param array  $fields
+     * @param mixed  $pool
      *
      * @return Promise
      */
-    public function add(string $index, int $id, array $fields): Promise
+    public function add(string $index, int $id, array $fields, $pool): Promise
     {
-        $args = $fields ? ['VALUES'] : [];
+        $name = $pool->random()->getName();
+        $args = ['VALUES', '_shard', $name];
         foreach ($fields as $field) {
             $args[] = $field->getName();
             $args[] = $field->exportValue();

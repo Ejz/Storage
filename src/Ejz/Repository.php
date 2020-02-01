@@ -116,7 +116,9 @@ class Repository
         $deferred = new Deferred();
         $pool = $this->getWritableBitmapPool($bean->id);
         $index = $this->getBitmapIndex();
-        $promises = $pool->add($index, $bean->id, $bean->getFields());
+        // $shard = ->random()->getName();
+        $_ = $this->getWritableDatabasePool($bean->id);
+        $promises = $pool->add($index, $bean->id, $bean->getFields(), $_);
         Promise\all($promises)->onResolve(function ($err, $res) use ($deferred) {
             $ids = $err ? [0] : ($res ?: [0]);
             $min = min($ids);
@@ -551,14 +553,21 @@ class Repository
      */
     public function search($query): Emitter
     {
+        $db = $this->getReadableDatabasePool();
         $pool = $this->getReadableBitmapPool();
+        $bitmap = $pool->random();
+        $iterators = [];
         $size = 0;
-        $iterators = $pool->each(function ($instance) use ($query, &$size) {
-            $query = is_string($query) ? $query : ($query[$instance->getName()] ?? []);
-            $iterator = $instance->search($this, $query);
+        foreach ($db->names() as $name) {
+            if (is_string($query)) {
+                $q = "({$query}) @_shard:{$name}";
+            } else {
+                $q = $query[$name];
+            }
+            $iterator = $bitmap->search($this, $q);
             $size += $iterator->getSize();
-            return $iterator;
-        });
+            $iterators[$name] = $iterator;
+        }
         $iterator = $this->getSearchIterator($iterators);
         $iterator->setSize($size);
         return $iterator;

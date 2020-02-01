@@ -87,20 +87,14 @@ class Storage
         if ($cached !== null) {
             return $cached;
         }
-        if (substr($name, -4) === 'Sync') {
-            $name = substr($name, 0, -4);
-            return Promise\wait($this->$name(...$arguments));
-        }
-        if (in_array($name, ['create', 'drop'])) {
+        $config = $this->repositories[$name] ?? null;
+        if ($config === null) {
             $promises = [];
             foreach (array_keys($this->repositories) as $_) {
                 $promises[$_] = $this->$_()->$name();
             }
-            return Promise\all($promises);
-        }
-        $config = $this->repositories[$name] ?? null;
-        if ($config === null) {
-            throw new RuntimeException(sprintf(self::INVALID_REPOSITORY_ERROR, $name));
+            return $promises;
+            // throw new RuntimeException(sprintf(self::INVALID_REPOSITORY_ERROR, $name));
         }
         $this->cached[$name] = new Repository($this, $name, $config);
         return $this->cached[$name];
