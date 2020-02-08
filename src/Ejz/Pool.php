@@ -7,6 +7,16 @@ class Pool
     /** @var array */
     private $pool;
 
+    public const POOL_WRITABLE = 6;
+    public const POOL_PRIMARY = 2;
+    public const POOL_SECONDARY = 4;
+    public const POOL_RANDOM_GET = 1;
+    public const POOL_RANDOM = 1;
+
+    public const POOL_CLUSTER_DEFAULT_W = 'w:*;';
+    public const POOL_CLUSTER_DEFAULT_P = 'p:*;';
+    public const POOL_CLUSTER_DEFAULT_S = 's:1:id;';
+
     /**
      * @param array $pool
      */
@@ -97,5 +107,31 @@ class Pool
         return $this->each(function ($instance) use ($call, $arguments) {
             return $instance->$call(...$arguments);
         });
+    }
+
+    public static function convertNotationToFilter($notation, $negate = false)
+    {
+        return function ($name, $names) use ($notation, $negate) {
+            $idx = array_search($name, $names);
+            foreach (explode(',', $notation) as $n) {
+                $neg = $negate;
+                if (strpos($n, '!') === 0) {
+                    $neg = !$neg;
+                    $n = substr($n, 1);
+                }
+                $trig =
+                    ($n === '*') ||
+                    (is_numeric($n) && $n == $idx) ||
+                    (!is_numeric($n) && $n === $name)
+                ;
+                if ($trig) {
+                    return !$neg;
+                }
+                if  ($neg) {
+                    return true;
+                }
+            }
+            return false;
+        };
     }
 }

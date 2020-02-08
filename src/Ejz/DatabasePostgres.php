@@ -646,6 +646,106 @@ class DatabasePostgres implements DatabaseInterface
     }
 
     /**
+     * @param array ...$args
+     *
+     * @return Promise
+     */
+    public function createNew(...$args): Promise
+    {
+        return \Amp\call(function ($args) {
+            $commands = $this->getCreateNewCommands(...$args);
+            foreach ($commands as $command) {
+                yield $this->exec($command);
+            }
+        }, $args);
+    }
+
+    /**
+     * @return array
+     */
+    private function getCreateNewCommands(
+        string $table,
+        string $primaryKey,
+        int $primaryKeyStart,
+        int $primaryKeyIncrement,
+        array $fields,
+        array $indexes,
+        array $foreignKeys
+    ): array {
+        $q = $this->config['quote'];
+        $enq = function ($fields) use ($q) {
+            return implode(', ', array_map(function ($field) use ($q) {
+                return $q . $field . $q;
+            }, $fields));
+        };
+        $pk = $primaryKey;
+        $pkStartWith = $primaryKeyStart;
+        $pkIncrementBy = $primaryKeyIncrement;
+        $seq = $table . '_seq';
+        $commands = [];
+        // CREATE TABLE
+        $commands[] = "CREATE TABLE {$q}{$table}{$q}()";
+        // CREATE SEQUENCE
+        $commands[] = "DROP SEQUENCE IF EXISTS {$q}{$seq}{$q} CASCADE";
+        $commands[] = "
+            CREATE SEQUENCE {$q}{$seq}{$q}
+            AS BIGINT
+            START {$pkStartWith}
+            INCREMENT {$pkIncrementBy}
+            MINVALUE {$pkStartWith}
+            NO CYCLE
+        ";
+        // ADD PRIMARY KEY
+        $commands[] = "
+            ALTER TABLE {$q}{$table}{$q}
+            ADD COLUMN {$q}{$pk}{$q} BIGINT DEFAULT
+            nextval('{$seq}'::regclass) NOT NULL
+        ";
+        $commands[] = "
+            ALTER TABLE {$q}{$table}{$q}
+            ADD CONSTRAINT {$q}{$table}_pk{$q}
+            PRIMARY KEY ({$q}{$pk}{$q})
+        ";
+        // FIELDS
+        foreach ($fields as $field) {
+            $type = $field->getType();
+            $null = $type->isNullable() ? 'NULL' : 'NOT NULL';
+            $default = !$type->isNullable() ? $this->getFieldTypeDefault($type) : '';
+            $default = $default !== '' ? 'DEFAULT ' . $default : '';
+            $type = $this->getFieldTypeString($type);
+            $commands[] = "
+                ALTER TABLE {$q}{$table}{$q}
+                ADD COLUMN {$q}{$field}{$q}
+                {$type} {$null} {$default}
+            ";
+        }
+        // INDEXES
+        foreach ($indexes as $index) {
+            $f = $index->getFields();
+            $t = $this->getIndexTypeString($index->getType());
+            $u = $index->isUnique() ? 'UNIQUE' : '';
+            $commands[] = "
+                CREATE {$u} INDEX {$q}{$table}_{$index}{$q} ON {$q}{$table}{$q}
+                USING {$t} ({$enq($f)})
+            ";
+        }
+        // FOREIGN KEYS
+        foreach ($foreignKeys as $foreignKey) {
+            $parentTable = $foreignKey->getParentTable();
+            $parentFields = $foreignKey->getParentFields();
+            $childFields = $foreignKey->getChildFields();
+            $commands[] = "
+                ALTER TABLE {$q}{$table}{$q} ADD CONSTRAINT {$q}{$table}_{$foreignKey}{$q}
+                FOREIGN KEY ({$enq($childFields)})
+                REFERENCES {$q}{$parentTable}{$q} ({$enq($parentFields)})
+                ON DELETE CASCADE ON UPDATE CASCADE
+            ";
+        }
+        $commands = array_map('trim', $commands);
+        return $commands;
+    }
+
+    /**
      * @param Repository $repository
      *
      * @return Promise
@@ -759,6 +859,43 @@ class DatabasePostgres implements DatabaseInterface
             [$cmd, $args] = $this->getInsertCommand($repository, $fields);
             return yield $this->val($cmd, ...$args);
         }, $repository, $fields);
+    }
+
+    /**
+     * @param Repository $repository
+     * @param array      $fields
+     *
+     * @return Promise
+     */
+    public function insertNew(...$args): Promise
+    {
+        return \Amp\call(function ($args) {
+            [$cmd, $args] = $this->getInsertNewCommand(...$args);
+            return yield $this->val($cmd, ...$args);
+        }, $args);
+    }
+
+    /**
+     * @param Repository $repository
+     * @param array      $fields
+     *
+     * @return array
+     */
+    private function getInsertNewCommand(string $table, string $primaryKey, array $fields): array
+    {
+        $q = $this->config['quote'];
+        $pk = $primaryKey;
+        [$columns, $values, $args] = [[], [], []];
+        foreach ($fields as $field) {
+            $columns[] = $q . $field->getName() . $q;
+            $values[] = $field->getInsertString();
+            $args[] = $field->exportValue();
+        }
+        $columns = implode(', ', $columns);
+        $values = implode(', ', $values);
+        $insert = ($columns && $values) ? "({$columns}) VALUES ({$values})" : 'DEFAULT VALUES';
+        $command = "INSERT INTO {$q}{$table}{$q} {$insert} RETURNING {$q}{$pk}{$q}";
+        return [$command, $args];
     }
 
     /**

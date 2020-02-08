@@ -26,6 +26,12 @@ class Repository
     /** @var Pool */
     protected $bitmapPool;
 
+    /** @var Pool */
+    protected $databaseCluster;
+
+    /** @var Pool */
+    protected $bitmapCluster;
+
     /** @var string */
     private const METHOD_NOT_FOUND = 'METHOD_NOT_FOUND: %s';
 
@@ -47,9 +53,60 @@ class Repository
      */
     public function create(): Promise
     {
+        if (!empty($this->config['database']['cluster'])) {
+            return \Amp\call(function () {
+                yield $this->databaseCreate();
+                yield $this->bitmapCreate();
+            });
+        } else {
+            return \Amp\call(function () {
+                yield $this->databasePool->create($this);
+                yield $this->bitmapPool->create($this);
+            });
+        }
+    }
+
+    public function bitmapCreate()
+    {
         return \Amp\call(function () {
-            yield $this->databasePool->create($this);
-            yield $this->bitmapPool->create($this);
+            $index = $this->getBitmapIndex();
+            $fields = $this->getBitmapFields();
+            $args = [$index, $fields];
+            //
+            $primaryPool = $this->getBitmapPool(Pool::POOL_PRIMARY);
+            $promises = $primaryPool->createNew($index, $fields);
+            yield $promises;            
+        });
+    }
+
+    public function databaseCreate()
+    {
+        return \Amp\call(function () {
+            $table = $this->getDatabaseTable();
+            $primaryKey = $this->getDatabasePrimaryKey();
+            $fields = $this->getDatabaseFields();
+            $indexes = $this->getDatabaseIndexes();
+            $foreignKeys = $this->getDatabaseForeignKeys();
+            $args = [
+                $table, $primaryKey,
+                3 => 0, 4 => 0,
+                5 => $fields, 6 => $indexes,
+                $foreignKeys,
+            ];
+            foreach ([Pool::POOL_PRIMARY, Pool::POOL_SECONDARY] as $type) {
+                $isSecondary = $type === Pool::POOL_SECONDARY;
+                $pool = $this->getDatabasePool($type, null);
+                $names = $pool->names();
+                yield $pool->each(function ($db) use ($names, $args, $isSecondary) {
+                    $primaryKeyStart = array_search($db->getName(), $names) + 1;
+                    $primaryKeyIncrement = count($names);
+                    [$args[3], $args[4]] = [$primaryKeyStart, $primaryKeyIncrement];
+                    if ($isSecondary) {
+                        [$args[5], $args[6]] = [[], []];
+                    }
+                    return $db->createNew(...$args);
+                });
+            }
         });
     }
 
@@ -83,14 +140,94 @@ class Repository
     public function insertBean(DatabaseBean $bean): Promise
     {
         $deferred = new Deferred();
-        $pool = $this->getWritableDatabasePool($bean);
-        $promises = $pool->insert($this, $bean->getFields());
-        Promise\all($promises)->onResolve(function ($err, $res) use ($deferred) {
-            $ids = $err ? [0] : ($res ?: [0]);
-            $min = min($ids);
-            $max = max($ids);
-            $deferred->resolve($min === $max ? $min : null);
-        });
+        if (!empty($this->config['database']['cluster'])) {
+            $table = $this->getDatabaseTable();
+            $primaryKey = $this->getDatabasePrimaryKey();
+            $fields = $bean->getFields();
+            $promises = [];
+            $pools = [];
+            foreach ([Pool::POOL_PRIMARY, Pool::POOL_SECONDARY] as $type) {
+                $isSecondary = $type === Pool::POOL_SECONDARY;
+                $pool = $this->getDatabasePool($type | Pool::POOL_RANDOM, null);
+                $_ = $isSecondary ? [] : $fields;
+                $promises[] = Promise\any($pool->insertNew($table, $primaryKey, $_));
+                $pools[] = $pool;
+            }
+            $promise = Promise\all($promises);
+            $promise->onResolve(function ($e, $v) use ($deferred, $pools, $table, $primaryKey) {
+                $id = null;
+                $collect = [];
+                foreach ($v as $idx => [$err, $ids]) {
+                    $collect[] = ['pool' => $pools[$idx], 'ids' => $ids];
+                    $min = $ids ? min($ids) : 0;
+                    $max = $ids ? max($ids) : 0;
+                    if ($err || !$min || !$max || $min !== $max) {
+                        $id = 0;
+                    }
+                    if ($id === 0) {
+                        continue;
+                    }
+                    if ($min !== $max) {
+                        $id = 0;
+                    }
+                }
+                foreach (($id ? [] : $collect) as ['pool' => $pool, 'ids' => $ids]) {
+                    $pool->deleteNewSync($table, $primaryKey, $ids);
+                }
+                $deferred->resolve($id);
+            });
+            return $deferred->promise();
+
+            $promise->onResolve(function ($e, $v) use ($deferred) {
+                $deferred->resolve($min === $max ? $min : null);
+            });
+            return $promise;
+            //
+            $primaryPool = $this->getDatabasePool(Pool::POOL_PRIMARY, $bean);
+            $promises = $primaryPool->insertNew($table, $primaryKey, $fields);
+            $promise = Promise\all($promises);
+            //
+            
+            $promise->onResolve(function ($err, $res) use ($deferred, $primaryPool) {
+                $ids = $err ? [0] : ($res ?: [0]);
+                $min = min($ids);
+                $max = max($ids);
+                $deferred->resolve($min === $max ? $min : null);
+            });
+
+            $names = $primaryPool->names();
+            $promises = $primaryPool->each(function ($db) use ($names, $args) {
+                $primaryKeyStart = array_search($db->getName(), $names) + 1;
+                $primaryKeyIncrement = count($names);
+                [$args[3], $args[4]] = [$primaryKeyStart, $primaryKeyIncrement];
+                return $db->createNew(...$args);
+            });
+            yield $promises;
+            //
+            $secondaryPool = $this->getDatabasePool(Pool::POOL_SECONDARY);
+            $names = $secondaryPool->names();
+            $promises = $secondaryPool->each(function ($db) use ($names, $args) {
+                $primaryKeyStart = array_search($db->getName(), $names) + 1;
+                $primaryKeyIncrement = count($names);
+                [$args[3], $args[4]] = [$primaryKeyStart, $primaryKeyIncrement];
+                [$args[5], $args[6]] = [[], []];
+                return $db->createNew(...$args);
+            });
+            yield $promises;
+
+            return \Amp\call(function () {
+                
+            });
+        } else {
+            $pool = $this->getWritableDatabasePool($bean);
+            $promises = $pool->insert($this, $bean->getFields());
+            Promise\all($promises)->onResolve(function ($err, $res) use ($deferred) {
+                $ids = $err ? [0] : ($res ?: [0]);
+                $min = min($ids);
+                $max = max($ids);
+                $deferred->resolve($min === $max ? $min : null);
+            });
+        }
         return $deferred->promise();
     }
 
@@ -317,12 +454,13 @@ class Repository
         //
         //
         //
-        $this->searchIteratorStates = [];
-        //
-        //
-        //
         $this->config['hasDatabase'] = isset($this->config['database']);
         $this->config['hasBitmap'] = isset($this->config['bitmap']);
+        //
+        //
+        //
+        $this->config['database']['cluster'] = $this->config['database']['cluster'] ?? '';
+        $this->config['bitmap']['cluster'] = $this->config['bitmap']['cluster'] ?? '';
         //
         //
         //
@@ -331,9 +469,9 @@ class Repository
         $this->config['bitmap']['index'] = $this->config['bitmap']['index'] ?? $_;
         //
         //
-        //
-        $_ = $this->config['database']['table'] . '_id';
-        $this->config['database']['pk'] = $this->config['database']['pk'] ?? $_;
+        //        
+        $_ = $this->config['database']['pk'] ?? '%s_id';
+        $this->config['database']['pk'] = sprintf($_, $this->config['database']['table']);
         //
         //
         //
@@ -825,6 +963,63 @@ class Repository
      */
     public function getDatabasePool(): Pool
     {
+        $args = func_get_args();
+        if ($args) {
+            [$flags, $object] = [$args[0], $args[1] ?? null];
+            if (!is_object($object)) {
+                $object = (object) ['id' => $object];
+            }
+            $names = $this->databasePool->names();
+            if ($this->databaseCluster === null) {
+                $cluster = $this->config['database']['cluster'];
+                $cluster = Pool::POOL_CLUSTER_DEFAULT_S . $cluster;
+                $cluster = Pool::POOL_CLUSTER_DEFAULT_P . $cluster;
+                $cluster = Pool::POOL_CLUSTER_DEFAULT_W . $cluster;
+                preg_match_all('~(\w):(.*?)(;|$)~', $cluster, $matches, PREG_SET_ORDER);
+                $collect = [];
+                foreach ($matches as $match) {
+                    $collect[$match[1]] = $match[2];
+                }
+                $filter = Pool::convertNotationToFilter($collect['w']);
+                $this->databaseCluster[Pool::POOL_WRITABLE] = $_ = $this->databasePool->filter($filter);
+                $filter = Pool::convertNotationToFilter($collect['p']);
+                $this->databaseCluster[Pool::POOL_PRIMARY] = $_->filter($filter);
+                $filter = Pool::convertNotationToFilter($collect['p'], true);
+                $this->databaseCluster[Pool::POOL_SECONDARY] = $_->filter($filter);
+                $this->databaseCluster['s'] = explode(':', $collect['s']);
+                $this->databaseCluster['s'][0] = (int) $this->databaseCluster['s'][0];
+                $this->databaseCluster['s'][1] = explode(',', $this->databaseCluster['s'][1]);
+            }
+            $pool = $this->databaseCluster[$flags & (~Pool::POOL_RANDOM)];
+            if (!$pool->names()) {
+                return $pool;
+            }
+            $s = $this->databaseCluster['s'];
+            foreach ($s[1] as $field) {
+                $v = $object->$field ?? null;
+                if ($v !== null) {
+                    $names = $pool->names();
+                    $c = count($names);
+                    $v = is_numeric($v) ? abs($v) : crc32($v);
+                    $v = ($v % $c) - 1;
+                    $v = $v < 0 ? $v + $c : $v;
+                    $collect = [];
+                    for ($i = 0; $i < $s[0]; $i++) {
+                        $collect[] = $names[($v + $i) % $c];
+                    }
+                    $pool = $pool->filter($collect);
+                }
+            }
+            if (($flags & Pool::POOL_RANDOM) && ($names = $pool->names())) {
+                $v = array_rand($names);
+                $collect = [];
+                for ($i = 0; $i < $s[0]; $i++) {
+                    $collect[] = $names[($v + $i) % $c];
+                }
+                $pool = $pool->filter($collect);
+            }
+            return $pool;
+        }
         return $this->databasePool;
     }
 
@@ -834,5 +1029,10 @@ class Repository
     public function getBitmapPool(): Pool
     {
         return $this->bitmapPool;
+    }
+
+    public function getDatabasePrimaryKey(): string
+    {
+        return $this->config['database']['pk'];
     }
 }

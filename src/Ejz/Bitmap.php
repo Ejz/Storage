@@ -82,6 +82,26 @@ class Bitmap
     }
 
     /**
+     * @param Repository $repository
+     *
+     * @return Promise
+     */
+    public function createNew($index, $fields): Promise
+    {
+        $args = ['FIELDS', '_shard', 'STRING'];
+        foreach ($fields as $name => $field) {
+            $args[] = $name;
+            $type = $field->getType();
+            $args[] = $this->getFieldTypeString($type);
+            if ($type->is(Type::bitmapForeignKey())) {
+                $args[] = $type->getParentTable();
+            }
+        }
+        $this->client->CREATE($index, ...$args);
+        return new Success();
+    }
+
+    /**
      * @param string $index
      * @param int    $id
      * @param array  $fields
