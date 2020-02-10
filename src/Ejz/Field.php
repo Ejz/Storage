@@ -6,8 +6,7 @@ use Ejz\Type\AbstractType;
 
 class Field
 {
-    /** @var string */
-    private $name;
+    use NameTrait;
 
     /** @var AbstractType */
     private $type;
@@ -25,7 +24,7 @@ class Field
      */
     public function __construct(string $name, ?AbstractType $type = null, ?string $alias = null)
     {
-        $this->name = $name;
+        $this->setName($name);
         $this->type = $type ?? Type::default(true);
         $this->alias = $alias ?? $this->name;
         $this->setValue(null);
@@ -111,21 +110,5 @@ class Field
     public function getType(): AbstractType
     {
         return $this->type;
-    }
-
-    /**
-     * @return string
-     */
-    public function getName(): string
-    {
-        return $this->name;
-    }
-
-    /**
-     * @return string
-     */
-    public function __toString(): string
-    {
-        return $this->getName();
     }
 }

@@ -11,10 +11,10 @@ use Amp\Postgres\PgSqlCommandResult;
 use Ejz\Type\AbstractType;
 use RuntimeException;
 
-class DatabasePostgres implements DatabaseInterface
+class DatabasePostgres implements NameInterface, DatabaseInterface
 {
-    /** @var string */
-    protected $name;
+    use NameTrait;
+    use SyncTrait;
 
     /** @var ConnectionConfig */
     protected $connectionConfig;
@@ -26,7 +26,16 @@ class DatabasePostgres implements DatabaseInterface
     protected $connection;
 
     /** @var string */
-    private const METHOD_NOT_FOUND = 'METHOD_NOT_FOUND: %s';
+    private const SEQUENCE_NAME = '%s_seq';
+
+    /** @var string */
+    private const PK_CONSTRAINT_NAME = '%s_pk';
+
+    /** @var string */
+    private const INDEX_NAME = '%s_%s';
+
+    /** @var string */
+    private const FOREIGN_KEY_NAME = '%s_%s';
 
     /**
      * @param string $name
@@ -35,7 +44,7 @@ class DatabasePostgres implements DatabaseInterface
      */
     public function __construct(string $name, string $dsn, array $config = [])
     {
-        $this->name = $name;
+        $this->setName($name);
         $this->connectionConfig = ConnectionConfig::fromString($dsn);
         $this->config = $config + [
             'quote' => '"',
@@ -43,6 +52,32 @@ class DatabasePostgres implements DatabaseInterface
             'rand_iterator_intervals' => 1000,
         ];
         $this->connection = null;
+    }
+
+    /**
+     * @return Promise
+     */
+    private function connect(): Promise
+    {
+        return \Amp\call(function () {
+            $this->connection = yield \Amp\Postgres\connect($this->connectionConfig);
+        });
+    }
+
+    /**
+     */
+    public function close()
+    {
+        if ($this->connection !== null) {
+            $this->connection->close();
+        }
+    }
+
+    /**
+     */
+    public function __destruct()
+    {
+        $this->close();
     }
 
     /**
@@ -105,6 +140,38 @@ class DatabasePostgres implements DatabaseInterface
      *
      * @return Promise
      */
+    public function col(string $sql, ...$args): Promise
+    {
+        return \Amp\call(function ($sql, $args) {
+            $all = yield $this->all($sql, ...$args);
+            return $this->all2col($all);
+        }, $sql, $args);
+    }
+
+    /**
+     * @param array $all
+     *
+     * @return array
+     */
+    private function all2col(array $all): array
+    {
+        if (!$all) {
+            return [];
+        }
+        $key = array_keys($all[0])[0];
+        $return = [];
+        foreach ($all as $row) {
+            $return[] = $row[$key];
+        }
+        return $return;
+    }
+
+    /**
+     * @param string $sql
+     * @param array  ...$args
+     *
+     * @return Promise
+     */
     public function val(string $sql, ...$args): Promise
     {
         return \Amp\call(function ($sql, $args) {
@@ -115,17 +182,22 @@ class DatabasePostgres implements DatabaseInterface
     }
 
     /**
-     * @param string $sql
-     * @param array  ...$args
+     * @param string $table
      *
      * @return Promise
      */
-    public function col(string $sql, ...$args): Promise
+    public function drop(string $table): Promise
     {
-        return \Amp\call(function ($sql, $args) {
-            $all = yield $this->all($sql, ...$args);
-            return $this->all2col($all);
-        }, $sql, $args);
+        return \Amp\call(function ($table) {
+            if (!yield $this->tableExists($table)) {
+                return false;
+            }
+            $q = $this->config['quote'];
+            yield $this->exec("DROP TABLE {$q}{$table}{$q} CASCADE");
+            $sequence = sprintf(self::SEQUENCE_NAME, $table);
+            yield $this->exec("DROP SEQUENCE IF EXISTS {$q}{$sequence}{$q} CASCADE");
+            return true;
+        }, $table);
     }
 
     /**
@@ -157,6 +229,42 @@ class DatabasePostgres implements DatabaseInterface
      *
      * @return Promise
      */
+    public function truncate(string $table): Promise
+    {
+        return \Amp\call(function ($table) {
+            if (!yield $this->tableExists($table)) {
+                return false;
+            }
+            $q = $this->config['quote'];
+            yield $this->exec("TRUNCATE {$q}{$table}{$q} CASCADE");
+            return true;
+        }, $table);
+    }
+
+    /**
+     * @param string          $table
+     * @param ?WhereCondition $where (optional)
+     *
+     * @return Promise
+     */
+    public function count(string $table, ?WhereCondition $where = null): Promise
+    {
+        return \Amp\call(function ($table, $where) {
+            if (!yield $this->tableExists($table)) {
+                return null;
+            }
+            $q = $this->config['quote'];
+            [$where, $args] = $where === null ? ['', []] : $where->stringify($q);
+            $sql = "SELECT COUNT(1) FROM {$q}{$table}{$q} {$where}";
+            return (int) yield $this->val($sql, ...$args);
+        }, $table, $where);
+    }
+
+    /**
+     * @param string $table
+     *
+     * @return Promise
+     */
     public function fields(string $table): Promise
     {
         return \Amp\call(function ($table) {
@@ -173,19 +281,15 @@ class DatabasePostgres implements DatabaseInterface
 
     /**
      * @param string $table
+     * @param string $field
      *
      * @return Promise
      */
-    public function count(string $table): Promise
+    public function fieldExists(string $table, string $field): Promise
     {
-        return \Amp\call(function ($table) {
-            if (!yield $this->tableExists($table)) {
-                return null;
-            }
-            $q = $this->config['quote'];
-            $sql = "SELECT COUNT(1) FROM {$q}{$table}{$q}";
-            return (int) yield $this->val($sql);
-        }, $table);
+        return \Amp\call(function ($table, $field) {
+            return in_array($field, yield $this->fields($table));
+        }, $table, $field);
     }
 
     /**
@@ -224,6 +328,19 @@ class DatabasePostgres implements DatabaseInterface
             }
             return $indexes;
         }, $table);
+    }
+
+    /**
+     * @param string $table
+     * @param string $index
+     *
+     * @return Promise
+     */
+    public function indexExists(string $table, string $index): Promise
+    {
+        return \Amp\call(function ($table, $index) {
+            return array_key_exists($index, yield $this->indexes($table));
+        }, $table, $index);
     }
 
     /**
@@ -308,366 +425,51 @@ class DatabasePostgres implements DatabaseInterface
 
     /**
      * @param string $table
+     * @param string $pk
+     * @param int    $pkStart     (optional)
+     * @param int    $pkIncrement (optional)
+     * @param array  $fields      (optional)
+     * @param array  $indexes     (optional)
+     * @param array  $foreignKeys (optional)
      *
      * @return Promise
      */
-    public function truncate(string $table): Promise
-    {
-        return \Amp\call(function ($table) {
-            if (!yield $this->tableExists($table)) {
-                return false;
-            }
-            $q = $this->config['quote'];
-            yield $this->exec("TRUNCATE {$q}{$table}{$q} CASCADE");
-            return true;
-        }, $table);
-    }
-
-    /**
-     * @param string $table
-     *
-     * @return Promise
-     */
-    public function drop(string $table): Promise
-    {
-        return \Amp\call(function ($table) {
-            if (!yield $this->tableExists($table)) {
-                return false;
-            }
-            $q = $this->config['quote'];
-            yield $this->exec("DROP TABLE {$q}{$table}{$q} CASCADE");
-            yield $this->exec("DROP SEQUENCE IF EXISTS {$q}{$table}_seq{$q} CASCADE");
-            return true;
-        }, $table);
-    }
-
-    /**
-     * @return Promise
-     */
-    private function connect(): Promise
-    {
-        return \Amp\call(function () {
-            $this->connection = yield \Amp\Postgres\connect($this->connectionConfig);
-        });
-    }
-
-    /**
-     */
-    public function close()
-    {
-        if ($this->connection !== null) {
-            $this->connection->close();
-        }
-    }
-
-    /**
-     */
-    public function __destruct()
-    {
-        $this->close();
-    }
-
-    /**
-     * @param array $all
-     *
-     * @return array
-     */
-    private function all2col(array $all): array
-    {
-        if (!$all) {
-            return [];
-        }
-        $key = array_keys($all[0])[0];
-        $return = [];
-        foreach ($all as $row) {
-            $return[] = $row[$key];
-        }
-        return $return;
-    }
-
-    /**
-     * @return string
-     */
-    public function getName(): string
-    {
-        return $this->name;
-    }
-
-    /**
-     * @return string
-     */
-    public function __toString(): string
-    {
-        return $this->getName();
-    }
-
-    /**
-     * @param string $table
-     * @param array  $params (optional)
-     *
-     * @return Emitter
-     */
-    public function iterate(string $table, array $params = []): Emitter
-    {
-        $emitter = new Emitter();
-        // $emitter = new \Amp\Emitter();
-        // $iterator = $emitter->iterate();
-        // $iterator = new Emitter($iterator);
-        $coroutine = \Amp\call(function ($table, $params, $emitter) {
-            $params += [
-                'fields' => null,
-                'returnFields' => false,
-                'asc' => true,
-                'rand' => false,
-                'min' => null,
-                'max' => null,
-                'limit' => 1E9,
-                'pk' => null,
-                'order' => true,
-                'where' => [],
-                'config' => [],
-            ];
-            [
-                'fields' => $fields,
-                'returnFields' => $returnFields,
-                'asc' => $asc,
-                'rand' => $rand,
-                'min' => $min,
-                'max' => $max,
-                'limit' => $limit,
-                'pk' => $pk,
-                'order' => $order,
-                'where' => $where,
-                'config' => $config,
-            ] = $params;
-            $config += $this->config;
-            [
-                'quote' => $q,
-                'iterator_chunk_size' => $iterator_chunk_size,
-                'rand_iterator_intervals' => $rand_iterator_intervals,
-            ] = $config;
-            $pk = $pk ?? yield $this->pk($table);
-            if ($pk === null || count($pk) !== 1) {
-                return;
-            }
-            $fields = $fields ?? yield $this->fields($table);
-            if ($rand) {
-                $min = $min ?? (yield $this->min($table))[0];
-                $max = $max ?? (yield $this->max($table))[0];
-                if (!isset($min, $max)) {
-                    return;
-                }
-                $rand = false;
-                $params = compact('fields', 'pk', 'rand') + $params;
-                if (is_int($min) && is_int($max)) {
-                    $rand_iterator_intervals = min($rand_iterator_intervals, $max - $min + 1);
-                    $intervals = $this->getIntervalsForRandIterator($min, $max, $rand_iterator_intervals);
-                } else {
-                    $intervals = [[$min, $max]];
-                }
-                $c = count($intervals);
-                while ($c) {
-                    $key = array_rand($intervals);
-                    if (!$intervals[$key] instanceof Emitter) {
-                        [$min, $max] = $intervals[$key];
-                        $asc = (bool) mt_rand(0, 1);
-                        $params = compact('asc', 'min', 'max') + $params;
-                        $intervals[$key] = $this->iterate($table, $params);
-                    }
-                    if (($value = yield $intervals[$key]->pull()) !== null) {
-                        yield $emitter->push($value);
-                    } else {
-                        unset($intervals[$key]);
-                        $c--;
-                    }
-                }
-                return;
-            }
-            [$pk] = $pk;
-            $qpk = $q . $pk . $q;
-            $collect = [];
-            foreach ($fields as $field) {
-                if (!$field instanceof Field) {
-                    $field = new Field($field);
-                }
-                $collect[$field->getAlias()] = $field;
-            }
-            $fields = $collect;
-            $select = array_map(function ($field) use ($q) {
-                $as = $q . $field->getAlias() . $q;
-                return $field->getSelectString($q) . ' AS ' . $as;
-            }, $fields);
-            $_pk = 'pk_' . md5($pk);
-            $select[] = $qpk . ' AS ' . $q . $_pk . $q;
-            $order = $order ? $qpk . ' ' . ($asc ? 'ASC' : 'DESC') : '';
-            $order = $order ? 'ORDER BY ' . $order : '';
-            $template = sprintf(
-                'SELECT %s FROM %s %%s %s LIMIT %%s',
-                implode(', ', $select),
-                $q . $table . $q,
-                $order
-            );
-            [$op1, $op2] = $asc ? ['>', '<='] : ['<', '>='];
-            $where = $where instanceof Condition ? $where : new Condition($where);
-            while ($limit > 0) {
-                $where->reset();
-                if (($asc && $min !== null) || (!$asc && $max !== null)) {
-                    $first = $first ?? true;
-                    $where->push($pk, $op1 . ($first ? '=' : ''), $asc ? $min : $max);
-                }
-                if (($asc && $max !== null) || (!$asc && $min !== null)) {
-                    $where->push($pk, $op2, $asc ? $max : $min);
-                }
-                [$_where, $_args] = $where->stringify($q);
-                $_where = $_where ? 'WHERE ' . $_where : '';
-                $lim = min($limit, $iterator_chunk_size);
-                $sql = sprintf($template, $_where, $lim);
-                $all = yield $this->all($sql, ...$_args);
-                $c = count($all);
-                $limit -= $c;
-                foreach ($all as $row) {
-                    $id = $row[$_pk];
-                    unset($row[$_pk]);
-                    foreach ($row as $k => &$v) {
-                        $f = $fields[$k];
-                        $f->importValue($v);
-                        $v = $returnFields ? clone $f : $f->getValue();
-                    }
-                    unset($v);
-                    yield $emitter->push([$id, $row]);
-                }
-                if (!$c || $c < $lim || $emitter === null) {
-                    break;
-                }
-                ${$asc ? 'min' : 'max'} = $id;
-                $first = false;
-            }
-        }, $table, $params, $emitter);
-        $coroutine->onResolve(function () use ($emitter) {
-            $emitter->finish();
-        });
-        return $emitter;
-        // return new Producer($emit);
-    }
-
-    /**
-     * @param string $table
-     * @param array  $ids
-     * @param array  $params (optional)
-     *
-     * @return Emitter
-     */
-    public function get(string $table, array $ids, array $params = []): Emitter
-    {
-        $emitter = new Emitter();
-        $coroutine = \Amp\call(function ($table, $ids, $params, $emitter) {
-            $params += [
-                'pk' => null,
-                'fields' => null,
-                'returnFields' => false,
-                'order' => false,
-                'config' => [],
-            ];
-            [
-                'pk' => $pk,
-                'fields' => $fields,
-                'returnFields' => $returnFields,
-                'order' => $order,
-                'config' => $config,
-            ] = $params;
-            $config += $this->config;
-            [
-                'iterator_chunk_size' => $iterator_chunk_size,
-            ] = $config;
-            $fields = $fields ?? yield $this->fields($table);
-            $pk = $pk ?? yield $this->pk($table);
-            if ($pk === null || count($pk) !== 1) {
-                return;
-            }
-            [$pk] = $pk;
-            foreach (array_chunk($ids, $iterator_chunk_size) as $chunk) {
-                $_ = $this->iterate($table, [
-                    'where' => new Condition([$pk => $chunk]),
-                    'pk' => [$pk],
-                    'fields' => $fields,
-                    'returnFields' => $returnFields,
-                    'limit' => $iterator_chunk_size,
-                    'config' => compact('iterator_chunk_size'),
-                    'order' => $order,
-                ]);
-                while (($value = yield $_->pull()) !== null) {
-                    yield $emitter->push($value);
-                }
-                // yield $emitter->from($_);
-                // while (($value = yield $emitter->pull()) !== null) {
-                //     yield $emitter->emit($iterator->getCurrent());
-                // }
-            }
-        }, $table, $ids, $params, $emitter);
-        $coroutine->onResolve(function () use ($emitter) {
-            $emitter->finish();
-        });
-        return $emitter;
-        // $coroutine->onResolve(function ($exception) use (&$emitter) {
-        //     if ($exception) {
-        //         $emitter->fail($exception);
-        //         $emitter = null;
-        //     } else {
-        //         $emitter->complete();
-        //     }
-        // });
-        // $emit = function ($emit) use ($table, $ids, $params) {
-            
-        // };
-        // return new Producer($emit);
-    }
-
-    /**
-     * @param int $min
-     * @param int $max
-     * @param int $n
-     *
-     * @return array
-     */
-    private function getIntervalsForRandIterator(int $min, int $max, int $n): array
-    {
-        $inc = ($max - $min + 1) / $n;
-        $intervals = [];
-        for ($i = 0; $i < $n; $i++) {
-            $one = (int) floor($min);
-            $two = (int) floor($min + $inc - 1E-6);
-            $one = $i > 0 && $one === $extwo ? $one + 1 : $one;
-            $one = $one > $two ? $one - 1 : $one;
-            $intervals[] = [$one, $two];
-            $min += $inc;
-            $extwo = $two;
-        }
-        return $intervals;
-    }
-
-    /**
-     * @param array ...$args
-     *
-     * @return Promise
-     */
-    public function createNew(...$args): Promise
-    {
-        return \Amp\call(function ($args) {
-            $commands = $this->getCreateNewCommands(...$args);
+    public function create(
+        string $table,
+        string $pk,
+        int $pkStart = 1,
+        int $pkIncrement = 1,
+        array $fields = [],
+        array $indexes = [],
+        array $foreignKeys = []
+    ): Promise {
+        return \Amp\call(function (...$args) {
+            $commands = $this->getCreateCommands(...$args);
             foreach ($commands as $command) {
                 yield $this->exec($command);
             }
-        }, $args);
+        },
+            $table, $pk, $pkStart, $pkIncrement,
+            $fields, $indexes, $foreignKeys
+        );
     }
 
     /**
+     * @param string $table
+     * @param string $pk
+     * @param int    $pkStart
+     * @param int    $pkIncrement
+     * @param array  $fields
+     * @param array  $indexes
+     * @param array  $foreignKeys
+     *
      * @return array
      */
-    private function getCreateNewCommands(
+    private function getCreateCommands(
         string $table,
-        string $primaryKey,
-        int $primaryKeyStart,
-        int $primaryKeyIncrement,
+        string $pk,
+        int $pkStart,
+        int $pkIncrement,
         array $fields,
         array $indexes,
         array $foreignKeys
@@ -678,32 +480,30 @@ class DatabasePostgres implements DatabaseInterface
                 return $q . $field . $q;
             }, $fields));
         };
-        $pk = $primaryKey;
-        $pkStartWith = $primaryKeyStart;
-        $pkIncrementBy = $primaryKeyIncrement;
-        $seq = $table . '_seq';
+        $sequence = sprintf(self::SEQUENCE_NAME, $table);
         $commands = [];
         // CREATE TABLE
         $commands[] = "CREATE TABLE {$q}{$table}{$q}()";
         // CREATE SEQUENCE
-        $commands[] = "DROP SEQUENCE IF EXISTS {$q}{$seq}{$q} CASCADE";
+        $commands[] = "DROP SEQUENCE IF EXISTS {$q}{$sequence}{$q} CASCADE";
         $commands[] = "
-            CREATE SEQUENCE {$q}{$seq}{$q}
+            CREATE SEQUENCE {$q}{$sequence}{$q}
             AS BIGINT
-            START {$pkStartWith}
-            INCREMENT {$pkIncrementBy}
-            MINVALUE {$pkStartWith}
+            START {$pkStart}
+            INCREMENT {$pkIncrement}
+            MINVALUE {$pkStart}
             NO CYCLE
         ";
         // ADD PRIMARY KEY
         $commands[] = "
             ALTER TABLE {$q}{$table}{$q}
             ADD COLUMN {$q}{$pk}{$q} BIGINT DEFAULT
-            nextval('{$seq}'::regclass) NOT NULL
+            nextval('{$sequence}'::regclass) NOT NULL
         ";
+        $_pk = sprintf(self::PK_CONSTRAINT_NAME, $table);
         $commands[] = "
             ALTER TABLE {$q}{$table}{$q}
-            ADD CONSTRAINT {$q}{$table}_pk{$q}
+            ADD CONSTRAINT {$q}{$_pk}{$q}
             PRIMARY KEY ({$q}{$pk}{$q})
         ";
         // FIELDS
@@ -724,8 +524,9 @@ class DatabasePostgres implements DatabaseInterface
             $f = $index->getFields();
             $t = $this->getIndexTypeString($index->getType());
             $u = $index->isUnique() ? 'UNIQUE' : '';
+            $_index = sprintf(self::INDEX_NAME, $table, $index);
             $commands[] = "
-                CREATE {$u} INDEX {$q}{$table}_{$index}{$q} ON {$q}{$table}{$q}
+                CREATE {$u} INDEX {$q}{$_index}{$q} ON {$q}{$table}{$q}
                 USING {$t} ({$enq($f)})
             ";
         }
@@ -734,8 +535,9 @@ class DatabasePostgres implements DatabaseInterface
             $parentTable = $foreignKey->getParentTable();
             $parentFields = $foreignKey->getParentFields();
             $childFields = $foreignKey->getChildFields();
+            $_fk = sprintf(self::FOREIGN_KEY_NAME, $table, (string) $foreignKey);
             $commands[] = "
-                ALTER TABLE {$q}{$table}{$q} ADD CONSTRAINT {$q}{$table}_{$foreignKey}{$q}
+                ALTER TABLE {$q}{$table}{$q} ADD CONSTRAINT {$q}{$_fk}{$q}
                 FOREIGN KEY ({$enq($childFields)})
                 REFERENCES {$q}{$parentTable}{$q} ({$enq($parentFields)})
                 ON DELETE CASCADE ON UPDATE CASCADE
@@ -746,145 +548,30 @@ class DatabasePostgres implements DatabaseInterface
     }
 
     /**
-     * @param Repository $repository
+     * @param string $table
+     * @param string $pk
+     * @param array  $fields     (optional)
      *
      * @return Promise
      */
-    public function create(Repository $repository): Promise
+    public function insert(string $table, string $pk, array $fields = []): Promise
     {
-        return \Amp\call(function ($repository) {
-            $commands = $this->getCreateCommands($repository);
-            foreach ($commands as $command) {
-                yield $this->exec($command);
-            }
-        }, $repository);
+        return \Amp\call(function (...$args) {
+            [$cmd, $args] = $this->getInsertCommand(...$args);
+            return yield $this->val($cmd, ...$args);
+        }, $table, $pk, $fields);
     }
-    
+
     /**
-     * @param Repository $repository
+     * @param string $table
+     * @param string $pk
+     * @param array  $fields
      *
      * @return array
      */
-    private function getCreateCommands(Repository $repository): array
+    private function getInsertCommand(string $table, string $pk, array $fields): array
     {
         $q = $this->config['quote'];
-        $enq = function ($fields) use ($q) {
-            return implode(', ', array_map(function ($field) use ($q) {
-                return $q . $field . $q;
-            }, $fields));
-        };
-        $table = $repository->getDatabaseTable();
-        [$fields, $indexes, $foreignKeys] = [[], [], []];
-        $primary = $repository->getPrimaryDatabasePool()->names();
-        if (in_array($this->getName(), $primary)) {
-            $fields = $repository->getDatabaseFields();
-            $indexes = $repository->getDatabaseIndexes();
-            $foreignKeys = $repository->getDatabaseForeignKeys();
-        }
-        $pk = $repository->getDatabasePk();
-        $pkStartWith = $repository->getDatabasePkStartWith($this->getName());
-        $pkIncrementBy = $repository->getDatabasePkIncrementBy($this->getName());
-        $seq = $table . '_seq';
-        $commands = [];
-        // CREATE TABLE
-        $commands[] = "CREATE TABLE {$q}{$table}{$q}()";
-        // CREATE SEQUENCE
-        $commands[] = "DROP SEQUENCE IF EXISTS {$q}{$seq}{$q} CASCADE";
-        $commands[] = "
-            CREATE SEQUENCE {$q}{$seq}{$q}
-            AS BIGINT
-            START WITH {$pkStartWith}
-            INCREMENT BY {$pkIncrementBy}
-            MINVALUE {$pkStartWith}
-        ";
-        // ADD PRIMARY KEY
-        $commands[] = "
-            ALTER TABLE {$q}{$table}{$q}
-            ADD COLUMN {$q}{$pk}{$q} BIGINT DEFAULT
-            nextval('{$seq}'::regclass) NOT NULL
-        ";
-        $commands[] = "
-            ALTER TABLE {$q}{$table}{$q}
-            ADD CONSTRAINT {$q}{$table}_pk{$q}
-            PRIMARY KEY ({$q}{$pk}{$q})
-        ";
-        // FIELDS
-        foreach ($fields as $field) {
-            $type = $field->getType();
-            $null = $type->isNullable() ? 'NULL' : 'NOT NULL';
-            $default = !$type->isNullable() ? $this->getFieldTypeDefault($type) : '';
-            $default = $default !== '' ? 'DEFAULT ' . $default : '';
-            $type = $this->getFieldTypeString($type);
-            $commands[] = "
-                ALTER TABLE {$q}{$table}{$q}
-                ADD COLUMN {$q}{$field}{$q}
-                {$type} {$null} {$default}
-            ";
-        }
-        // INDEXES
-        foreach ($indexes as $index) {
-            $f = $index->getFields();
-            $t = $this->getIndexTypeString($index->getType());
-            $u = $index->isUnique() ? 'UNIQUE' : '';
-            $commands[] = "
-                CREATE {$u} INDEX {$q}{$table}_{$index}{$q} ON {$q}{$table}{$q}
-                USING {$t} ({$enq($f)})
-            ";
-        }
-        // FOREIGN KEYS
-        foreach ($foreignKeys as $foreignKey) {
-            $parentTable = $foreignKey->getParentTable();
-            $parentFields = $foreignKey->getParentFields();
-            $childFields = $foreignKey->getChildFields();
-            $commands[] = "
-                ALTER TABLE {$q}{$table}{$q} ADD CONSTRAINT {$q}{$table}_{$foreignKey}{$q}
-                FOREIGN KEY ({$enq($childFields)})
-                REFERENCES {$q}{$parentTable}{$q} ({$enq($parentFields)})
-                ON DELETE CASCADE ON UPDATE CASCADE
-            ";
-        }
-        $commands = array_map('trim', $commands);
-        return $commands;
-    }
-
-    /**
-     * @param Repository $repository
-     * @param array      $fields
-     *
-     * @return Promise
-     */
-    public function insert(Repository $repository, array $fields): Promise
-    {
-        return \Amp\call(function ($repository, $fields) {
-            [$cmd, $args] = $this->getInsertCommand($repository, $fields);
-            return yield $this->val($cmd, ...$args);
-        }, $repository, $fields);
-    }
-
-    /**
-     * @param Repository $repository
-     * @param array      $fields
-     *
-     * @return Promise
-     */
-    public function insertNew(...$args): Promise
-    {
-        return \Amp\call(function ($args) {
-            [$cmd, $args] = $this->getInsertNewCommand(...$args);
-            return yield $this->val($cmd, ...$args);
-        }, $args);
-    }
-
-    /**
-     * @param Repository $repository
-     * @param array      $fields
-     *
-     * @return array
-     */
-    private function getInsertNewCommand(string $table, string $primaryKey, array $fields): array
-    {
-        $q = $this->config['quote'];
-        $pk = $primaryKey;
         [$columns, $values, $args] = [[], [], []];
         foreach ($fields as $field) {
             $columns[] = $q . $field->getName() . $q;
@@ -899,63 +586,35 @@ class DatabasePostgres implements DatabaseInterface
     }
 
     /**
-     * @param Repository $repository
-     * @param array      $fields
-     *
-     * @return array
-     */
-    private function getInsertCommand(Repository $repository, array $fields): array
-    {
-        $q = $this->config['quote'];
-        $table = $repository->getDatabaseTable();
-        $pk = $repository->getDatabasePk();
-        $primary = $repository->getPrimaryDatabasePool()->names();
-        if (!in_array($this->getName(), $primary)) {
-            $fields = [];
-        }
-        [$columns, $values, $args] = [[], [], []];
-        foreach ($fields as $field) {
-            $columns[] = $q . $field->getName() . $q;
-            $values[] = $field->getInsertString();
-            $args[] = $field->exportValue();
-        }
-        $columns = implode(', ', $columns);
-        $values = implode(', ', $values);
-        $insert = ($columns && $values) ? "({$columns}) VALUES ({$values})" : 'DEFAULT VALUES';
-        $command = "INSERT INTO {$q}{$table}{$q} {$insert} RETURNING {$q}{$pk}{$q}";
-        return [$command, $args];
-    }
-
-    /**
-     * @param Repository $repository
-     * @param array      $ids
-     * @param array      $fields
+     * @param string $table
+     * @param string $pk
+     * @param array  $ids
+     * @param array  $fields
      *
      * @return Promise
      */
-    public function update(Repository $repository, array $ids, array $fields): Promise
+    public function update(string $table, string $pk, array $ids, array $fields): Promise
     {
-        return \Amp\call(function ($repository, $ids, $fields) {
+        return \Amp\call(function ($table, $pk, $ids, $fields) {
             if (!$fields || !$ids) {
                 return 0;
             }
-            [$cmd, $args] = $this->getUpdateCommand($repository, $ids, $fields);
+            [$cmd, $args] = $this->getUpdateCommand($table, $pk, $ids, $fields);
             return (int) yield $this->exec($cmd, ...$args);
-        }, $repository, $ids, $fields);
+        }, $table, $pk, $ids, $fields);
     }
 
     /**
-     * @param Repository $repository
-     * @param array      $ids
-     * @param array      $fields
+     * @param string $table
+     * @param string $pk
+     * @param array  $ids
+     * @param array  $fields
      *
      * @return array
      */
-    private function getUpdateCommand(Repository $repository, array $ids, array $fields): array
+    private function getUpdateCommand(string $table, string $pk, array $ids, array $fields): array
     {
         $q = $this->config['quote'];
-        $table = $repository->getDatabaseTable();
-        $pk = $repository->getDatabasePk();
         [$args, $update] = [[], []];
         foreach ($fields as $field) {
             $f = $q . $field->getName() . $q;
@@ -970,68 +629,311 @@ class DatabasePostgres implements DatabaseInterface
     }
 
     /**
-     * @param Repository $repository
-     * @param array      $ids
+     * @param string $table
+     * @param string $pk
+     * @param array  $ids
      *
      * @return Promise
      */
-    public function delete(Repository $repository, array $ids): Promise
+    public function delete(string $table, string $pk, array $ids): Promise
     {
-        return \Amp\call(function ($repository, $ids) {
+        return \Amp\call(function ($table, $pk, $ids) {
             if (!$ids) {
                 return 0;
             }
-            [$cmd, $args] = $this->getDeleteCommand($repository, $ids);
+            [$cmd, $args] = $this->getDeleteCommand($table, $pk, $ids);
             return (int) yield $this->exec($cmd, ...$args);
-        }, $repository, $ids);
+        }, $table, $pk, $ids);
     }
 
     /**
-     * @param Repository $repository
-     * @param array      $ids
+     * @param string $table
+     * @param string $pk
+     * @param array  $ids
      *
      * @return array
      */
-    private function getDeleteCommand(Repository $repository, array $ids): array
+    private function getDeleteCommand(string $table, string $pk, array $ids): array
     {
         $q = $this->config['quote'];
-        $table = $repository->getDatabaseTable();
-        $pk = $repository->getDatabasePk();
         $_ = implode(', ', array_fill(0, count($ids), '?'));
         $command = "DELETE FROM {$q}{$table}{$q} WHERE {$q}{$pk}{$q} IN ({$_})";
         return [$command, $ids];
     }
 
     /**
-     * @param Repository $repository
-     * @param int        $id1
-     * @param int        $id2
+     * @param string $table
+     * @param string $pk
+     * @param int    $id1
+     * @param int    $id2
      *
      * @return Promise
      */
-    public function reid(Repository $repository, int $id1, int $id2): Promise
+    public function reid(string $table, string $pk, int $id1, int $id2): Promise
     {
-        return \Amp\call(function ($repository, $id1, $id2) {
-            [$cmd, $args] = $this->getReidCommand($repository, $id1, $id2);
+        return \Amp\call(function ($table, $pk, $id1, $id2) {
+            [$cmd, $args] = $this->getReidCommand($table, $pk, $id1, $id2);
             return (bool) yield $this->exec($cmd, ...$args);
-        }, $repository, $id1, $id2);
+        }, $table, $pk, $id1, $id2);
     }
 
     /**
-     * @param Repository $repository
-     * @param int        $id1
-     * @param int        $id2
+     * @param string $table
+     * @param string $pk
+     * @param int    $id1
+     * @param int    $id2
      *
      * @return array
      */
-    private function getReidCommand(Repository $repository, int $id1, int $id2): array
+    private function getReidCommand(string $table, string $pk, int $id1, int $id2): array
     {
         $q = $this->config['quote'];
-        $table = $repository->getDatabaseTable();
-        $pk = $repository->getDatabasePk();
         $command = "UPDATE {$q}{$table}{$q} SET {$q}{$pk}{$q} = ? WHERE {$q}{$pk}{$q} = ?";
         return [$command, [$id2, $id1]];
     }
+
+    // /**
+    //  * @param string $table
+    //  * @param array  $params (optional)
+    //  *
+    //  * @return Emitter
+    //  */
+    // public function iterate(string $table, array $params = []): Emitter
+    // {
+    //     $emitter = new Emitter();
+    //     // $emitter = new \Amp\Emitter();
+    //     // $iterator = $emitter->iterate();
+    //     // $iterator = new Emitter($iterator);
+    //     $coroutine = \Amp\call(function ($table, $params, $emitter) {
+    //         $params += [
+    //             'fields' => null,
+    //             'returnFields' => false,
+    //             'asc' => true,
+    //             'min' => null,
+    //             'max' => null,
+    //             'limit' => 1E9,
+    //             'pk' => null,
+    //             'where' => [],
+    //             'config' => [],
+    //         ];
+    //         [
+    //             'fields' => $fields,
+    //             'returnFields' => $returnFields,
+    //             'asc' => $asc,
+    //             'min' => $min,
+    //             'max' => $max,
+    //             'limit' => $limit,
+    //             'pk' => $pk,
+    //             'where' => $where,
+    //             'config' => $config,
+    //         ] = $params;
+    //         $config += $this->config;
+    //         [
+    //             'quote' => $q,
+    //             'iterator_chunk_size' => $iterator_chunk_size,
+    //             'rand_iterator_intervals' => $rand_iterator_intervals,
+    //         ] = $config;
+    //         $pk = $pk ?? yield $this->pk($table);
+    //         if ($pk === null || count($pk) !== 1) {
+    //             return;
+    //         }
+    //         $fields = $fields ?? yield $this->fields($table);
+    //         if ($asc === null) {
+    //             $min = $min ?? (yield $this->min($table))[0];
+    //             $max = $max ?? (yield $this->max($table))[0];
+    //             if (!isset($min, $max)) {
+    //                 return;
+    //             }
+    //             $params = compact('fields', 'pk') + $params;
+    //             if (is_int($min) && is_int($max)) {
+    //                 $rand_iterator_intervals = min($rand_iterator_intervals, $max - $min + 1);
+    //                 $intervals = $this->getIntervalsForRandIterator($min, $max, $rand_iterator_intervals);
+    //             } else {
+    //                 $intervals = [[$min, $max]];
+    //             }
+    //             $c = count($intervals);
+    //             while ($c) {
+    //                 $key = array_rand($intervals);
+    //                 if (!$intervals[$key] instanceof Emitter) {
+    //                     [$min, $max] = $intervals[$key];
+    //                     $asc = (bool) mt_rand(0, 1);
+    //                     $params = compact('asc', 'min', 'max') + $params;
+    //                     $intervals[$key] = $this->iterate($table, $params);
+    //                 }
+    //                 if (($value = yield $intervals[$key]->pull()) !== null) {
+    //                     yield $emitter->push($value);
+    //                 } else {
+    //                     unset($intervals[$key]);
+    //                     $c--;
+    //                 }
+    //             }
+    //             return;
+    //         }
+    //         [$pk] = $pk;
+    //         $qpk = $q . $pk . $q;
+    //         $collect = [];
+    //         foreach ($fields as $field) {
+    //             if (!$field instanceof Field) {
+    //                 $field = new Field($field);
+    //             }
+    //             $collect[$field->getAlias()] = $field;
+    //         }
+    //         $fields = $collect;
+    //         $select = array_map(function ($field) use ($q) {
+    //             $as = $q . $field->getAlias() . $q;
+    //             return $field->getSelectString($q) . ' AS ' . $as;
+    //         }, $fields);
+    //         $_pk = 'pk_' . md5($pk);
+    //         $select[] = $qpk . ' AS ' . $q . $_pk . $q;
+    //         $template = sprintf(
+    //             'SELECT %s FROM %s %%s %s LIMIT %%s',
+    //             implode(', ', $select),
+    //             $q . $table . $q,
+    //             'ORDER BY ' . $qpk . ' ' . ($asc ? 'ASC' : 'DESC')
+    //         );
+    //         [$op1, $op2] = $asc ? ['>', '<='] : ['<', '>='];
+    //         $where = $where instanceof WhereCondition ? $where : new WhereCondition($where);
+    //         while ($limit > 0) {
+    //             $_where = clone $where;
+    //             if (($asc && $min !== null) || (!$asc && $max !== null)) {
+    //                 $first = $first ?? true;
+    //                 $_where->and($pk, $op1 . ($first ? '=' : ''), $asc ? $min : $max);
+    //             }
+    //             if (($asc && $max !== null) || (!$asc && $min !== null)) {
+    //                 $_where->and($pk, $op2, $asc ? $max : $min);
+    //             }
+    //             [$_where, $_args] = $_where->stringify($q, 'TRUE');
+    //             $lim = min($limit, $iterator_chunk_size);
+    //             $sql = sprintf($template, 'WHERE ' . $_where, $lim);
+    //             $all = yield $this->all($sql, ...$_args);
+    //             $c = count($all);
+    //             $limit -= $c;
+    //             foreach ($all as $row) {
+    //                 $id = $row[$_pk];
+    //                 unset($row[$_pk]);
+    //                 foreach ($row as $k => &$v) {
+    //                     $f = $fields[$k];
+    //                     $f->importValue($v);
+    //                     $v = $returnFields ? clone $f : $f->getValue();
+    //                 }
+    //                 unset($v);
+    //                 yield $emitter->push([$id, $row]);
+    //             }
+    //             if (!$c || $c < $lim || $emitter === null) {
+    //                 break;
+    //             }
+    //             ${$asc ? 'min' : 'max'} = $id;
+    //             $first = false;
+    //         }
+    //     }, $table, $params, $emitter);
+    //     $coroutine->onResolve(function () use ($emitter) {
+    //         $emitter->finish();
+    //     });
+    //     return $emitter;
+    // }
+
+    // /**
+    //  * @param string $table
+    //  * @param array  $ids
+    //  * @param array  $params (optional)
+    //  *
+    //  * @return Emitter
+    //  */
+    // public function get(string $table, array $ids, array $params = []): Emitter
+    // {
+    //     $emitter = new Emitter();
+    //     $coroutine = \Amp\call(function ($table, $ids, $params, $emitter) {
+    //         $params += [
+    //             'pk' => null,
+    //             'fields' => null,
+    //             'returnFields' => false,
+    //             'order' => false,
+    //             'config' => [],
+    //         ];
+    //         [
+    //             'pk' => $pk,
+    //             'fields' => $fields,
+    //             'returnFields' => $returnFields,
+    //             'order' => $order,
+    //             'config' => $config,
+    //         ] = $params;
+    //         $config += $this->config;
+    //         [
+    //             'iterator_chunk_size' => $iterator_chunk_size,
+    //         ] = $config;
+    //         $fields = $fields ?? yield $this->fields($table);
+    //         $pk = $pk ?? yield $this->pk($table);
+    //         if ($pk === null || count($pk) !== 1) {
+    //             return;
+    //         }
+    //         [$pk] = $pk;
+    //         foreach (array_chunk($ids, $iterator_chunk_size) as $chunk) {
+    //             $_ = $this->iterate($table, [
+    //                 'where' => new Condition([$pk => $chunk]),
+    //                 'pk' => [$pk],
+    //                 'fields' => $fields,
+    //                 'returnFields' => $returnFields,
+    //                 'limit' => $iterator_chunk_size,
+    //                 'config' => compact('iterator_chunk_size'),
+    //                 'order' => $order,
+    //             ]);
+    //             while (($value = yield $_->pull()) !== null) {
+    //                 yield $emitter->push($value);
+    //             }
+    //             // yield $emitter->from($_);
+    //             // while (($value = yield $emitter->pull()) !== null) {
+    //             //     yield $emitter->emit($iterator->getCurrent());
+    //             // }
+    //         }
+    //     }, $table, $ids, $params, $emitter);
+    //     $coroutine->onResolve(function () use ($emitter) {
+    //         $emitter->finish();
+    //     });
+    //     return $emitter;
+    //     // $coroutine->onResolve(function ($exception) use (&$emitter) {
+    //     //     if ($exception) {
+    //     //         $emitter->fail($exception);
+    //     //         $emitter = null;
+    //     //     } else {
+    //     //         $emitter->complete();
+    //     //     }
+    //     // });
+    //     // $emit = function ($emit) use ($table, $ids, $params) {
+            
+    //     // };
+    //     // return new Producer($emit);
+    // }
+
+    // /**
+    //  * @param int $min
+    //  * @param int $max
+    //  * @param int $n
+    //  *
+    //  * @return array
+    //  */
+    // private function getIntervalsForRandIterator(int $min, int $max, int $n): array
+    // {
+    //     $inc = ($max - $min + 1) / $n;
+    //     $intervals = [];
+    //     for ($i = 0; $i < $n; $i++) {
+    //         $one = (int) floor($min);
+    //         $two = (int) floor($min + $inc - 1E-6);
+    //         $one = $i > 0 && $one === $extwo ? $one + 1 : $one;
+    //         $one = $one > $two ? $one - 1 : $one;
+    //         $intervals[] = [$one, $two];
+    //         $min += $inc;
+    //         $extwo = $two;
+    //     }
+    //     return $intervals;
+    // }
+
+    
+
+    
+
+    
+
+    
 
     /**
      * @param AbstractType $type
@@ -1043,6 +945,7 @@ class DatabasePostgres implements DatabaseInterface
         static $map;
         if ($map === null) {
             $map = [
+                (string) Type::default() => 'TEXT',
                 (string) Type::string() => 'TEXT',
                 (string) Type::int() => 'INTEGER',
                 (string) Type::float() => 'REAL',
@@ -1071,6 +974,7 @@ class DatabasePostgres implements DatabaseInterface
         static $map;
         if ($map === null) {
             $map = [
+                (string) Type::default() => "''::TEXT",
                 (string) Type::string() => "''::TEXT",
                 (string) Type::int() => '0',
                 (string) Type::float() => '0',
@@ -1109,20 +1013,5 @@ class DatabasePostgres implements DatabaseInterface
             ];
         }
         return $map[$type];
-    }
-
-    /**
-     * @param string $name
-     * @param array  $arguments
-     *
-     * @return mixed
-     */
-    public function __call(string $name, array $arguments)
-    {
-        if (substr($name, -4) === 'Sync') {
-            $name = substr($name, 0, -4);
-            return Promise\wait($this->$name(...$arguments));
-        }
-        throw new RuntimeException(sprintf(self::METHOD_NOT_FOUND, $name));
     }
 }

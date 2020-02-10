@@ -9,13 +9,13 @@ use Amp\Iterator;
 use RuntimeException;
 use Ejz\Type\AbstractType;
 
-class Repository
+class Repository implements NameInterface
 {
+    use NameTrait;
+    use SyncTrait;
+
     /** @var Storage */
     protected $storage;
-
-    /** @var string */
-    protected $name;
 
     /** @var array */
     protected $config;
@@ -32,18 +32,15 @@ class Repository
     /** @var Pool */
     protected $bitmapCluster;
 
-    /** @var string */
-    private const METHOD_NOT_FOUND = 'METHOD_NOT_FOUND: %s';
-
     /**
-     * @param Storage $storage
      * @param string  $name
+     * @param Storage $storage
      * @param array   $config
      */
-    public function __construct(Storage $storage, string $name, array $config)
+    public function __construct(string $name, Storage $storage, array $config)
     {
+        $this->setName($name);
         $this->storage = $storage;
-        $this->name = $name;
         $this->config = $config;
         $this->normalize();
     }
@@ -797,134 +794,130 @@ class Repository
         return $chains;
     }
 
-    /**
-     * @param string $name
-     * @param array  $arguments
-     *
-     * @return mixed
-     */
-    public function __call(string $name, array $arguments)
-    {
-        if (substr($name, -4) === 'Sync') {
-            $name = substr($name, 0, -4);
-            return Promise\wait($this->$name(...$arguments));
-        }
-        $closure = function ($one, $two) {
-            return function ($smth = null) use ($one, $two) {
-                $filter = $this->config[$one][$two . 'PoolFilter'] ?? null;
-                $pool = $one . 'Pool';
-                $pool = $this->$pool;
-                if ($filter === null) {
-                    return $pool;
-                }
-                return $pool->filter($filter($smth, $pool->names()));
-            };
-        };
-        $this->_map = $this->_map ?? [
-            'hasDatabase' => function () {
-                return $this->config['hasDatabase'];
-            },
-            'hasBitmap' => function () {
-                return $this->config['hasBitmap'];
-            },
-            'getDatabaseTable' => function () {
-                return $this->config['database']['table'];
-            },
-            'getBitmapIndex' => function () {
-                return $this->config['bitmap']['index'];
-            },
-            //
-            'getDatabaseFields' => function () {
-                $fields = [];
-                foreach ($this->config['database']['fields'] as $name => $field) {
-                    $fields[$name] = new Field($name, $field['type']);
-                }
-                return $fields;
-            },
-            'getBitmapFields' => function () {
-                $fields = [];
-                foreach ($this->config['bitmap']['fields'] as $name => $field) {
-                    $fields[$name] = new Field($name, $field['type']);
-                }
-                return $fields;
-            },
-            'getSortScore' => function ($bean) {
-                $getSortScore = $this->config['database']['getSortScore'] ?? null;
-                return $getSortScore !== null ? $getSortScore($bean) : 0;
-            },
-            'getDatabasePk' => function () {
-                return $this->config['database']['pk'];
-            },
-            'getDatabasePkIncrementBy' => function ($name) {
-                $get = $this->config['database']['getPkIncrementBy'] ?? null;
-                if ($get === null) {
-                    return 1;
-                }
-                return (int) $get($name, $this->databasePool->names());
-            },
-            'getDatabasePkStartWith' => function ($name) {
-                $get = $this->config['database']['getPkStartWith'] ?? null;
-                if ($get === null) {
-                    return 1;
-                }
-                return (int) $get($name, $this->databasePool->names());
-            },
-            'getDatabaseIndexes' => function () {
-                return $this->config['database']['indexes'];
-            },
-            'getDatabaseForeignKeys' => function () {
-                return $this->config['database']['foreignKeys'];
-            },
-            //
-            'getPrimaryDatabasePool' => $closure('database', 'primary'),
-            'getWritableDatabasePool' => $closure('database', 'writable'),
-            'getReadableDatabasePool' => $closure('database', 'readable'),
-            'getPrimaryBitmapPool' => $closure('bitmap', 'primary'),
-            'getWritableBitmapPool' => $closure('bitmap', 'writable'),
-            'getReadableBitmapPool' => $closure('bitmap', 'readable'),
-            //
-            'getDatabaseBean' => function ($id = null, $values = []) {
-                return $this->getDatabaseBeanWithValues($id, $values);
-            },
-            'getDatabaseBeanWithValues' => function ($id, $values) {
-                $bean = $this->getDatabaseBeanWithFields($id, $this->getDatabaseFields());
-                $bean->setValues($values);
-                return $bean;
-            },
-            'getDatabaseBeanWithFields' => function ($id, $fields) {
-                $bean = $this->config['database']['bean'] ?? DatabaseBean::class;
-                return new $bean($this, $id, $fields);
-            },
-            'getBitmapBean' => function ($id, $values = []) {
-                return $this->getBitmapBeanWithValues($id, $values);
-            },
-            'getBitmapBeanWithValues' => function ($id, $values) {
-                $bean = $this->getBitmapBeanWithFields($id, $this->getBitmapFields());
-                $bean->setValues($values);
-                return $bean;
-            },
-            'getBitmapBeanWithFields' => function ($id, $fields) {
-                $bean = $this->config['bitmap']['bean'] ?? BitmapBean::class;
-                return new $bean($this, $id, $fields);
-            },
-            'getBitmapBeanFromDatabaseBean' => function ($bean) {
-                $id = (int) $bean->id;
-                $getValues = $this->config['bitmap']['getValues'] ?? null;
-                if ($getValues === null) {
-                    $keys = array_keys($this->config['bitmap']['fields']);
-                    $values = array_intersect_key($bean->getValues(), array_flip($keys));
-                } else {
-                    $values = $getValues($bean);
-                }
-                return $this->getBitmapBeanWithValues($id, $values);
-            },
-        ];
-        $method = $this->_map[$name] ?? null;
-        if ($method === null) {
-            throw new RuntimeException(sprintf(self::METHOD_NOT_FOUND, $name));
-        }
-        return $method(...$arguments);
-    }
+    // /**
+    //  * @param string $name
+    //  * @param array  $arguments
+    //  *
+    //  * @return mixed
+    //  */
+    // public function __call(string $name, array $arguments)
+    // {
+    //     $closure = function ($one, $two) {
+    //         return function ($smth = null) use ($one, $two) {
+    //             $filter = $this->config[$one][$two . 'PoolFilter'] ?? null;
+    //             $pool = $one . 'Pool';
+    //             $pool = $this->$pool;
+    //             if ($filter === null) {
+    //                 return $pool;
+    //             }
+    //             return $pool->filter($filter($smth, $pool->names()));
+    //         };
+    //     };
+    //     $this->_map = $this->_map ?? [
+    //         'hasDatabase' => function () {
+    //             return $this->config['hasDatabase'];
+    //         },
+    //         'hasBitmap' => function () {
+    //             return $this->config['hasBitmap'];
+    //         },
+    //         'getDatabaseTable' => function () {
+    //             return $this->config['database']['table'];
+    //         },
+    //         'getBitmapIndex' => function () {
+    //             return $this->config['bitmap']['index'];
+    //         },
+    //         //
+    //         'getDatabaseFields' => function () {
+    //             $fields = [];
+    //             foreach ($this->config['database']['fields'] as $name => $field) {
+    //                 $fields[$name] = new Field($name, $field['type']);
+    //             }
+    //             return $fields;
+    //         },
+    //         'getBitmapFields' => function () {
+    //             $fields = [];
+    //             foreach ($this->config['bitmap']['fields'] as $name => $field) {
+    //                 $fields[$name] = new Field($name, $field['type']);
+    //             }
+    //             return $fields;
+    //         },
+    //         'getSortScore' => function ($bean) {
+    //             $getSortScore = $this->config['database']['getSortScore'] ?? null;
+    //             return $getSortScore !== null ? $getSortScore($bean) : 0;
+    //         },
+    //         'getDatabasePk' => function () {
+    //             return $this->config['database']['pk'];
+    //         },
+    //         'getDatabasePkIncrementBy' => function ($name) {
+    //             $get = $this->config['database']['getPkIncrementBy'] ?? null;
+    //             if ($get === null) {
+    //                 return 1;
+    //             }
+    //             return (int) $get($name, $this->databasePool->names());
+    //         },
+    //         'getDatabasePkStartWith' => function ($name) {
+    //             $get = $this->config['database']['getPkStartWith'] ?? null;
+    //             if ($get === null) {
+    //                 return 1;
+    //             }
+    //             return (int) $get($name, $this->databasePool->names());
+    //         },
+    //         'getDatabaseIndexes' => function () {
+    //             return $this->config['database']['indexes'];
+    //         },
+    //         'getDatabaseForeignKeys' => function () {
+    //             return $this->config['database']['foreignKeys'];
+    //         },
+    //         //
+    //         'getPrimaryDatabasePool' => $closure('database', 'primary'),
+    //         'getWritableDatabasePool' => $closure('database', 'writable'),
+    //         'getReadableDatabasePool' => $closure('database', 'readable'),
+    //         'getPrimaryBitmapPool' => $closure('bitmap', 'primary'),
+    //         'getWritableBitmapPool' => $closure('bitmap', 'writable'),
+    //         'getReadableBitmapPool' => $closure('bitmap', 'readable'),
+    //         //
+    //         'getDatabaseBean' => function ($id = null, $values = []) {
+    //             return $this->getDatabaseBeanWithValues($id, $values);
+    //         },
+    //         'getDatabaseBeanWithValues' => function ($id, $values) {
+    //             $bean = $this->getDatabaseBeanWithFields($id, $this->getDatabaseFields());
+    //             $bean->setValues($values);
+    //             return $bean;
+    //         },
+    //         'getDatabaseBeanWithFields' => function ($id, $fields) {
+    //             $bean = $this->config['database']['bean'] ?? DatabaseBean::class;
+    //             return new $bean($this, $id, $fields);
+    //         },
+    //         'getBitmapBean' => function ($id, $values = []) {
+    //             return $this->getBitmapBeanWithValues($id, $values);
+    //         },
+    //         'getBitmapBeanWithValues' => function ($id, $values) {
+    //             $bean = $this->getBitmapBeanWithFields($id, $this->getBitmapFields());
+    //             $bean->setValues($values);
+    //             return $bean;
+    //         },
+    //         'getBitmapBeanWithFields' => function ($id, $fields) {
+    //             $bean = $this->config['bitmap']['bean'] ?? BitmapBean::class;
+    //             return new $bean($this, $id, $fields);
+    //         },
+    //         'getBitmapBeanFromDatabaseBean' => function ($bean) {
+    //             $id = (int) $bean->id;
+    //             $getValues = $this->config['bitmap']['getValues'] ?? null;
+    //             if ($getValues === null) {
+    //                 $keys = array_keys($this->config['bitmap']['fields']);
+    //                 $values = array_intersect_key($bean->getValues(), array_flip($keys));
+    //             } else {
+    //                 $values = $getValues($bean);
+    //             }
+    //             return $this->getBitmapBeanWithValues($id, $values);
+    //         },
+    //     ];
+    //     $method = $this->_map[$name] ?? null;
+    //     if ($method === null) {
+    //         throw new RuntimeException(sprintf(self::METHOD_NOT_FOUND, $name));
+    //     }
+    //     return $method(...$arguments);
+    // }
     
     /**
      * @return Storage
@@ -932,22 +925,6 @@ class Repository
     public function getStorage(): Storage
     {
         return $this->storage;
-    }
-
-    /**
-     * @return string
-     */
-    public function getName(): string
-    {
-        return $this->name;
-    }
-
-    /**
-     * @return string
-     */
-    public function __toString(): string
-    {
-        return $this->getName();
     }
 
     /**

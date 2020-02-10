@@ -22,6 +22,8 @@ function getCache(): object
 }
 
 /**
+ * @param string $name
+ *
  * @return object
  */
 function getBitmap(string $name): object
@@ -52,16 +54,34 @@ function getDatabase(string $name): object
 }
 
 /**
+ * @param string $name
+ * @param array  $config
+ *
+ * @return object
+ */
+function getRepository(string $name, array $config): object
+{
+    $name = strtolower($name);
+    return new \Ejz\Repository(
+        $name,
+        $config,
+        getDatabasePool(),
+        getBitmapPool(),
+        getCache()
+    );
+}
+
+/**
  * @return object
  */
 function getDatabasePool(): object
 {
     $envs = getenv('DB_ENVS');
-    $instances = [];
+    $objects = [];
     foreach (explode(',', $envs) as $env) {
-        $instances[] = getDatabase(strtolower($env));
+        $objects[] = getDatabase(strtolower($env));
     }
-    return new \Ejz\Pool($instances);
+    return new \Ejz\DatabasePool($objects);
 }
 
 /**
@@ -70,22 +90,23 @@ function getDatabasePool(): object
 function getBitmapPool(): object
 {
     $envs = getenv('BITMAP_ENVS');
-    $instances = [];
+    $objects = [];
     foreach (explode(',', $envs) as $env) {
-        $instances[] = getBitmap(strtolower($env));
+        $objects[] = getBitmap(strtolower($env));
     }
-    return new \Ejz\Pool($instances);
+    return new \Ejz\BitmapPool($objects);
 }
 
 /**
- * @param array $repositories
+ * @param array $configs
  *
  * @return object
  */
-function getStorage(array $repositories): object
+function getRepositoryPool(array $configs): object
 {
-    $databasePool = getDatabasePool();
-    $bitmapPool = getBitmapPool();
-    $cache = getCache();
-    return new \Ejz\Storage($databasePool, $bitmapPool, $cache, $repositories);
+    $objects = [];
+    foreach ($configs as $name => $config) {
+        $objects[] = getRepository($name, $config);
+    }
+    return new \Ejz\RepositoryPool($objects);
 }

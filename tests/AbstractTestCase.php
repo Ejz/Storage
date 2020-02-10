@@ -12,11 +12,14 @@ use function Amp\Promise\wait;
 
 abstract class AbstractTestCase extends TestCase
 {
-    /** Pool */
+    /** DatabasePool */
     protected $databasePool;
 
-    /** Pool */
+    /** BitmapPool */
     protected $bitmapPool;
+
+    /** RepositoryPool */
+    protected $repositoryPool;
 
     /** RedisCache */
     protected $cache;

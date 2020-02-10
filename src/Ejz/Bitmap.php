@@ -9,10 +9,10 @@ use Amp\Success;
 use Ejz\Type\AbstractType;
 use RuntimeException;
 
-class Bitmap
+class Bitmap implements NameInterface, BitmapInterface
 {
-    /** @var string */
-    protected $name;
+    use NameTrait;
+    use SyncTrait;
 
     /** @var RedisClient */
     protected $client;
@@ -25,24 +25,8 @@ class Bitmap
      */
     public function __construct(string $name, RedisClient $client)
     {
-        $this->name = $name;
+        $this->setName($name);
         $this->client = $client;
-    }
-
-    /**
-     * @return string
-     */
-    public function getName(): string
-    {
-        return $this->name;
-    }
-
-    /**
-     * @return string
-     */
-    public function __toString(): string
-    {
-        return $this->getName();
     }
 
     /**
@@ -195,18 +179,5 @@ class Bitmap
         return $map[(string) $type];
     }
 
-    /**
-     * @param string $name
-     * @param array  $arguments
-     *
-     * @return mixed
-     */
-    public function __call(string $name, array $arguments)
-    {
-        if (substr($name, -4) === 'Sync') {
-            $name = substr($name, 0, -4);
-            return Promise\wait($this->$name(...$arguments));
-        }
-        throw new RuntimeException(sprintf(self::METHOD_NOT_FOUND, $name));
-    }
+    
 }
