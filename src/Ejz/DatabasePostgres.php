@@ -4,7 +4,6 @@ namespace Ejz;
 
 use Amp\Loop;
 use Amp\Promise;
-use Amp\Iterator;
 use Amp\Postgres\Connection;
 use Amp\Postgres\ConnectionConfig;
 use Amp\Postgres\PgSqlCommandResult;
@@ -49,7 +48,7 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
         $this->config = $config + [
             'quote' => '"',
             'iterator_chunk_size' => 100,
-            'rand_iterator_intervals' => 1000,
+            'rand_iterator_intervals' => 100,
         ];
         $this->connection = null;
     }
@@ -692,248 +691,231 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
         return [$command, [$id2, $id1]];
     }
 
-    // /**
-    //  * @param string $table
-    //  * @param array  $params (optional)
-    //  *
-    //  * @return Emitter
-    //  */
-    // public function iterate(string $table, array $params = []): Emitter
-    // {
-    //     $emitter = new Emitter();
-    //     // $emitter = new \Amp\Emitter();
-    //     // $iterator = $emitter->iterate();
-    //     // $iterator = new Emitter($iterator);
-    //     $coroutine = \Amp\call(function ($table, $params, $emitter) {
-    //         $params += [
-    //             'fields' => null,
-    //             'returnFields' => false,
-    //             'asc' => true,
-    //             'min' => null,
-    //             'max' => null,
-    //             'limit' => 1E9,
-    //             'pk' => null,
-    //             'where' => [],
-    //             'config' => [],
-    //         ];
-    //         [
-    //             'fields' => $fields,
-    //             'returnFields' => $returnFields,
-    //             'asc' => $asc,
-    //             'min' => $min,
-    //             'max' => $max,
-    //             'limit' => $limit,
-    //             'pk' => $pk,
-    //             'where' => $where,
-    //             'config' => $config,
-    //         ] = $params;
-    //         $config += $this->config;
-    //         [
-    //             'quote' => $q,
-    //             'iterator_chunk_size' => $iterator_chunk_size,
-    //             'rand_iterator_intervals' => $rand_iterator_intervals,
-    //         ] = $config;
-    //         $pk = $pk ?? yield $this->pk($table);
-    //         if ($pk === null || count($pk) !== 1) {
-    //             return;
-    //         }
-    //         $fields = $fields ?? yield $this->fields($table);
-    //         if ($asc === null) {
-    //             $min = $min ?? (yield $this->min($table))[0];
-    //             $max = $max ?? (yield $this->max($table))[0];
-    //             if (!isset($min, $max)) {
-    //                 return;
-    //             }
-    //             $params = compact('fields', 'pk') + $params;
-    //             if (is_int($min) && is_int($max)) {
-    //                 $rand_iterator_intervals = min($rand_iterator_intervals, $max - $min + 1);
-    //                 $intervals = $this->getIntervalsForRandIterator($min, $max, $rand_iterator_intervals);
-    //             } else {
-    //                 $intervals = [[$min, $max]];
-    //             }
-    //             $c = count($intervals);
-    //             while ($c) {
-    //                 $key = array_rand($intervals);
-    //                 if (!$intervals[$key] instanceof Emitter) {
-    //                     [$min, $max] = $intervals[$key];
-    //                     $asc = (bool) mt_rand(0, 1);
-    //                     $params = compact('asc', 'min', 'max') + $params;
-    //                     $intervals[$key] = $this->iterate($table, $params);
-    //                 }
-    //                 if (($value = yield $intervals[$key]->pull()) !== null) {
-    //                     yield $emitter->push($value);
-    //                 } else {
-    //                     unset($intervals[$key]);
-    //                     $c--;
-    //                 }
-    //             }
-    //             return;
-    //         }
-    //         [$pk] = $pk;
-    //         $qpk = $q . $pk . $q;
-    //         $collect = [];
-    //         foreach ($fields as $field) {
-    //             if (!$field instanceof Field) {
-    //                 $field = new Field($field);
-    //             }
-    //             $collect[$field->getAlias()] = $field;
-    //         }
-    //         $fields = $collect;
-    //         $select = array_map(function ($field) use ($q) {
-    //             $as = $q . $field->getAlias() . $q;
-    //             return $field->getSelectString($q) . ' AS ' . $as;
-    //         }, $fields);
-    //         $_pk = 'pk_' . md5($pk);
-    //         $select[] = $qpk . ' AS ' . $q . $_pk . $q;
-    //         $template = sprintf(
-    //             'SELECT %s FROM %s %%s %s LIMIT %%s',
-    //             implode(', ', $select),
-    //             $q . $table . $q,
-    //             'ORDER BY ' . $qpk . ' ' . ($asc ? 'ASC' : 'DESC')
-    //         );
-    //         [$op1, $op2] = $asc ? ['>', '<='] : ['<', '>='];
-    //         $where = $where instanceof WhereCondition ? $where : new WhereCondition($where);
-    //         while ($limit > 0) {
-    //             $_where = clone $where;
-    //             if (($asc && $min !== null) || (!$asc && $max !== null)) {
-    //                 $first = $first ?? true;
-    //                 $_where->and($pk, $op1 . ($first ? '=' : ''), $asc ? $min : $max);
-    //             }
-    //             if (($asc && $max !== null) || (!$asc && $min !== null)) {
-    //                 $_where->and($pk, $op2, $asc ? $max : $min);
-    //             }
-    //             [$_where, $_args] = $_where->stringify($q, 'TRUE');
-    //             $lim = min($limit, $iterator_chunk_size);
-    //             $sql = sprintf($template, 'WHERE ' . $_where, $lim);
-    //             $all = yield $this->all($sql, ...$_args);
-    //             $c = count($all);
-    //             $limit -= $c;
-    //             foreach ($all as $row) {
-    //                 $id = $row[$_pk];
-    //                 unset($row[$_pk]);
-    //                 foreach ($row as $k => &$v) {
-    //                     $f = $fields[$k];
-    //                     $f->importValue($v);
-    //                     $v = $returnFields ? clone $f : $f->getValue();
-    //                 }
-    //                 unset($v);
-    //                 yield $emitter->push([$id, $row]);
-    //             }
-    //             if (!$c || $c < $lim || $emitter === null) {
-    //                 break;
-    //             }
-    //             ${$asc ? 'min' : 'max'} = $id;
-    //             $first = false;
-    //         }
-    //     }, $table, $params, $emitter);
-    //     $coroutine->onResolve(function () use ($emitter) {
-    //         $emitter->finish();
-    //     });
-    //     return $emitter;
-    // }
+    /**
+     * @param string $table
+     * @param array  $params (optional)
+     *
+     * @return Iterator
+     */
+    public function iterate(string $table, array $params = []): Iterator
+    {
+        $emit = function ($emit) use ($table, $params) {
+            $params += [
+                'fields' => null,
+                'returnFields' => false,
+                'asc' => true,
+                'min' => null,
+                'max' => null,
+                'limit' => 1E9,
+                'pk' => null,
+                'where' => null,
+                'config' => [],
+            ];
+            [
+                'fields' => $fields,
+                'returnFields' => $returnFields,
+                'asc' => $asc,
+                'min' => $min,
+                'max' => $max,
+                'limit' => $limit,
+                'pk' => $pk,
+                'where' => $where,
+                'config' => $config,
+            ] = $params;
+            $config += $this->config;
+            [
+                'quote' => $q,
+                'iterator_chunk_size' => $iterator_chunk_size,
+                'rand_iterator_intervals' => $rand_iterator_intervals,
+            ] = $config;
+            $pk = $pk ?? yield $this->pk($table);
+            if ($pk === null || count($pk) !== 1) {
+                return;
+            }
+            $fields = $fields ?? yield $this->fields($table);
+            if ($asc === null) {
+                $min = $min ?? (yield $this->min($table))[0];
+                $max = $max ?? (yield $this->max($table))[0];
+                if (!isset($min, $max)) {
+                    return;
+                }
+                $params = compact('fields', 'pk') + $params;
+                if (is_int($min) && is_int($max)) {
+                    $intervals = $this->getIntervalsForRandIterator(
+                        $min,
+                        $max,
+                        min($rand_iterator_intervals, $max - $min + 1)
+                    );
+                } else {
+                    $intervals = [[$min, $max]];
+                }
+                $iterators = array_map(function ($interval) use ($table, $params) {
+                    [$min, $max] = $interval;
+                    $asc = (bool) mt_rand(0, 1);
+                    return $this->iterate($table, compact('asc', 'min', 'max') + $params);
+                }, $intervals);
+                $iterator = Iterator::merge($iterators);
+                while (yield $iterator->advance()) {
+                    yield $emit($iterator->getCurrent());
+                }
+                return;
+            }
+            [$pk] = $pk;
+            $qpk = $q . $pk . $q;
+            $collect = [];
+            foreach ($fields as $field) {
+                if (!$field instanceof Field) {
+                    $field = new Field($field);
+                }
+                $collect[$field->getAlias()] = $field;
+            }
+            $fields = $collect;
+            $select = array_map(function ($field) use ($q) {
+                $as = $q . $field->getAlias() . $q;
+                return $field->getSelectString($q) . ' AS ' . $as;
+            }, $fields);
+            $_pk = 'pk_' . md5($pk);
+            $select[] = $qpk . ' AS ' . $q . $_pk . $q;
+            if (is_bool($asc)) {
+                $order = 'ORDER BY ' . $qpk . ' ' . ($asc ? 'ASC' : 'DESC');
+            } elseif (is_array($asc)) {
+                $order = sprintf(
+                    'ORDER BY array_position(ARRAY[%s]::BIGINT[], %s::BIGINT)',
+                    implode(', ', array_map('intval', $asc)),
+                    $qpk
+                );
+            }
+            $template = sprintf(
+                'SELECT %s FROM %s %%s %s LIMIT %%s',
+                implode(', ', $select),
+                $q . $table . $q,
+                $order
+            );
+            if ($where !== null && !$where instanceof WhereCondition) {
+                $where = new WhereCondition($where);
+            }
+            $min = isset($min, $max) ? $min : 1;
+            [$op1, $op2] = $asc ? ['>', '<='] : ['<', '>='];
+            while ($limit > 0) {
+                $_where = $where !== null ? clone $where : new WhereCondition();
+                if (($asc === true && $min !== null) || ($asc === false && $max !== null)) {
+                    $first = $first ?? true;
+                    $_where->append($pk, $asc ? $min : $max, $op1 . ($first ? '=' : ''));
+                }
+                if (($asc === true && $max !== null) || ($asc === false && $min !== null)) {
+                    $_where->append($pk, $asc ? $max : $min, $op2);
+                }
+                [$_where, $_args] = $_where->stringify($q);
+                $lim = min($limit, $iterator_chunk_size);
+                $sql = sprintf($template, $_where, $lim);
+                $all = yield $this->all($sql, ...$_args);
+                $c = count($all);
+                $limit -= $c;
+                foreach ($all as $row) {
+                    $id = $row[$_pk];
+                    unset($row[$_pk]);
+                    foreach ($row as $k => &$v) {
+                        $f = $fields[$k];
+                        $f->importValue($v);
+                        $v = $returnFields ? clone $f : $f->getValue();
+                    }
+                    unset($v);
+                    yield $emit([$id, $row]);
+                }
+                if (!$c || $c < $lim) {
+                    break;
+                }
+                ${$asc ? 'min' : 'max'} = $id;
+                $first = false;
+            }
+        };
+        return new Iterator($emit);
+    }
 
-    // /**
-    //  * @param string $table
-    //  * @param array  $ids
-    //  * @param array  $params (optional)
-    //  *
-    //  * @return Emitter
-    //  */
-    // public function get(string $table, array $ids, array $params = []): Emitter
-    // {
-    //     $emitter = new Emitter();
-    //     $coroutine = \Amp\call(function ($table, $ids, $params, $emitter) {
-    //         $params += [
-    //             'pk' => null,
-    //             'fields' => null,
-    //             'returnFields' => false,
-    //             'order' => false,
-    //             'config' => [],
-    //         ];
-    //         [
-    //             'pk' => $pk,
-    //             'fields' => $fields,
-    //             'returnFields' => $returnFields,
-    //             'order' => $order,
-    //             'config' => $config,
-    //         ] = $params;
-    //         $config += $this->config;
-    //         [
-    //             'iterator_chunk_size' => $iterator_chunk_size,
-    //         ] = $config;
-    //         $fields = $fields ?? yield $this->fields($table);
-    //         $pk = $pk ?? yield $this->pk($table);
-    //         if ($pk === null || count($pk) !== 1) {
-    //             return;
-    //         }
-    //         [$pk] = $pk;
-    //         foreach (array_chunk($ids, $iterator_chunk_size) as $chunk) {
-    //             $_ = $this->iterate($table, [
-    //                 'where' => new Condition([$pk => $chunk]),
-    //                 'pk' => [$pk],
-    //                 'fields' => $fields,
-    //                 'returnFields' => $returnFields,
-    //                 'limit' => $iterator_chunk_size,
-    //                 'config' => compact('iterator_chunk_size'),
-    //                 'order' => $order,
-    //             ]);
-    //             while (($value = yield $_->pull()) !== null) {
-    //                 yield $emitter->push($value);
-    //             }
-    //             // yield $emitter->from($_);
-    //             // while (($value = yield $emitter->pull()) !== null) {
-    //             //     yield $emitter->emit($iterator->getCurrent());
-    //             // }
-    //         }
-    //     }, $table, $ids, $params, $emitter);
-    //     $coroutine->onResolve(function () use ($emitter) {
-    //         $emitter->finish();
-    //     });
-    //     return $emitter;
-    //     // $coroutine->onResolve(function ($exception) use (&$emitter) {
-    //     //     if ($exception) {
-    //     //         $emitter->fail($exception);
-    //     //         $emitter = null;
-    //     //     } else {
-    //     //         $emitter->complete();
-    //     //     }
-    //     // });
-    //     // $emit = function ($emit) use ($table, $ids, $params) {
+    /**
+     * @param string $table
+     * @param array  $ids
+     * @param array  $params (optional)
+     *
+     * @return Iterator
+     */
+    public function get(string $table, array $ids, array $params = []): Iterator
+    {
+        $emit = function ($emit) use ($table, $ids, $params) {
+            $params += [
+                'pk' => null,
+                'fields' => null,
+                'returnFields' => false,
+                'config' => [],
+            ];
+            [
+                'pk' => $pk,
+                'fields' => $fields,
+                'returnFields' => $returnFields,
+                'config' => $config,
+            ] = $params;
+            $config += $this->config;
+            [
+                'iterator_chunk_size' => $iterator_chunk_size,
+            ] = $config;
+            $fields = $fields ?? yield $this->fields($table);
+            $pk = $pk ?? yield $this->pk($table);
+            if ($pk === null || count($pk) !== 1) {
+                return;
+            }
+            [$pk] = $pk;
+            foreach (array_chunk($ids, $iterator_chunk_size) as $chunk) {
+                $iterator = $this->iterate($table, [
+                    'where' => new WhereCondition([$pk => $chunk]),
+                    'pk' => [$pk],
+                    'fields' => $fields,
+                    'returnFields' => $returnFields,
+                    'limit' => $iterator_chunk_size,
+                    'config' => compact('iterator_chunk_size'),
+                    'asc' => $chunk,
+                ]);
+                while (yield $iterator->advance()) {
+                    yield $emit($iterator->getCurrent());
+                }
+            }
+        };
+        return new Iterator($emit);
+        // $coroutine->onResolve(function ($exception) use (&$emitter) {
+        //     if ($exception) {
+        //         $emitter->fail($exception);
+        //         $emitter = null;
+        //     } else {
+        //         $emitter->complete();
+        //     }
+        // });
+        // $emit = function ($emit) use ($table, $ids, $params) {
             
-    //     // };
-    //     // return new Producer($emit);
-    // }
+        // };
+        // return new Producer($emit);
+    }
 
-    // /**
-    //  * @param int $min
-    //  * @param int $max
-    //  * @param int $n
-    //  *
-    //  * @return array
-    //  */
-    // private function getIntervalsForRandIterator(int $min, int $max, int $n): array
-    // {
-    //     $inc = ($max - $min + 1) / $n;
-    //     $intervals = [];
-    //     for ($i = 0; $i < $n; $i++) {
-    //         $one = (int) floor($min);
-    //         $two = (int) floor($min + $inc - 1E-6);
-    //         $one = $i > 0 && $one === $extwo ? $one + 1 : $one;
-    //         $one = $one > $two ? $one - 1 : $one;
-    //         $intervals[] = [$one, $two];
-    //         $min += $inc;
-    //         $extwo = $two;
-    //     }
-    //     return $intervals;
-    // }
-
-    
-
-    
-
-    
-
-    
+    /**
+     * @param int $min
+     * @param int $max
+     * @param int $n
+     *
+     * @return array
+     */
+    private function getIntervalsForRandIterator(int $min, int $max, int $n): array
+    {
+        $inc = ($max - $min + 1) / $n;
+        $intervals = [];
+        for ($i = 0; $i < $n; $i++) {
+            $one = (int) floor($min);
+            $two = (int) floor($min + $inc - 1E-6);
+            $one = $i > 0 && $one === $extwo ? $one + 1 : $one;
+            $one = $one > $two ? $one - 1 : $one;
+            $intervals[] = [$one, $two];
+            $min += $inc;
+            $extwo = $two;
+        }
+        return $intervals;
+    }
 
     /**
      * @param AbstractType $type

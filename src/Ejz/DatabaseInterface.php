@@ -3,7 +3,6 @@
 namespace Ejz;
 
 use Amp\Promise;
-use Amp\Iterator;
 
 interface DatabaseInterface
 {
@@ -195,16 +194,16 @@ interface DatabaseInterface
      * @param string $table
      * @param array  $params (optional)
      *
-     * @return Emitter
+     * @return Iterator
      */
-    // public function iterate(string $table, array $params = []): Emitter;
+    public function iterate(string $table, array $params = []): Iterator;
 
-    // /**
-    //  * @param string $table
-    //  * @param array  $ids
-    //  * @param array  $params (optional)
-    //  *
-    //  * @return Emitter
-    //  */
-    // public function get(string $table, array $ids, array $params = []): Emitter;
+    /**
+     * @param string $table
+     * @param array  $ids
+     * @param array  $params (optional)
+     *
+     * @return Iterator
+     */
+    public function get(string $table, array $ids, array $params = []): Iterator;
 }

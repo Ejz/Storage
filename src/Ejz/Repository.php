@@ -708,61 +708,16 @@ class Repository implements NameInterface
         return $iterator;
     }
 
-    /**
-     * @param array  $iterators
-     * @param string $cursor
-     *
-     * @return Emitter
-     */
-    public function getSearchIterator(array $iterators): Emitter
-    {
-        $emitter = new Emitter();
-        $emitter->setContext(['emitters' => $iterators]);
-        $coroutine = \Amp\call(function ($iterators, $emitter) {
-            $score = [$this, 'getSortScore'];
-            $values = [];
-            $state = [];
-            $ids = [];
-            while (true) {
-                do {
-                    $results = yield array_map(function ($iterator) {
-                        return $iterator->pull();
-                    }, $diff = array_diff_key($iterators, $values));
-                    foreach ($results as $key => $value) {
-                        if ($value === null) {
-                            unset($iterators[$key]);
-                            unset($diff[$key]);
-                        } elseif (!isset($ids[$value[0]])) {
-                            $ids[$value[0]] = true;
-                            $values[$key] = $value;
-                            $state[$key] = $value[0];
-                            unset($diff[$key]);
-                        }
-                    }
-                } while ($diff);
-                if (!$values) {
-                    break;
-                }
-                uasort($values, function ($v1, $v2) use ($score) {
-                    $s1 = (int) $score($v1[1]);
-                    $s2 = (int) $score($v2[1]);
-                    if ($s1 === $s2) {
-                        return $v1[0] - $v2[0];
-                    }
-                    return $s2 - $s1;
-                });
-                $key = key($values);
-                $emitter->setContext($state, 'ids');
-                yield $emitter->push($values[$key]);
-                unset($values[$key], $state[$key]);
-                $emitter->setContext($state, 'ids');
-            }
-        }, $iterators, $emitter);
-        $coroutine->onResolve(function ($e) use ($emitter) {
-            $emitter->finish();
-        });
-        return $emitter;
-    }
+    // *
+    //  * @param array  $iterators
+    //  * @param string $cursor
+    //  *
+    //  * @return Emitter
+     
+    // public function getSearchIterator(array $iterators): Emitter
+    // {
+        
+    // }
 
     /**
      * @param array $scores

@@ -8,9 +8,9 @@ class WhereCondition
     private $conditions;
 
     /**
-     * @param array $conditions
+     * @param array $conditions (optional)
      */
-    public function __construct(array $conditions)
+    public function __construct(array $conditions = [])
     {
         if (count($conditions) === count(array_filter(array_keys($conditions), 'is_string'))) {
             $conditions = array_map(null, array_keys($conditions), array_values($conditions));
