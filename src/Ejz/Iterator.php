@@ -14,10 +14,32 @@ class Iterator implements \Amp\Iterator, \Iterator
     /** @var ?bool */
     private $next;
 
+    /** @var array */
+    private $context;
+
+    /**
+     * @param mixed $iterator (optional)
+     */
+    public function __construct($iterator = null)
+    {
+        if ($iterator !== null) {
+            $this->setIterator($iterator);
+        }
+        $this->context = [];
+    }
+
+    /**
+     * @return \Amp\Iterator
+     */
+    public function getIterator(): \Amp\Iterator
+    {
+        return $this->iterator;
+    }
+
     /**
      * @param mixed $iterator
      */
-    public function __construct($iterator)
+    public function setIterator($iterator)
     {
         if (!is_callable($iterator)) {
             $_ = $iterator;
@@ -28,6 +50,7 @@ class Iterator implements \Amp\Iterator, \Iterator
             };
         }
         $this->iterator = new \Amp\Producer($iterator);
+        $this->next = null;
     }
 
     /**
@@ -92,6 +115,27 @@ class Iterator implements \Amp\Iterator, \Iterator
     }
 
     /**
+     * @return array
+     */
+    public function getContext(): array
+    {
+        return $this->context;
+    }
+
+    /**
+     * @param mixed   $value
+     * @param ?string $key   (optional)
+     */
+    public function setContext($value, ?string $key = null)
+    {
+        if ($key === null) {
+            $this->context = $value;
+        } else {
+            $this->context[$key] = $value;
+        }
+    }
+
+    /**
      * @param array     $iterators
      * @param ?callable $sort      (optional)
      *
@@ -133,6 +177,22 @@ class Iterator implements \Amp\Iterator, \Iterator
                 }
                 yield $emit($values[$key]);
                 unset($values[$key]);
+            }
+        };
+        return new self($emit);
+    }
+
+    /**
+     * @param self     $iterator
+     * @param callable $map
+     *
+     * @return self
+     */
+    public static function map(self $iterator, callable $map): self
+    {
+        $emit = function ($emit) use ($iterator, $map) {
+            while (yield $iterator->advance()) {
+                yield $emit($map($iterator->getCurrent()));
             }
         };
         return new self($emit);

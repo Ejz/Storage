@@ -7,6 +7,8 @@ use RuntimeException;
 
 class AbstractBean
 {
+    use SyncTrait;
+
     /** @var Repository */
     protected $_repository;
 
@@ -21,9 +23,6 @@ class AbstractBean
 
     /** @var string */
     private const ERROR_INVALID_FIELD = 'ERROR_INVALID_FIELD: %s';
-
-    /** @var string */
-    private const METHOD_NOT_FOUND = 'METHOD_NOT_FOUND: %s';
 
     /**
      * @param Repository $repository
@@ -73,10 +72,32 @@ class AbstractBean
     /**
      * @return array
      */
+    public function getSlaveFields(): array
+    {
+        return array_filter($this->_fields, function ($field) {
+            return $field->isSlave();
+        });
+    }
+
+    /**
+     * @return array
+     */
     public function getValues(): array
     {
         $values = [];
-        foreach ($this->_fields as $name => $field) {
+        foreach ($this->getFields() as $name => $field) {
+            $values[$name] = $field->getValue();
+        }
+        return $values;
+    }
+
+    /**
+     * @return array
+     */
+    public function getSlaveValues(): array
+    {
+        $values = [];
+        foreach ($this->getSlaveFields() as $name => $field) {
             $values[$name] = $field->getValue();
         }
         return $values;
@@ -130,20 +151,5 @@ class AbstractBean
         if (!isset($this->_fields[$name])) {
             throw new RuntimeException(sprintf(self::ERROR_INVALID_FIELD, $name));
         }
-    }
-
-    /**
-     * @param string $name
-     * @param array  $arguments
-     *
-     * @return mixed
-     */
-    public function __call(string $name, array $arguments)
-    {
-        if (substr($name, -4) === 'Sync') {
-            $name = substr($name, 0, -4);
-            return Promise\wait($this->$name(...$arguments));
-        }
-        throw new RuntimeException(sprintf(self::METHOD_NOT_FOUND, $name));
     }
 }

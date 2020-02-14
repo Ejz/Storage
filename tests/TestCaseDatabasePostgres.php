@@ -249,7 +249,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
         $this->assertTrue($db->fieldExistsSync('tt', 'f1'));
         $f = new Field('f1');
         $f->setValue('foo');
-        $id = $db->insertSync('tt', 'tt_id', [$f]);
+        $id = $db->insertSync('tt', 'tt_id', null, [$f]);
         $val = $db->valSync('SELECT f1 FROM tt WHERE tt_id = ?', $id);
         $this->assertEquals('foo', $val);
         $f->setValue('bar');
@@ -324,7 +324,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
         $db->createSync('tt', 'tt_id', 1, 1, [$f]);
         foreach (range(1, 500) as $_) {
             $f->setValue(mt_rand(1, 10));
-            $db->insertSync('tt', 'tt_id', [$f]);
+            $db->insertSync('tt', 'tt_id', null, [$f]);
         }
         $params = ['where' => ['str' => mt_rand(1, 10)]];
         $cnt = count(iterator_to_array($db->iterate('tt', $params)));

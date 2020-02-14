@@ -109,29 +109,5 @@ class Pool
         });
     }
 
-    public static function convertNotationToFilter($notation, $negate = false)
-    {
-        return function ($name, $names) use ($notation, $negate) {
-            $idx = array_search($name, $names);
-            foreach (explode(',', $notation) as $n) {
-                $neg = $negate;
-                if (strpos($n, '!') === 0) {
-                    $neg = !$neg;
-                    $n = substr($n, 1);
-                }
-                $trig =
-                    ($n === '*') ||
-                    (is_numeric($n) && $n == $idx) ||
-                    (!is_numeric($n) && $n === $name)
-                ;
-                if ($trig) {
-                    return !$neg;
-                }
-                if  ($neg) {
-                    return true;
-                }
-            }
-            return false;
-        };
-    }
+    
 }

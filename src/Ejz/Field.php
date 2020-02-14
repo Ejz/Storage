@@ -17,6 +17,9 @@ class Field
     /** @var mixed */
     private $value;
 
+    /** @var bool */
+    private $slave;
+
     /**
      * @param string        $name
      * @param ?AbstractType $type  (optional)
@@ -28,6 +31,7 @@ class Field
         $this->type = $type ?? Type::default(true);
         $this->alias = $alias ?? $this->name;
         $this->setValue(null);
+        $this->slave = false;
     }
 
     /**
@@ -110,5 +114,16 @@ class Field
     public function getType(): AbstractType
     {
         return $this->type;
+    }
+
+    /**
+     * @param ?bool $slave (optional)
+     *
+     * @return bool
+     */
+    public function isSlave(?bool $slave = null): bool
+    {
+        $this->slave = $slave ?? $this->slave;
+        return $this->slave;
     }
 }

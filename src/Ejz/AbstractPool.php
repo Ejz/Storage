@@ -20,7 +20,6 @@ class AbstractPool implements PoolInterface
         $this->pool = [];
         foreach ($pool as $object) {
             if (!$this->checkObject($object)) {
-                var_dump($object);
                 throw new RuntimeException(self::ERROR_INVALID_OBJECT);
             }
             $this->pool[$object->getName()] = $object;
@@ -59,7 +58,7 @@ class AbstractPool implements PoolInterface
     /**
      * @param mixed $filter
      *
-     * @return self
+     * @return PoolInterface
      */
     public function filter($filter): PoolInterface
     {
@@ -74,7 +73,7 @@ class AbstractPool implements PoolInterface
                 $pool[] = $object;
             }
         }
-        return new self($pool);
+        return new static($pool);
     }
 
     /**

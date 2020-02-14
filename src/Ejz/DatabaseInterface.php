@@ -155,11 +155,19 @@ interface DatabaseInterface
     /**
      * @param string $table
      * @param string $pk
+     * @param ?int   $int    (optional)
      * @param array  $fields (optional)
      *
      * @return Promise
      */
-    public function insert(string $table, string $pk, array $fields = []): Promise;
+    public function insert(string $table, string $pk, ?int $id = null, array $fields = []): Promise;
+
+    /**
+     * @param string $table
+     *
+     * @return Promise
+     */
+    public function getNextId(string $table): Promise;
 
     /**
      * @param string $table

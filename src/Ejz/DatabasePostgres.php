@@ -429,7 +429,7 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
      * @param int    $pkIncrement (optional)
      * @param array  $fields      (optional)
      * @param array  $indexes     (optional)
-     * @param array  $foreignKeys (optional)
+     * @param array  $fks         (optional)
      *
      * @return Promise
      */
@@ -440,7 +440,7 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
         int $pkIncrement = 1,
         array $fields = [],
         array $indexes = [],
-        array $foreignKeys = []
+        array $fks = []
     ): Promise {
         return \Amp\call(function (...$args) {
             $commands = $this->getCreateCommands(...$args);
@@ -449,7 +449,7 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
             }
         },
             $table, $pk, $pkStart, $pkIncrement,
-            $fields, $indexes, $foreignKeys
+            $fields, $indexes, $fks
         );
     }
 
@@ -460,7 +460,7 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
      * @param int    $pkIncrement
      * @param array  $fields
      * @param array  $indexes
-     * @param array  $foreignKeys
+     * @param array  $fks
      *
      * @return array
      */
@@ -471,7 +471,7 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
         int $pkIncrement,
         array $fields,
         array $indexes,
-        array $foreignKeys
+        array $fks
     ): array {
         $q = $this->config['quote'];
         $enq = function ($fields) use ($q) {
@@ -496,8 +496,8 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
         // ADD PRIMARY KEY
         $commands[] = "
             ALTER TABLE {$q}{$table}{$q}
-            ADD COLUMN {$q}{$pk}{$q} BIGINT DEFAULT
-            nextval('{$sequence}'::regclass) NOT NULL
+            ADD COLUMN {$q}{$pk}{$q} BIGINT
+            DEFAULT 0 NOT NULL
         ";
         $_pk = sprintf(self::PK_CONSTRAINT_NAME, $table);
         $commands[] = "
@@ -530,11 +530,11 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
             ";
         }
         // FOREIGN KEYS
-        foreach ($foreignKeys as $foreignKey) {
-            $parentTable = $foreignKey->getParentTable();
-            $parentFields = $foreignKey->getParentFields();
-            $childFields = $foreignKey->getChildFields();
-            $_fk = sprintf(self::FOREIGN_KEY_NAME, $table, (string) $foreignKey);
+        foreach ($fks as $fk) {
+            $parentTable = $fk->getParentTable();
+            $parentFields = $fk->getParentFields();
+            $childFields = $fk->getChildFields();
+            $_fk = sprintf(self::FOREIGN_KEY_NAME, $table, (string) $fk);
             $commands[] = "
                 ALTER TABLE {$q}{$table}{$q} ADD CONSTRAINT {$q}{$_fk}{$q}
                 FOREIGN KEY ({$enq($childFields)})
@@ -549,16 +549,18 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
     /**
      * @param string $table
      * @param string $pk
-     * @param array  $fields     (optional)
+     * @param ?int   $int    (optional)
+     * @param array  $fields (optional)
      *
      * @return Promise
      */
-    public function insert(string $table, string $pk, array $fields = []): Promise
+    public function insert(string $table, string $pk, ?int $id = null, array $fields = []): Promise
     {
-        return \Amp\call(function (...$args) {
-            [$cmd, $args] = $this->getInsertCommand(...$args);
+        return \Amp\call(function ($table, $pk, $id, $fields) {
+            $id = $id ?? yield $this->getNextId($table);
+            [$cmd, $args] = $this->getInsertCommand($table, $pk, $id, $fields);
             return yield $this->val($cmd, ...$args);
-        }, $table, $pk, $fields);
+        }, $table, $pk, $id, $fields);
     }
 
     /**
@@ -568,10 +570,10 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
      *
      * @return array
      */
-    private function getInsertCommand(string $table, string $pk, array $fields): array
+    private function getInsertCommand(string $table, string $pk, int $id, array $fields): array
     {
         $q = $this->config['quote'];
-        [$columns, $values, $args] = [[], [], []];
+        [$columns, $values, $args] = [[$q . $pk . $q], ['?'], [$id]];
         foreach ($fields as $field) {
             $columns[] = $q . $field->getName() . $q;
             $values[] = $field->getInsertString();
@@ -579,9 +581,23 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
         }
         $columns = implode(', ', $columns);
         $values = implode(', ', $values);
-        $insert = ($columns && $values) ? "({$columns}) VALUES ({$values})" : 'DEFAULT VALUES';
-        $command = "INSERT INTO {$q}{$table}{$q} {$insert} RETURNING {$q}{$pk}{$q}";
+        $command = "
+            INSERT INTO {$q}{$table}{$q}
+            ({$columns}) VALUES ({$values})
+            RETURNING {$q}{$pk}{$q}
+        ";
         return [$command, $args];
+    }
+
+    /**
+     * @param string $table
+     *
+     * @return Promise
+     */
+    public function getNextId(string $table): Promise
+    {
+        $sequence = sprintf(self::SEQUENCE_NAME, $table);
+        return $this->val("SELECT nextval('{$sequence}'::regclass)");
     }
 
     /**
@@ -880,18 +896,6 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
             }
         };
         return new Iterator($emit);
-        // $coroutine->onResolve(function ($exception) use (&$emitter) {
-        //     if ($exception) {
-        //         $emitter->fail($exception);
-        //         $emitter = null;
-        //     } else {
-        //         $emitter->complete();
-        //     }
-        // });
-        // $emit = function ($emit) use ($table, $ids, $params) {
-            
-        // };
-        // return new Producer($emit);
     }
 
     /**
