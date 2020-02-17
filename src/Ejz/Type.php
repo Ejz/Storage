@@ -160,4 +160,46 @@ class Type
     {
         return new Type\TypeCompressedBinary($nullable);
     }
+
+    /**
+     * @param string $separator (optional)
+     *
+     * @return Type\AbstractType
+     */
+    public static function bitmapArray(string $separator = '|'): Type\AbstractType
+    {
+        return new Type\TypeBitmapArray($separator);
+    }
+
+    /**
+     * @return Type\AbstractType
+     */
+    public static function bitmapString(): Type\AbstractType
+    {
+        return new Type\TypeBitmapString();
+    }
+
+    /**
+     * @return Type\AbstractType
+     */
+    public static function bitmapInt(): Type\AbstractType
+    {
+        return new Type\TypeBitmapInt();
+    }
+
+    /**
+     * @return Type\AbstractType
+     */
+    public static function bitmapDate(): Type\AbstractType
+    {
+        return new Type\TypeBitmapDate();
+    }
+
+    /**
+     * @return Type\AbstractType
+     */
+    public static function bitmapDateTime(): Type\AbstractType
+    {
+        return new Type\TypeBitmapDateTime();
+    }
 }

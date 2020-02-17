@@ -20,7 +20,7 @@ class Bitmap implements NameInterface, BitmapInterface
     protected $config;
 
     /** @var string */
-    private const ID_FIELD = 'id';
+    public const ID_FIELD = 'id';
 
     /**
      * @param string      $name
@@ -31,7 +31,7 @@ class Bitmap implements NameInterface, BitmapInterface
         $this->setName($name);
         $this->client = $client;
         $this->config = $config + [
-            'iterator_chunk_size' => 100,
+            'iterator_chunk_size' => 30,
         ];
     }
 
@@ -83,8 +83,8 @@ class Bitmap implements NameInterface, BitmapInterface
     {
         return \Amp\call(function ($index, $fields) {
             $args = ['FIELDS'];
-            foreach ($fields as $name => $field) {
-                $args[] = $name;
+            foreach ($fields as $field) {
+                $args[] = $field->getName();
                 $type = $field->getType();
                 $args[] = $this->getFieldTypeString($type);
                 if ($type->is(Type::bitmapForeignKey())) {
@@ -140,6 +140,7 @@ class Bitmap implements NameInterface, BitmapInterface
                 'cursor' => [],
                 'sortby' => self::ID_FIELD,
                 'asc' => true,
+                'fks' => [],
                 'config' => [],
             ];
             [
@@ -147,27 +148,35 @@ class Bitmap implements NameInterface, BitmapInterface
                 'cursor' => $cursor,
                 'sortby' => $sortby,
                 'asc' => $asc,
+                'fks' => $fks,
                 'config' => $config,
             ] = $params;
+            $fks = (array) $fks;
             $config += $this->config;
             [
                 'iterator_chunk_size' => $iterator_chunk_size,
             ] = $config;
+            // return;
             if (is_string($query)) {
-                $ret = $this->client->SEARCH(
+                $args = [
                     $index,
                     $query,
                     'SORTBY',
                     $sortby,
                     $asc ? 'ASC' : 'DESC',
-                    'WITHCURSOR'
-                );
+                    'WITHCURSOR',
+                ];
+                foreach ($fks as $fk) {
+                    $args[] = 'APPENDFK';
+                    $args[] = $fk;
+                }
+                $ret = $this->client->SEARCH(...$args);
                 [$size, $cursor] = [$ret[0], $ret[1] ?? null];
             } else {
-                ['size' => $size, 'cursor' => $cursor, 'ids' => $ids] = $query;
+                ['size' => $size, 'cursor' => $cursor, 'ids' => $ids, 'fks' => $fks] = $query;
             }
-            $iterator->setContext(compact('cursor', 'ids', 'size'));
-            while ($cursor !== null) {
+            $iterator->setContext(compact('cursor', 'ids', 'size', 'fks'));
+            while ($cursor !== null || isset($ids)) {
                 if (!isset($ids)) {
                     $ids = $this->client->CURSOR($cursor, 'LIMIT', $iterator_chunk_size);
                     $iterator->setContext($ids, 'ids');
@@ -176,8 +185,11 @@ class Bitmap implements NameInterface, BitmapInterface
                         $iterator->setContext($cursor, 'cursor');
                     }
                 }
-                while (($id = array_shift($ids)) !== null) {
-                    yield $emit([$id, null]);
+                while (($value = array_shift($ids)) !== null) {
+                    var_dump($value);
+                    $value = $fks ? $value : [$value];
+                    $id = array_shift($value);
+                    yield $emit([$id, $value]);
                     $iterator->setContext($ids, 'ids');
                 }
                 $ids = null;
@@ -199,6 +211,11 @@ class Bitmap implements NameInterface, BitmapInterface
         if ($map === null) {
             $map = [
                 (string) Type::bitmapBool() => 'BOOLEAN',
+                (string) Type::bitmapDate() => 'DATE',
+                (string) Type::bitmapDateTime() => 'DATETIME',
+                (string) Type::bitmapString() => 'STRING',
+                (string) Type::bitmapInt() => 'INTEGER',
+                (string) Type::bitmapArray() => 'ARRAY',
                 (string) Type::bitmapForeignKey() => 'FOREIGNKEY',
             ];
         }

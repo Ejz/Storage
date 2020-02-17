@@ -30,11 +30,11 @@ class WhereCondition
     }
 
     /**
-     * @param string $quote
+     * @param string $quote (optional)
      *
      * @return array
      */
-    public function stringify(string $quote): array
+    public function stringify(string $quote = ''): array
     {
         $where = [];
         $args = [];

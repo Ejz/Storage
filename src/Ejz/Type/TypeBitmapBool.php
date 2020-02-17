@@ -18,6 +18,6 @@ class TypeBitmapBool extends TypeBool
      */
     public function export($value)
     {
-        return $value ? '1' : '0';
+        return $value === null ? null : ($value ? '1' : '0');
     }
 }

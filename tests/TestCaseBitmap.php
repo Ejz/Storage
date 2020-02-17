@@ -4,6 +4,7 @@ namespace Tests;
 
 use Ejz\Field;
 use Ejz\WhereCondition;
+use Ejz\Type;
 
 class TestCaseBitmap extends AbstractTestCase
 {
@@ -56,5 +57,23 @@ class TestCaseBitmap extends AbstractTestCase
             }
         }
         $this->assertEquals(range(1, 1000), $ids);
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_bitmap_search_fk()
+    {
+        $bm = $this->bitmapPool->random();
+        $bm->createSync('parent');
+        $fields = [new Field('fk', Type::bitmapForeignKey('parent'))];
+        $bm->createSync('child', $fields);
+        $fk = new Field('fk');
+        $fk->setValue(1);
+        $bm->addSync('child', 1, [$fk]);
+        $all = iterator_to_array($bm->search('child', [
+            'fks' => 'fk',
+        ]));
+        $this->assertTrue($all === [1 => [1]]);
     }
 }

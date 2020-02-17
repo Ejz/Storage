@@ -330,8 +330,53 @@ class TestCaseRepository extends AbstractTestCase
         $_ = iterator_to_array($repository->get([$id]));
         $this->assertTrue($_ === []);
         $id = $repository->insertSync();
-        $names = $repository->getWritableDatabasePool($id);
+        $names = $repository->getWritableDatabasePool($id)->names();
         $this->assertTrue($repository->deleteSync([$id]) === count($names));
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_repository_crud_3()
+    {
+        $repository = \Container\getRepository('t', [
+            'database' => [
+                'cluster' => 'm:0;s:*;',
+            ],
+        ]);
+        $repository->createSync();
+        $id1 = $repository->insertSync();
+        $id2 = $repository->insertSync();
+        $keys = array_keys(iterator_to_array($repository->get([$id1, 1E6, $id2])));
+        $this->assertEquals([$id1, $id2], $keys);
+        $keys = array_keys(iterator_to_array($repository->get([$id1, 1E6, $id2], ['nulls' => true])));
+        $this->assertEquals([$id1, (int) 1E6, $id2], $keys);
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_repository_crud_4()
+    {
+        $repository = \Container\getRepository('t', [
+            'database' => [
+                'cluster' => 'm:*;ms:*:id;',
+                'fields' => [
+                    'text' => Type::string(),
+                ],
+            ],
+        ]);
+        $index = $repository->getBitmapIndex();
+        $repository->createSync();
+        $id = $repository->insertSync(['text' => 'foo']);
+        foreach ($repository->iterate() as $id => $bean) {
+            $this->assertTrue(is_object($bean));
+            $this->assertTrue(is_array($bean->getValues()));
+        }
+        foreach ($repository->get([$id, 7]) as $id => $bean) {
+            $this->assertTrue(is_object($bean));
+            $this->assertTrue(is_array($bean->getValues()));
+        }
     }
 
     /**
@@ -675,25 +720,21 @@ class TestCaseRepository extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_storage_cache_1()
+    public function test_case_repository_cache_1()
     {
-        $cacheTtl = 3;
-        $tbl = 'table' . mt_rand();
-        $storage = \Container\getStorage([
-            'table' => [
-                'database' => [
-                    'table' => $tbl,
-                    'fields' => [
-                        'text1' => Type::string(),
-                    ],
-                ],
-                'cache' => [
-                    'ttl' => $cacheTtl,
-                    'fieldsToId' => ['text1'],
+        $ttl = 3;
+        $repository = \Container\getRepository('t', [
+            'database' => [
+                'cluster' => 'm:*;ms:*:id;',
+                'fields' => [
+                    'text1' => Type::string(),
                 ],
             ],
+            'cache' => [
+                'ttl' => $ttl,
+                'cacheableFields' => ['text1'],
+            ],
         ]);
-        $repository = $storage->table();
         $pk = $repository->getDatabasePk();
         $repository->createSync();
         $id = $repository->insertSync(['text1' => 'foo1']);
@@ -701,152 +742,201 @@ class TestCaseRepository extends AbstractTestCase
         $this->assertTrue($text1 === 'foo1');
         $text1 = $repository->filter(['text1' => 'foo1'])->current()->text1;
         $this->assertTrue($text1 === 'foo1');
-        $sql = "UPDATE {$tbl} SET text1 = ? WHERE {$pk} = ?";
+        $sql = "UPDATE t SET text1 = ? WHERE {$pk} = ?";
         $repository->getDatabasePool()->execSync($sql, 'bar1', $id);
         $text1 = $repository->filter(['text1' => 'foo1'])->current()->text1;
         $this->assertTrue($text1 === 'foo1');
-        sleep($cacheTtl + 1);
+        sleep($ttl + 1);
         $this->assertTrue($repository->filter(['text1' => 'foo1'])->current() === null);
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_repository_bitmap_0()
+    {
+        $repository = \Container\getRepository('t', [
+            'database' => [
+                'cluster' => 'm:*;ms:*:id;',
+                'fields' => [
+                    'boolean' => Type::string(),
+                ],
+            ],
+            'bitmap' => [
+                'cluster' => 'm:*;ms:*:id;',
+                'fields' => [
+                    'boolean' => Type::bitmapBool(),
+                ],
+            ],
+        ]);
+        $index = $repository->getBitmapIndex();
+        $repository->createSync();
+        $id = $repository->addSync(1E6);
+        $this->assertTrue($id === (int) 1E6);
+        $indexes = $repository->getBitmapPool()->indexesSync();
+        $this->assertTrue(in_array($index, current($indexes)));
+        foreach (range(1, 100) as $_) {
+            $repository->insertSync(['boolean' => mt_rand(0, 1)]);
+        }
+        $repository->populateBitmap();
+        $ex = null;
+        foreach ($repository->search('*') as $id => $bean) {
+            $ex = $ex ?? $id;
+            $this->assertTrue($id >= $ex);
+            $ex = $id;
+        }
+        $ex = null;
+        foreach ($repository->search('*', ['asc' => false]) as $id => $bean) {
+            $ex = $ex ?? $id;
+            $this->assertTrue($id <= $ex);
+            $ex = $id;
+        }
+        foreach ($repository->search('@boolean:1') as $id => $bean) {
+            $this->assertTrue(((bool) $bean->boolean) === true);
+        }
+        foreach ($repository->search('@boolean:0') as $id => $bean) {
+            $this->assertTrue(((bool) $bean->boolean) === false);
+        }
+        $_0 = $repository->search('@boolean:0')->getContext()['size'];
+        $_1 = $repository->search('@boolean:1')->getContext()['size'];
+        $this->assertTrue($_0 + $_1 === 100);
+        $this->assertTrue($_0 > 10 && $_1 > 10);
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_repository_bitmap_1()
+    {
+        $repository = \Container\getRepository('t', [
+            'database' => [
+                'cluster' => 'm:*;ms:1:id;',
+                'fields' => [
+                    'int' => Type::int(),
+                ],
+            ],
+            'bitmap' => [
+                'cluster' => 'm:*;ms:*:id;',
+                'fields' => [
+                    'int' => Type::bitmapInt(),
+                ],
+            ],
+        ]);
+        $repository->createSync();
+        $values = [];
+        foreach (range(1, 1000) as $_) {
+            $int = mt_rand(1, 100);
+            $id = $repository->insertSync(['int' => $int]);
+            $values[] = [$id, $int];
+        }
+        $idAsc = function ($filter = null) use ($values) {
+            if ($filter !== null) {
+                $values = array_filter($values, $filter);
+            }
+            uasort($values, function ($a, $b) {
+                [$id1, $val1] = $a;
+                [$id2, $val2] = $b;
+                return $id1 - $id2;
+            });
+            return array_values($values);
+        };
+        $valSort = function ($filter = null, $asc = true) use ($values) {
+            if ($filter !== null) {
+                $values = array_filter($values, $filter);
+            }
+            uasort($values, function ($a, $b) use ($asc) {
+                [$id1, $val1] = $a;
+                [$id2, $val2] = $b;
+                return (($asc ? 1 : -1) * ($val1 - $val2)) ?: $id1 - $id2;
+            });
+            return array_values($values);
+        };
+        $repository->populateBitmap();
+        //
+        $collect = [];
+        foreach ($repository->search('*') as $id => $bean) {
+            $collect[] = [$id, $bean->int];
+        }
+        $this->assertEquals($idAsc(), $collect);
+        //
+        $collect = [];
+        foreach ($repository->search('*', ['asc' => false]) as $id => $bean) {
+            $collect[] = [$id, $bean->int];
+        }
+        $this->assertEquals(array_reverse($idAsc()), $collect);
+        //
+        $collect = [];
+        foreach ($repository->search('*', ['sortby' => 'int']) as $id => $bean) {
+            $collect[] = [$id, $bean->int];
+        }
+        $this->assertEquals($valSort(), $collect);
+        //
+        $collect = [];
+        foreach ($repository->search('*', ['sortby' => 'int', 'asc' => false]) as $id => $bean) {
+            $collect[] = [$id, $bean->int];
+        }
+        $this->assertEquals($valSort(null, false), $collect);
+        //
+        $collect = [];
+        $iterator = $repository->search('*', ['sortby' => 'int', 'asc' => false]);
+        while ($iterator->advanceSync()) {
+            [$id, $bean] = $iterator->getCurrent();
+            $collect[] = [$id, $bean->int];
+            if (mt_rand(0, 1)) {
+                $iterator = $repository->search($iterator->getContext());
+            }
+        }
+        $this->assertEquals($valSort(null, false), $collect);
+        // foreach ($iterator as $id => $bean) {
+        // }
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_repository_bitmap_2()
+    {
+        $repository = \Container\getRepository('t', [
+            'database' => [
+                'cluster' => 'm:*;ms:1:id,int;',
+                'fields' => [
+                    'int' => Type::int(),
+                ],
+            ],
+            'bitmap' => [
+                'cluster' => 'm:*;ms:*:id;',
+                'fields' => [
+                    'int' => Type::bitmapInt(),
+                ],
+            ],
+        ]);
+        $repository->createSync();
+        $id1 = $repository->insertSync(['int' => 1]);
+        $id2 = $repository->insertSync(['int' => 2]);
+        $id3 = $repository->insertSync(['int' => 3]);
+        $ret = function ($context) {
+            $context['iterators'] = array_map(function ($it) {
+                return $it->getContext();
+            }, $context['iterators']);
+            return $context;
+        };
+        $repository->populateBitmap();
+        $iterator = $repository->search('*', ['sortby' => 'int', 'asc' => true]);
+        $this->assertTrue($iterator->current()->id === 1);
+        $_context = $iterator->getContext();
+        var_dump($ret($_context));
+        return;
+        // $iterator = $repository->search($iterator->getContext());
+        // $this->assertEquals($ret($_context), $ret($iterator->getContext()));
+        $this->assertTrue($iterator->current()->id === 2);
+        // $iterator = $repository->search($iterator->getContext());
+        $this->assertTrue($iterator->current()->id === 3);
     }
 
     // /**
     //  * @test
     //  */
-    // public function test_case_storage_cache_2()
-    // {
-    //     $storage = \Container\getStorage([
-    //         'table' => [
-    //             'database' => [
-    //                 'fields' => [
-    //                     'text1' => Type::string(),
-    //                 ],
-    //             ],
-    //             'cache' => [],
-    //         ],
-    //     ]);
-    //     $repository = $storage->table();
-    //     $pk = $repository->getDatabasePk();
-    //     $repository->createSync();
-    //     $id = $repository->insertSync(['text1' => 'foo']);
-    //     $bean = $repository->get([$id])->current();
-    //     $bean->text1 = 'bar';
-    //     $bean->updateSync();
-    //     $bean = $repository->get([$id])->current();
-    //     $this->assertTrue($bean->text1 === 'bar');
-    // }
-
-    // /**
-    //  * @test
-    //  */
-    // public function test_case_storage_cache_3()
-    // {
-    //     $storage = \Container\getStorage([
-    //         'table' => [
-    //             'database' => [
-    //                 'fields' => [
-    //                     'text1' => Type::string(),
-    //                 ],
-    //             ],
-    //             'cache' => [],
-    //         ],
-    //     ]);
-    //     $repository = $storage->table();
-    //     $pk = $repository->getDatabasePk();
-    //     $repository->createSync();
-    //     $id = $repository->insertSync(['text1' => 'foo']);
-    //     $bean = $repository->get([$id])->current();
-    //     $bean->deleteSync();
-    //     $bean = $repository->get([$id])->current();
-    //     $this->assertTrue($bean === null);
-    // }
-
-    
-
-    // /**
-    //  * @test
-    //  */
-    // public function test_case_storage_bitmap_1()
-    // {
-    //     $storage = \Container\getStorage([
-    //         'table' => [
-    //             'database' => [
-    //                 'fields' => [
-    //                     'boolean' => Type::bool(),
-    //                 ],
-    //             ],
-    //             'bitmap' => [
-    //                 'fields' => [
-    //                     'boolean' => Type::bitmapBool(),
-    //                 ],
-    //             ],
-    //         ],
-    //     ]);
-    //     $repository = $storage->table();
-    //     $repository->createSync();
-    //     $id = $repository->addSync(1E6);
-    //     $this->assertTrue($id === intval(1E6));
-    //     $list = $repository->getBitmapPool()->listSync();
-    //     $this->assertTrue(in_array($repository->getBitmapIndex(), current($list)));
-    //     foreach (range(1, 100) as $_) {
-    //         $this->assertTrue($repository->insertSync(['boolean' => mt_rand(0, 1)]) > 0);
-    //     }
-    //     $repository->bitmapPopulate();
-    //     $bitmap = $repository->getBitmapPool()->random();
-    //     $ids = [];
-    //     foreach ($bitmap->search($repository, '*') as $id => $bean) {
-    //         $ids[] = $id;
-    //         $this->assertTrue($id > 0);
-    //         $this->assertTrue(is_object($bean));
-    //     }
-    //     $this->assertTrue($ids === range(1, 100));
-    //     $this->assertTrue($bitmap->search($repository, '*')->getSize() === 100);
-    //     $_0 = $bitmap->search($repository, '@boolean:0')->getSize();
-    //     $_1 = $bitmap->search($repository, '@boolean:1')->getSize();
-    //     $this->assertTrue($_0 + $_1 === 100);
-    //     $this->assertTrue($_0 > 10 && $_1 > 10);
-    // }
-
-    // /**
-    //  * @test
-    //  */
-    // public function test_case_storage_bitmap_2()
-    // {
-    //     $storage = \Container\getStorage([
-    //         'table' => [
-    //             'database' => [
-    //                 'fields' => [
-    //                     'boolean' => Type::bool(),
-    //                 ],
-    //             ] + Storage::getShardsClusterConfig(),
-    //             'bitmap' => [
-    //                 'fields' => [
-    //                     'boolean' => Type::bitmapBool(),
-    //                 ],
-    //             ] + Storage::getShardsClusterConfig(),
-    //         ],
-    //     ]);
-    //     $repository = $storage->table();
-    //     $repository->createSync();
-    //     foreach (range(1, 100) as $_) {
-    //         $repository->insertSync(['boolean' => mt_rand(0, 1)]);
-    //     }
-    //     $repository->bitmapPopulate();
-    //     $this->assertTrue($repository->search('*')->getSize() === 100);
-    //     $_0 = $repository->search('@boolean:0')->getSize();
-    //     $_1 = $repository->search('@boolean:1')->getSize();
-    //     $this->assertTrue($_0 + $_1 === 100);
-    //     $this->assertTrue($_0 > 10 && $_1 > 10);
-    //     foreach ($repository->search('*') as $id => $bean) {
-    //         $ex = $ex ?? $id;
-    //         $this->assertTrue($ex <= $id);
-    //         $ex = $id;
-    //     }
-    // }
-
-    // /**
-    //  * @test
-    //  */
-    // public function test_case_storage_bitmap_3()
+    // public function test_case_repository_bitmap_3()
     // {
     //     $storage = \Container\getStorage([
     //         'table' => [
@@ -887,7 +977,7 @@ class TestCaseRepository extends AbstractTestCase
     // /**
     //  * @test
     //  */
-    // public function test_case_storage_bitmap_4()
+    // public function test_case_repository_bitmap_4()
     // {
     //     $storage = \Container\getStorage([
     //         'table' => [
@@ -979,7 +1069,7 @@ class TestCaseRepository extends AbstractTestCase
     // /**
     //  * @test
     //  */
-    // public function test_case_storage_bitmap_5()
+    // public function test_case_repository_bitmap_5()
     // {
     //     $storage = \Container\getStorage([
     //         'table' => [
@@ -1057,7 +1147,7 @@ class TestCaseRepository extends AbstractTestCase
     // /**
     //  * @test
     //  */
-    // public function test_case_storage_massive_create()
+    // public function test_case_repository_massive_create()
     // {
     //     $rnd = (bool) mt_rand(0, 1);
     //     $storage = \Container\getStorage([

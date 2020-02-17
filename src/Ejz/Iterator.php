@@ -138,14 +138,24 @@ class Iterator implements \Amp\Iterator, \Iterator
     /**
      * @param array     $iterators
      * @param ?callable $sort      (optional)
+     * @param ?callable $saver     (optional)
      *
      * @return self
      */
-    public static function merge(array $iterators, ?callable $sort = null): self
+    public static function merge(
+        array $iterators,
+        ?callable $sort = null,
+        ?callable $saver = null
+    ): self
     {
-        $emit = function ($emit) use ($iterators, $sort) {
+        if (count($iterators) === 1) {
+            return current($iterators);
+        }
+        $iterator = new self();
+        $emit = function ($emit) use ($iterators, $sort, $saver, $iterator) {
             $values = [];
             $ids = [];
+            $state = [];
             while (true) {
                 do {
                     $diff = array_diff_key($iterators, $values);
@@ -162,6 +172,7 @@ class Iterator implements \Amp\Iterator, \Iterator
                         if (!isset($ids[$value[0]])) {
                             $ids[$value[0]] = true;
                             $values[$key] = $value;
+                            $state[$key] = $value[0];
                             unset($diff[$key]);
                         }
                     }
@@ -175,11 +186,18 @@ class Iterator implements \Amp\Iterator, \Iterator
                 } else {
                     $key = array_rand($values);
                 }
+                if ($saver !== null) {
+                    $saver($iterator, $state);
+                }
                 yield $emit($values[$key]);
-                unset($values[$key]);
+                unset($values[$key], $state[$key]);
+                if ($saver !== null) {
+                    $saver($iterator, $state);
+                }
             }
         };
-        return new self($emit);
+        $iterator->setIterator($emit);
+        return $iterator;
     }
 
     /**
@@ -196,5 +214,72 @@ class Iterator implements \Amp\Iterator, \Iterator
             }
         };
         return new self($emit);
+    }
+
+    /**
+     * @param self $iterator
+     * @param int  $size
+     *
+     * @return self
+     */
+    public static function chunk(self $iterator, int $size): self
+    {
+        $emit = function ($emit) use ($iterator, $size) {
+            $collect = [];
+            while (yield $iterator->advance()) {
+                $collect[] = $iterator->getCurrent();
+                if (count($collect) === $size) {
+                    yield $emit($collect);
+                    $collect = [];
+                }
+            }
+            if ($collect) {
+                yield $emit($collect);
+            }
+        };
+        return new self($emit);
+    }
+
+    /**
+     * @param array $iterators
+     *
+     * @return self
+     */
+    public static function pair(array $iterators): self
+    {
+        $emit = function ($emit) use ($iterators) {
+            $c = count($iterators);
+            while ($c > 0) {
+                $results = yield array_map(function ($iterator) {
+                    return $iterator->advance();
+                }, $iterators);
+                if (count(array_filter($results)) !== $c) {
+                    break;
+                }
+                $results = array_map(function ($iterator) {
+                    return $iterator->getCurrent();
+                }, $iterators);
+                yield $emit(array_values($results));
+            }
+        };
+        return new self($emit);
+    }
+
+    /**
+     * @return array
+     */
+    public function getSearchState(): array
+    {
+        ['ids' => $ids, 'iterators' => $iterators] = $this->context;
+        $contexts = array_map(function ($iterator) {
+            return $iterator->getContext();
+        }, $iterators);
+        foreach ($contexts as $key => &$context) {
+            if (isset($ids[$key])) {
+                array_unshift($context, $ids[$key]);
+            }
+        }
+        unset($context);
+        return $contexts;
     }
 }
