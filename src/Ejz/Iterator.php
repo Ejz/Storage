@@ -223,4 +223,50 @@ class Iterator implements \Amp\Iterator, \Iterator, ContextInterface
         };
         return new self($emit);
     }
+
+    /**
+     * @param self $iterator
+     *
+     * @return self
+     */
+    public static function wrap(self $iterator): self
+    {
+        return self::map($iterator, function ($value) {
+            $id = array_shift($value);
+            return [$id, $value];
+        });
+    }
+
+    /**
+     * @param self     $iterator
+     * @param callable $filter
+     *
+     * @return self
+     */
+    public static function filter(self $iterator, callable $filter): self
+    {
+        $emit = function ($emit) use ($iterator, $filter) {
+            while (yield $iterator->advance()) {
+                $value = $iterator->getCurrent();
+                if ($filter($value)) {
+                    yield $emit($value);
+                }
+            }
+        };
+        return new self($emit);
+    }
+
+    /**
+     * @param self $iterator
+     * @param int  $offset
+     *
+     * @return self
+     */
+    public static function offset(self $iterator, int $offset): self
+    {
+        $position = 0;
+        return self::filter($iterator, function ($value) use (&$position, $offset) {
+            return $position++ >= $offset;
+        });
+    }
 }

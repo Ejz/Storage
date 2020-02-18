@@ -224,6 +224,9 @@ class Repository implements NameInterface, ContextInterface
                     $meta[$id] = [$ck, $ct];
                 }
                 $db = $this->getMasterDatabasePool($id)->random();
+                if ($db === null) {
+                    continue;
+                }
                 $name = $db->getName();
                 $dbs[$name] = $dbs[$name] ?? ['db' => $db, 'ids' => []];
                 $dbs[$name]['ids'][] = $id;
@@ -339,9 +342,11 @@ class Repository implements NameInterface, ContextInterface
             $pool = $this->getMasterBitmapPool($bean);
             $fields = $bean->getFields();
             $id = $bean->id;
-            $field = new Field('_names', Type::bitmapArray());
-            $field->setValue($this->getMasterDatabasePool($id)->names());
-            $fields[] = $field;
+            if ($this->hasSortScore()) {
+                $field = new Field('_names', Type::bitmapArray());
+                $field->setValue($this->getMasterDatabasePool($id)->names());
+                $fields[] = $field;
+            }
             yield $pool->add($index, $id, $fields);
             return $id;
         }, $bean);
@@ -455,7 +460,10 @@ class Repository implements NameInterface, ContextInterface
                 'pk' => [$this->getDatabasePk()],
                 'fields' => array_values($this->getDatabaseFields()),
                 'returnFields' => true,
-            ] + $params;
+            ] + $params + [
+                'asc' => true,
+            ];
+            ['asc' => $asc] = $params;
             $pool = $this->getReadableMasterDatabasePool();
             $table = $this->getDatabaseTable();
             $iterators = $pool->each(function ($database) use ($table, $params) {
@@ -463,7 +471,7 @@ class Repository implements NameInterface, ContextInterface
                 $iterator = Iterator::map($iterator, [$this, 'toDatabaseBean']);
                 return $iterator;
             });
-            $iterator = Iterator::merge($iterators, $this->getSortScoreClosure(true));
+            $iterator = Iterator::merge($iterators, $this->getSortScoreClosure($asc));
             while (yield $iterator->advance()) {
                 yield $emit($iterator->getCurrent());
             }
@@ -579,8 +587,9 @@ class Repository implements NameInterface, ContextInterface
      */
     public function search($query, array $params = []): Iterator
     {
+        $id = AbstractBean::ID;
         $params += [
-            'sortby' => Bitmap::ID_FIELD,
+            'sortby' => $id,
             'asc' => true,
             'fks' => [],
         ];
@@ -592,7 +601,7 @@ class Repository implements NameInterface, ContextInterface
         $index = $this->getBitmapIndex();
         $bitmap = $this->getReadableMasterBitmapPool()->random();
         $names = [null];
-        if ($sortby === Bitmap::ID_FIELD) {
+        if ($sortby === $id && $this->hasSortScore()) {
             $names = $this->getReadableMasterDatabasePool()->names();
         }
         $size = 0;
@@ -718,8 +727,9 @@ class Repository implements NameInterface, ContextInterface
         $this->config['bitmap']['bean'] = $this->config['bitmap']['bean'] ?? BitmapBean::class;
         //
         $getSortScore = $this->config['getSortScore'] ?? null;
-        if (!is_callable($getSortScore)) {
-            $getSortScore = function (DatabaseBean $bean) {
+        $this->config['hasSortScore'] = $_ = is_callable($getSortScore);
+        if (!$_) {
+            $getSortScore = function () {
                 return 0;
             };
         }
@@ -759,6 +769,14 @@ class Repository implements NameInterface, ContextInterface
     {
         $getSortScore = $this->config['getSortScore'];
         return $getSortScore($bean);
+    }
+
+    /**
+     * @return bool
+     */
+    public function hasSortScore(): bool
+    {
+        return $this->config['hasSortScore'];
     }
 
     /**

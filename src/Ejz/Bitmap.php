@@ -19,9 +19,6 @@ class Bitmap implements NameInterface, BitmapInterface
     /** @var array */
     protected $config;
 
-    /** @var string */
-    public const ID_FIELD = 'id';
-
     /**
      * @param string      $name
      * @param RedisClient $client
@@ -138,7 +135,7 @@ class Bitmap implements NameInterface, BitmapInterface
             $params += [
                 'query' => '*',
                 'cursor' => [],
-                'sortby' => self::ID_FIELD,
+                'sortby' => AbstractBean::ID,
                 'asc' => true,
                 'fks' => [],
             ];

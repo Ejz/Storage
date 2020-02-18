@@ -6,6 +6,7 @@ use Ejz\Type;
 use Ejz\DatabaseBean;
 use Ejz\BitmapBean;
 use Ejz\Index;
+use Ejz\Iterator;
 use Ejz\Repository;
 use Amp\Promise;
 use RuntimeException;
@@ -949,5 +950,27 @@ class TestCaseRepository extends AbstractTestCase
         $this->assertTrue($id > 0);
         $id = $repository->insertSync(['int' => 1]);
         $this->assertTrue($id === 0);
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_repository_get_if_no_database()
+    {
+        $repository = \Container\getRepository('t', [
+            'database' => [
+            ],
+            'bitmap' => [
+                'cluster' => 'm:*;',
+            ],
+        ]);
+        $repository->createSync();
+        $repository->addSync(1);
+        foreach ($repository->search('*') as $id => $bean) {
+            $this->assertTrue($id > 0 && $bean === null);
+        }
+        foreach (Iterator::wrap($repository->search('*')) as $id => $beans) {
+            $this->assertTrue($id > 0 && $beans === [null] && $beans[0] === null);
+        }
     }
 }

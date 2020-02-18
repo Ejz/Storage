@@ -24,6 +24,9 @@ class AbstractBean
     /** @var string */
     private const ERROR_INVALID_FIELD = 'ERROR_INVALID_FIELD: %s';
 
+    /** @var string */
+    public const ID = 'id';
+
     /**
      * @param Repository $repository
      * @param ?int       $id
@@ -119,7 +122,7 @@ class AbstractBean
      */
     public function __set(string $name, $value)
     {
-        if ($name === 'id') {
+        if ($name === self::ID) {
             $this->_id = $value;
             return;
         }
@@ -136,7 +139,7 @@ class AbstractBean
      */
     public function __get(string $name)
     {
-        if ($name === 'id') {
+        if ($name === self::ID) {
             return $this->_id;
         }
         $this->checkField($name);
