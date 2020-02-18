@@ -179,12 +179,14 @@ class Repository implements NameInterface, ContextInterface
                 return 0;
             }
             $slave = $this->getSlaveDatabasePool($id);
+            $promises = [];
             foreach ([$master, $slave] as $i => $pool) {
                 $isMaster = $i === 0;
                 $fields = $isMaster ? $bean->getFields() : $bean->getSlaveFields();
-                yield $pool->insert($table, $pk, $id, $fields);
+                $promises += $pool->insert($table, $pk, $id, $fields);
             }
-            return $id;
+            [$errors] = yield Promise\any($promises);
+            return $errors ? 0 : $id;
         }, $bean);
     }
 
@@ -643,9 +645,6 @@ class Repository implements NameInterface, ContextInterface
      */
     private function normalize()
     {
-        $this->config['aliases'] = $this->config['aliases'] ?? [];
-        $this->config['aliases'] = (array) $this->config['aliases'];
-        //
         $cluster = 'm:!*;ms:1:id;s:!*;ss:1:id;';
         $this->config['database'] = $this->config['database'] ?? [];
         $this->config['bitmap'] = $this->config['bitmap'] ?? [];
@@ -1171,17 +1170,6 @@ class Repository implements NameInterface, ContextInterface
             $parent = $field->getType()->getParentTable();
             return $this->getContext()['repositoryPool']->get($parent);
         }
-    }
-
-    /**
-     * @return array
-     */
-    public function getAliases(): array
-    {
-        $aliases = $this->config['aliases'];
-        $aliases[] = $this->getDatabaseTable();
-        $aliases[] = $this->getBitmapIndex();
-        return $aliases;
     }
 
     /**

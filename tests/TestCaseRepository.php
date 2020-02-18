@@ -922,264 +922,32 @@ class TestCaseRepository extends AbstractTestCase
             [$id1, $bean1, $id2, $bean2] = $iterator->getCurrent();
             $this->assertTrue($bean1->fk === $id2);
         }
-        // foreach ($iterator as $id => $bean) {
-        //     var_dump($bean);
-        //     break;
-        // }
-        // $id1 = $repository->insertSync(['int' => 1]);
-        // $id2 = $repository->insertSync(['int' => 2]);
-        // $id3 = $repository->insertSync(['int' => 3]);
-        // $ret = function ($context) {
-        //     $context['iterators'] = array_map(function ($it) {
-        //         return $it->getContext();
-        //     }, $context['iterators']);
-        //     return $context;
-        // };
-        // $this->assertTrue($iterator->current()->id === 1);
-        // $_context = $iterator->getContext();
-        // var_dump($ret($_context));
-        // return;
-        // // $iterator = $repository->search($iterator->getContext());
-        // // $this->assertEquals($ret($_context), $ret($iterator->getContext()));
-        // $this->assertTrue($iterator->current()->id === 2);
-        // // $iterator = $repository->search($iterator->getContext());
-        // $this->assertTrue($iterator->current()->id === 3);
     }
 
-    // /**
-    //  * @test
-    //  */
-    // public function test_case_repository_bitmap_3()
-    // {
-    //     $storage = \Container\getStorage([
-    //         'table' => [
-    //             'database' => [
-    //                 'fields' => [
-    //                     'boolean' => Type::bool(),
-    //                     'int' => Type::int(),
-    //                 ],
-    //                 'getSortScore' => function ($bean) {
-    //                     return $bean->int;
-    //                 },
-    //             ] + Storage::getShardsClusterConfig(),
-    //             'bitmap' => [
-    //                 'fields' => [
-    //                     'boolean' => Type::bitmapBool(),
-    //                 ],
-    //             ] + Storage::getShardsClusterConfig(),
-    //         ],
-    //     ]);
-    //     $repository = $storage->table();
-    //     $table->createSync();
-    //     foreach (range(1, 100) as $_) {
-    //         $table->insertSync([
-    //             'boolean' => mt_rand(0, 1),
-    //             'int' => mt_rand(1, 100),
-    //         ]);
-    //     }
-    //     $table->sort();
-    //     $table->bitmapPopulate();
-    //     $query = mt_rand(0, 1) ? '*' : '@boolean:' . mt_rand(0, 1);
-    //     foreach ($table->search($query) as $id => $bean) {
-    //         $ex = $ex ?? $bean->int;
-    //         $this->assertTrue($bean->int <= $ex, "{$bean->int} <= {$ex}");
-    //         $ex = $bean->int;
-    //     }
-    // }
-
-    // /**
-    //  * @test
-    //  */
-    // public function test_case_repository_bitmap_4()
-    // {
-    //     $storage = \Container\getStorage([
-    //         'table' => [
-    //             'database' => [
-    //                 'fields' => [
-    //                     'boolean' => Type::bool(),
-    //                 ],
-    //             ],
-    //             'bitmap' => [
-    //                 'fields' => [
-    //                     'boolean' => Type::bitmapBool(),
-    //                 ],
-    //             ],
-    //         ],
-    //     ]);
-    //     $table = $storage->table();
-    //     $table->createSync();
-    //     foreach (range(1, 100) as $_) {
-    //         $table->insertSync(['boolean' => mt_rand(0, 1)]);
-    //     }
-    //     $table->bitmapPopulate();
-    //     //
-    //     //
-    //     //
-    //     $bitmap = $table->getBitmapPool()->random();
-    //     $iterator = $bitmap->search($table, '*');
-    //     $this->assertTrue(!empty($iterator->getSearchState()));
-    //     $state = $iterator->getSearchState();
-    //     $this->assertTrue($state['size'] === 100);
-    //     $this->assertTrue($state['left'] + count($state['ids']) === 100);
-    //     $iterator->pullSync();
-    //     $state = $iterator->getSearchState();
-    //     $this->assertTrue($state['left'] + count($state['ids']) === 99);
-    //     //
-    //     //
-    //     //
-    //     $inc = mt_rand(1, 7);
-    //     foreach (range(1, $inc) as $_) {
-    //         $iterator->pullSync();
-    //     }
-    //     $state = $iterator->getSearchState();
-    //     $this->assertTrue($state['left'] + count($state['ids']) === 99 - $inc);
-    //     //
-    //     //
-    //     //
-    //     $bitmap = $table->getBitmapPool()->random();
-    //     $iterator = $bitmap->search($table, '*');
-    //     $i = $_i = mt_rand(0, 7);
-    //     foreach (($i ? $iterator : []) as $id => $bean) {
-    //         $i--;
-    //         if (!$i) {
-    //             break;
-    //         }
-    //     }
-    //     $state = $iterator->getSearchState();
-    //     $this->assertTrue($state['left'] + count($state['ids']) === 100 - $_i);
-    //     //
-    //     //
-    //     //
-    //     $bitmap = $table->getBitmapPool()->random();
-    //     $iterator = $bitmap->search($table, '*');
-    //     $ids = array_keys(iterator_to_array($iterator));
-    //     $this->assertTrue($ids === range(1, 100));
-    //     $iterator = $bitmap->search($table, '*');
-    //     $values = [];
-    //     foreach ($iterator as $id => $bean) {
-    //         $values[] = $bean->boolean;
-    //     }
-    //     $iterator = $bitmap->search($table, '*');
-    //     if (mt_rand(0, 1)) {
-    //         $state = $iterator->getSearchState();
-    //         $this->assertTrue($state['size'] === $state['left'] + count($state['ids']));
-    //         $iterator = $bitmap->search($table, $state);
-    //     }
-    //     $ids = [];
-    //     $_values = [];
-    //     while (($value = $iterator->pullSync()) !== null) {
-    //         $ids[] = $value[0];
-    //         $_values[] = $value[1]->boolean;
-    //         if (mt_rand(0, 1)) {
-    //             $state = $iterator->getSearchState();
-    //             $iterator = $bitmap->search($table, $state);
-    //         }
-    //     }
-    //     $this->assertTrue($ids === range(1, 100));
-    //     $this->assertEquals($values, $_values);
-    // }
-
-    // /**
-    //  * @test
-    //  */
-    // public function test_case_repository_bitmap_5()
-    // {
-    //     $storage = \Container\getStorage([
-    //         'table' => [
-    //             'database' => [
-    //                 'fields' => [
-    //                     'boolean' => Type::bool(),
-    //                     'int' => Type::int(),
-    //                 ],
-    //                 'getSortScore' => function ($bean) {
-    //                     return 1000 - $bean->id;
-    //                 },
-    //             ] + Storage::getShardsClusterConfig(),
-    //             'bitmap' => [
-    //                 'fields' => [
-    //                     'boolean' => Type::bitmapBool(),
-    //                 ],
-    //             ] + Storage::getShardsClusterConfig(),
-    //         ],
-    //     ]);
-    //     $table = $storage->table();
-    //     $table->createSync();
-    //     $all = [];
-    //     foreach (range(1, 100) as $_) {
-    //         $all[] = $table->insertSync([
-    //             'boolean' => mt_rand(0, 1),
-    //             'int' => mt_rand(1, 100),
-    //         ]);
-    //     }
-    //     sort($all);
-    //     $table->sort();
-    //     $table->bitmapPopulate();
-    //     //
-    //     //
-    //     //
-    //     $iterator = $table->search('*');
-    //     $state = $iterator->getSearchState();
-    //     $calc = function ($state) {
-    //         $count0 = 0;
-    //         $count1 = 0;
-    //         foreach ($state as $s) {
-    //             $count0 += count($s['ids']) + $s['left'];
-    //             $count1 += $s['size'];
-    //         }
-    //         return [$count0, $count1];
-    //     };
-    //     $this->assertTrue($calc($state)[0] === 100);
-    //     $this->assertTrue($calc($state)[1] === 100);
-    //     $iterator->pullSync();
-    //     $state = $iterator->getSearchState();
-    //     $this->assertTrue($calc($state)[0] === 99);
-    //     $this->assertTrue($calc($state)[1] === 100);
-    //     $inc = mt_rand(1, 70);
-    //     foreach (range(1, $inc) as $_) {
-    //         $iterator->pullSync();
-    //     }
-    //     $state = $iterator->getSearchState();
-    //     $this->assertTrue($calc($state)[0] === 99 - $inc);
-    //     $this->assertTrue($calc($state)[1] === 100);
-    //     //
-    //     //
-    //     //
-    //     $iterator = $table->search('*');
-    //     $ids = [];
-    //     while (($value = $iterator->pullSync()) !== null) {
-    //         [$id, $bean] = $value;
-    //         $ids[] = $id;
-    //         if (mt_rand(0, 1)) {
-    //             $iterator = $table->search($iterator->getSearchState());
-    //         }
-    //     }
-    //     sort($ids);
-    //     $this->assertEquals($all, $ids);
-    // }
-
-    // /**
-    //  * @test
-    //  */
-    // public function test_case_repository_massive_create()
-    // {
-    //     $rnd = (bool) mt_rand(0, 1);
-    //     $storage = \Container\getStorage([
-    //         'table1' => [
-    //             'bitmap' => [],
-    //         ],
-    //         'table2' => [
-    //             'bitmap' => $rnd ? [] : null,
-    //         ],
-    //     ]);
-    //     $storage->createSync();
-    //     $storage->table1()->bitmapPopulate();
-    //     $storage->table2()->bitmapPopulate();
-    //     $storage->table1()->sort();
-    //     $storage->table2()->sort();
-    //     $bitmap = $storage->getBitmapPool()->random();
-    //     $list = $bitmap->listSync();
-    //     $this->assertTrue(in_array('table1', $list));
-    //     $this->assertTrue($rnd xor !in_array('table2', $list));
-    //     $storage->dropSync();
-    // }
+    /**
+     * @test
+     */
+    public function test_case_repository_insert_unique()
+    {
+        $repository = \Container\getRepository('t', [
+            'database' => [
+                'cluster' => 'm:*;ms:*:id;',
+                'fields' => [
+                    'int' => Type::int(),
+                ],
+                'indexes' => [
+                    'f1' => [
+                        'fields' => ['int'],
+                        'type' => Index::INDEX_TYPE_UNIQUE,
+                    ],
+                ],
+            ],
+        ]);
+        $repository->createSync();
+        $table = $repository->getDatabaseTable();
+        $id = $repository->insertSync(['int' => 1]);
+        $this->assertTrue($id > 0);
+        $id = $repository->insertSync(['int' => 1]);
+        $this->assertTrue($id === 0);
+    }
 }
