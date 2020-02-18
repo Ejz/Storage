@@ -328,7 +328,7 @@ class TestCaseRepository extends AbstractTestCase
         $this->assertTrue($bean->deleteSync());
         $this->assertFalse($bean->deleteSync());
         $_ = iterator_to_array($repository->get([$id]));
-        $this->assertTrue($_ === []);
+        $this->assertTrue($_ === [$id => null]);
         $id = $repository->insertSync();
         $names = $repository->getWritableDatabasePool($id)->names();
         $this->assertTrue($repository->deleteSync([$id]) === count($names));
@@ -348,9 +348,13 @@ class TestCaseRepository extends AbstractTestCase
         $id1 = $repository->insertSync();
         $id2 = $repository->insertSync();
         $keys = array_keys(iterator_to_array($repository->get([$id1, 1E6, $id2])));
-        $this->assertEquals([$id1, $id2], $keys);
-        $keys = array_keys(iterator_to_array($repository->get([$id1, 1E6, $id2], ['nulls' => true])));
         $this->assertEquals([$id1, (int) 1E6, $id2], $keys);
+        $vals = iterator_to_array($repository->get([1E6, $id1, 1E6, $id2, 1E6]), false);
+        $this->assertTrue($vals[0] === null);
+        $this->assertTrue($vals[1] !== null);
+        $this->assertTrue($vals[2] === null);
+        $this->assertTrue($vals[3] !== null);
+        $this->assertTrue($vals[4] === null);
     }
 
     /**
@@ -373,9 +377,9 @@ class TestCaseRepository extends AbstractTestCase
             $this->assertTrue(is_object($bean));
             $this->assertTrue(is_array($bean->getValues()));
         }
-        foreach ($repository->get([$id, 7]) as $id => $bean) {
-            $this->assertTrue(is_object($bean));
-            $this->assertTrue(is_array($bean->getValues()));
+        foreach ($repository->get([$id, 1E6]) as $id => $bean) {
+            $this->assertTrue($bean === null || is_object($bean));
+            $this->assertTrue($bean === null || is_array($bean->getValues()));
         }
     }
 
@@ -882,13 +886,8 @@ class TestCaseRepository extends AbstractTestCase
         while ($iterator->advanceSync()) {
             [$id, $bean] = $iterator->getCurrent();
             $collect[] = [$id, $bean->int];
-            if (mt_rand(0, 1)) {
-                $iterator = $repository->search($iterator->getContext());
-            }
         }
         $this->assertEquals($valSort(null, false), $collect);
-        // foreach ($iterator as $id => $bean) {
-        // }
     }
 
     /**
@@ -896,41 +895,55 @@ class TestCaseRepository extends AbstractTestCase
      */
     public function test_case_repository_bitmap_2()
     {
-        $repository = \Container\getRepository('t', [
+        $pool = \Container\getRepositoryPool(['t' => [
             'database' => [
                 'cluster' => 'm:*;ms:1:id,int;',
                 'fields' => [
                     'int' => Type::int(),
+                    'fk' => Type::int(),
                 ],
             ],
             'bitmap' => [
                 'cluster' => 'm:*;ms:*:id;',
                 'fields' => [
                     'int' => Type::bitmapInt(),
+                    'fk' => Type::bitmapForeignKey('t'),
                 ],
             ],
-        ]);
+        ]]);
+        $repository = $pool->get('t');
         $repository->createSync();
-        $id1 = $repository->insertSync(['int' => 1]);
-        $id2 = $repository->insertSync(['int' => 2]);
-        $id3 = $repository->insertSync(['int' => 3]);
-        $ret = function ($context) {
-            $context['iterators'] = array_map(function ($it) {
-                return $it->getContext();
-            }, $context['iterators']);
-            return $context;
-        };
+        foreach (range(1, 100) as $_) {
+            $repository->insertSync(['int' => mt_rand(1, 100), 'fk' => mt_rand(1, 100)]);
+        }
         $repository->populateBitmap();
-        $iterator = $repository->search('*', ['sortby' => 'int', 'asc' => true]);
-        $this->assertTrue($iterator->current()->id === 1);
-        $_context = $iterator->getContext();
-        var_dump($ret($_context));
-        return;
-        // $iterator = $repository->search($iterator->getContext());
-        // $this->assertEquals($ret($_context), $ret($iterator->getContext()));
-        $this->assertTrue($iterator->current()->id === 2);
-        // $iterator = $repository->search($iterator->getContext());
-        $this->assertTrue($iterator->current()->id === 3);
+        $iterator = $repository->search('*', ['sortby' => 'int', 'asc' => false, 'fks' => 'fk']);
+        while ($iterator->advanceSync()) {
+            [$id1, $bean1, $id2, $bean2] = $iterator->getCurrent();
+            $this->assertTrue($bean1->fk === $id2);
+        }
+        // foreach ($iterator as $id => $bean) {
+        //     var_dump($bean);
+        //     break;
+        // }
+        // $id1 = $repository->insertSync(['int' => 1]);
+        // $id2 = $repository->insertSync(['int' => 2]);
+        // $id3 = $repository->insertSync(['int' => 3]);
+        // $ret = function ($context) {
+        //     $context['iterators'] = array_map(function ($it) {
+        //         return $it->getContext();
+        //     }, $context['iterators']);
+        //     return $context;
+        // };
+        // $this->assertTrue($iterator->current()->id === 1);
+        // $_context = $iterator->getContext();
+        // var_dump($ret($_context));
+        // return;
+        // // $iterator = $repository->search($iterator->getContext());
+        // // $this->assertEquals($ret($_context), $ret($iterator->getContext()));
+        // $this->assertTrue($iterator->current()->id === 2);
+        // // $iterator = $repository->search($iterator->getContext());
+        // $this->assertTrue($iterator->current()->id === 3);
     }
 
     // /**

@@ -9,10 +9,11 @@ use RuntimeException;
 use Ejz\Type\AbstractType;
 use Closure;
 
-class Repository implements NameInterface
+class Repository implements NameInterface, ContextInterface
 {
     use NameTrait;
     use SyncTrait;
+    use ContextTrait;
 
     /** @var array */
     protected $config;
@@ -29,30 +30,24 @@ class Repository implements NameInterface
     /** @var array */
     protected $cached;
 
-    /** @var ?RepositoryPool */
-    protected $repositoryPool;
-
     /**
      * @param string          $name
      * @param array           $config
      * @param DatabasePool    $databasePool
      * @param BitmapPool      $bitmapPool
      * @param RedisCache      $cache
-     * @param ?RepositoryPool $repositoryPool (opitonal)
      */
     public function __construct(
         string $name,
         array $config,
         DatabasePool $databasePool,
         BitmapPool $bitmapPool,
-        RedisCache $cache,
-        ?RepositoryPool $repositoryPool = null
+        RedisCache $cache
     ) {
         $this->setName($name);
         $this->config = $config;
         $this->databasePool = $databasePool;
         $this->bitmapPool = $bitmapPool;
-        $this->repositoryPool = $repositoryPool;
         $this->cache = $cache;
         $this->normalize();
     }
@@ -198,14 +193,9 @@ class Repository implements NameInterface
      *
      * @return Iterator
      */
-    public function get(array $ids, array $params = []): Iterator
+    public function get(array $ids): Iterator
     {
-        $emit = function ($emit) use ($ids, $params) {
-            $params += [
-                'nulls' => false,
-            ];
-            ['nulls' => $nulls] = $params;
-            unset($params);
+        $emit = function ($emit) use ($ids) {
             $ids = array_map('intval', $ids);
             $ids = array_values($ids);
             $table = $this->getDatabaseTable();
@@ -267,15 +257,29 @@ class Repository implements NameInterface
             $iterator = Iterator::merge($iterators, function ($value1, $value2) use ($_ids) {
                 return $_ids[$value1[0]] - $_ids[$value2[0]];
             });
-            $pos = 0;
-            while (yield $iterator->advance()) {
-                $value = $iterator->getCurrent();
-                while ($nulls && $value[0] !== $ids[$pos]) {
-                    yield $emit([$ids[$pos], null]);
-                    $pos++;
+            $already = [];
+            foreach ($ids as $id) {
+                if (isset($already[$id])) {
+                    yield $emit($already[$id]);
+                    continue;
                 }
-                yield $emit($value);
-                $pos++;
+                $value = null;
+                if ($iterator !== null) {
+                    $advance = yield $iterator->advance();
+                    $value = $advance ? $iterator->getCurrent() : null;
+                    $iterator = $value !== null ? $iterator : null;
+                }
+                if ($value === null) {
+                    yield $emit([$id, null]);
+                    continue;
+                }
+                [$vid] = $value;
+                $already[$vid] = $value;
+                if ($vid === $id) {
+                    yield $emit($value);
+                    continue;
+                }
+                yield $emit([$id, null]);
             }
         };
         return new Iterator($emit);
@@ -457,13 +461,7 @@ class Repository implements NameInterface
                 $iterator = Iterator::map($iterator, [$this, 'toDatabaseBean']);
                 return $iterator;
             });
-            $iterator = Iterator::merge($iterators, function ($a, $b) {
-                [$id1, $bean1] = $a;
-                [$id2, $bean2] = $b;
-                $score1 = $this->getSortScore($bean1);
-                $score2 = $this->getSortScore($bean2);
-                return ($score2 - $score1) ?: ($id1 - $id2);
-            });
+            $iterator = Iterator::merge($iterators, $this->getSortScoreClosure(true));
             while (yield $iterator->advance()) {
                 yield $emit($iterator->getCurrent());
             }
@@ -579,13 +577,6 @@ class Repository implements NameInterface
      */
     public function search($query, array $params = []): Iterator
     {
-        if (!is_string($query)) {
-            $params = [
-                'sortby' => $query['sortby'],
-                'asc' => $query['asc'],
-                'fks' => $query['fks'],
-            ] + $params;
-        }
         $params += [
             'sortby' => Bitmap::ID_FIELD,
             'asc' => true,
@@ -598,42 +589,27 @@ class Repository implements NameInterface
         ] = $params;
         $index = $this->getBitmapIndex();
         $bitmap = $this->getReadableMasterBitmapPool()->random();
-        $context = [
-            'iterators' => [],
-            'size' => 0,
-            'ids' => $query['ids'] ?? [],
-            'sortby' => $sortby,
-            'asc' => $asc,
-            'fks' => $fks,
-        ];
         $names = [null];
-        $byid = $sortby === Bitmap::ID_FIELD;
-        if ($byid) {
+        if ($sortby === Bitmap::ID_FIELD) {
             $names = $this->getReadableMasterDatabasePool()->names();
         }
+        $size = 0;
         $iterators = array_map(function ($name) use (
-            $bitmap, $index, $query, $params, &$context
+            $bitmap, $index, $query, $params, &$size
         ) {
-            if (!is_string($query)) {
-                $_ctx = $query['iterators'][$name]->getContext();
-                var_dump($name);
-                var_dump($_ctx);
-                var_dump($query['ids']);
-                if (isset($query['ids'][$name])) {
-                    $_ctx['ids'] = $_ctx['ids'] ?? [];
-                    array_unshift($_ctx['ids'], $query['ids'][$name]);
-                }
-                $query = $_ctx;
-                var_dump($_ctx);
-            } elseif ($name !== null) {
+            if ($name !== null) {
                 $query = "({$query}) & (@_names:{$name})";
             }
             $params = compact('query') + $params;
-            // var_dump($index, $params);
             $iterator = $bitmap->search($index, $params);
-            $context['iterators'][$name] = $iterator;
+            $size += $iterator->getContext()['size'];
             $iterator = Iterator::chunk($iterator, 30);
-            $emit = function ($emit) use ($iterator) {
+            $repositories = [$this];
+            $fks = $params['fks'];
+            foreach ((array) $fks as $fk) {
+                $repositories[] = $this->getRepositoryForFk($fk);
+            }
+            $emit = function ($emit) use ($iterator, $repositories) {
                 while (yield $iterator->advance()) {
                     $chunk = $iterator->getCurrent();
                     $ids = [];
@@ -644,9 +620,10 @@ class Repository implements NameInterface
                             @ $ids[$i + 1][] = $fks[$i];
                         }
                     }
-                    $iterators = array_map(function ($ids) {
-                        return $this->get($ids, ['nulls' => true]);
-                    }, $ids);
+                    $iterators = [];
+                    foreach ($ids as $idx => $_ids) {
+                        $iterators[] = $repositories[$idx]->get($_ids);
+                    }
                     $paired = Iterator::pair($iterators);
                     while (yield $paired->advance()) {
                         $value = $paired->getCurrent();
@@ -657,30 +634,8 @@ class Repository implements NameInterface
             };
             return new Iterator($emit);
         }, array_combine($names, $names));
-        $sort = function ($a, $b) use ($asc) {
-            [$id1, $bean1] = $a;
-            [$id2, $bean2] = $b;
-            $score1 = $this->getSortScore($bean1);
-            $score2 = $this->getSortScore($bean2);
-            // var_dump($score1, $score2);
-            // var_dump($id1, $id2);
-            if ($asc) {
-                return ($score2 - $score1) ?: ($id1 - $id2);
-            }
-            return ($score1 - $score2) ?: ($id2 - $id1);
-        };
-        // var_dump($iterators);
-        $iterator = Iterator::merge($iterators, $sort, function ($iterator, $ids) {
-            // var_dump($ids);
-            $iterator->setContext($ids, 'ids');
-        });
-        // var_dump($context);
-        $size = array_sum(array_map(function ($iterator) {
-            // var_dump($iterator->getContext());
-            return $iterator->getContext()['size'];
-        }, $context['iterators']));
-        $context['size'] = $size;
-        $iterator->setContext($context);
+        $iterator = Iterator::merge($iterators, $this->getSortScoreClosure($asc));
+        $iterator->setContext($size, 'size');
         return $iterator;
     }
 
@@ -689,7 +644,7 @@ class Repository implements NameInterface
     private function normalize()
     {
         $this->config['aliases'] = $this->config['aliases'] ?? [];
-        $this->config['aliases'] = array_map('strtolower', $this->config['aliases']);
+        $this->config['aliases'] = (array) $this->config['aliases'];
         //
         $cluster = 'm:!*;ms:1:id;s:!*;ss:1:id;';
         $this->config['database'] = $this->config['database'] ?? [];
@@ -808,19 +763,31 @@ class Repository implements NameInterface
     }
 
     /**
+     * @param bool $asc
+     *
+     * @return Closure
+     */
+    public function getSortScoreClosure(bool $asc): Closure
+    {
+        return function ($a, $b) use ($asc) {
+            [$id1, $bean1] = $a;
+            [$id2, $bean2] = $b;
+            $score1 = $this->getSortScore($bean1);
+            $score2 = $this->getSortScore($bean2);
+            if (!$asc) {
+                [$score1, $score2] = [$score2, $score1];
+                [$id1, $id2] = [$id2, $id1];
+            }
+            return ($score2 - $score1) ?: ($id1 - $id2);
+        };
+    }
+
+    /**
      * @return RedisCache
      */
     public function getCache(): RedisCache
     {
         return $this->cache;
-    }
-
-    /**
-     * @return ?RepositoryPool
-     */
-    public function getRepositoryPool(): ?RepositoryPool
-    {
-        return $this->repositoryPool;
     }
 
     /**
@@ -1187,6 +1154,34 @@ class Repository implements NameInterface
     public function getCacheConfig(): ?array
     {
         return $this->config['cache'];
+    }
+
+    /**
+     * @param string $fk
+     *
+     * @return self
+     */
+    public function getRepositoryForFk(string $fk): self
+    {
+        $fields = $this->getBitmapFields();
+        foreach ($fields as $field) {
+            if (!$field->getType()->is(Type::bitmapForeignKey())) {
+                continue;
+            }
+            $parent = $field->getType()->getParentTable();
+            return $this->getContext()['repositoryPool']->get($parent);
+        }
+    }
+
+    /**
+     * @return array
+     */
+    public function getAliases(): array
+    {
+        $aliases = $this->config['aliases'];
+        $aliases[] = $this->getDatabaseTable();
+        $aliases[] = $this->getBitmapIndex();
+        return $aliases;
     }
 
     /**

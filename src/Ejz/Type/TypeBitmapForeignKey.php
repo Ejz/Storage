@@ -23,4 +23,20 @@ class TypeBitmapForeignKey extends TypeInt
     {
         return $this->parentTable;
     }
+
+    /**
+     * @return string
+     */
+    public function getParentIndex(): string
+    {
+        return $this->parentTable;
+    }
+
+    /**
+     * @return string
+     */
+    public function getParent(): string
+    {
+        return $this->parentTable;
+    }
 }

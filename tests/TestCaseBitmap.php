@@ -38,26 +38,26 @@ class TestCaseBitmap extends AbstractTestCase
         $this->assertEquals(array_reverse(range(1, 1000)), $keys);
     }
 
-    /**
-     * @test
-     */
-    public function test_case_bitmap_search_context()
-    {
-        $bm = $this->bitmapPool->random();
-        $bm->createSync('tt');
-        foreach (range(1, 1000) as $id) {
-            $bm->addSync('tt', $id);
-        }
-        $ids = [];
-        $it = $bm->search('tt');
-        while ($it->advanceSync()) {
-            $ids[] = $it->getCurrent()[0];
-            if (mt_rand(0, 1)) {
-                $it = $bm->search('tt', ['query' => $it->getContext()]);
-            }
-        }
-        $this->assertEquals(range(1, 1000), $ids);
-    }
+    // /**
+    //  * @test
+    //  */
+    // public function test_case_bitmap_search_context()
+    // {
+    //     $bm = $this->bitmapPool->random();
+    //     $bm->createSync('tt');
+    //     foreach (range(1, 1000) as $id) {
+    //         $bm->addSync('tt', $id);
+    //     }
+    //     $ids = [];
+    //     $it = $bm->search('tt');
+    //     while ($it->advanceSync()) {
+    //         $ids[] = $it->getCurrent()[0];
+    //         if (mt_rand(0, 1)) {
+    //             $it = $bm->search('tt', ['query' => $it->getContext()]);
+    //         }
+    //     }
+    //     $this->assertEquals(range(1, 1000), $ids);
+    // }
 
     /**
      * @test

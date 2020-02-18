@@ -4,18 +4,16 @@ namespace Ejz;
 
 use Amp\Promise;
 
-class Iterator implements \Amp\Iterator, \Iterator
+class Iterator implements \Amp\Iterator, \Iterator, ContextInterface
 {
     use SyncTrait;
+    use ContextTrait;
 
     /** @var \Amp\Iterator */
     private $iterator;
 
     /** @var ?bool */
     private $next;
-
-    /** @var array */
-    private $context;
 
     /**
      * @param mixed $iterator (optional)
@@ -25,7 +23,6 @@ class Iterator implements \Amp\Iterator, \Iterator
         if ($iterator !== null) {
             $this->setIterator($iterator);
         }
-        $this->context = [];
     }
 
     /**
@@ -115,47 +112,20 @@ class Iterator implements \Amp\Iterator, \Iterator
     }
 
     /**
-     * @return array
-     */
-    public function getContext(): array
-    {
-        return $this->context;
-    }
-
-    /**
-     * @param mixed   $value
-     * @param ?string $key   (optional)
-     */
-    public function setContext($value, ?string $key = null)
-    {
-        if ($key === null) {
-            $this->context = $value;
-        } else {
-            $this->context[$key] = $value;
-        }
-    }
-
-    /**
-     * @param array     $iterators
-     * @param ?callable $sort      (optional)
-     * @param ?callable $saver     (optional)
+     * @param array    $iterators
+     * @param callable $sort
      *
      * @return self
      */
-    public static function merge(
-        array $iterators,
-        ?callable $sort = null,
-        ?callable $saver = null
-    ): self
+    public static function merge(array $iterators, callable $sort): self
     {
         if (count($iterators) === 1) {
             return current($iterators);
         }
         $iterator = new self();
-        $emit = function ($emit) use ($iterators, $sort, $saver, $iterator) {
+        $emit = function ($emit) use ($iterators, $sort, $iterator) {
             $values = [];
             $ids = [];
-            $state = [];
             while (true) {
                 do {
                     $diff = array_diff_key($iterators, $values);
@@ -172,7 +142,6 @@ class Iterator implements \Amp\Iterator, \Iterator
                         if (!isset($ids[$value[0]])) {
                             $ids[$value[0]] = true;
                             $values[$key] = $value;
-                            $state[$key] = $value[0];
                             unset($diff[$key]);
                         }
                     }
@@ -180,20 +149,10 @@ class Iterator implements \Amp\Iterator, \Iterator
                 if (!$values) {
                     break;
                 }
-                if ($sort !== null) {
-                    uasort($values, $sort);
-                    $key = key($values);
-                } else {
-                    $key = array_rand($values);
-                }
-                if ($saver !== null) {
-                    $saver($iterator, $state);
-                }
+                uasort($values, $sort);
+                $key = key($values);
                 yield $emit($values[$key]);
-                unset($values[$key], $state[$key]);
-                if ($saver !== null) {
-                    $saver($iterator, $state);
-                }
+                unset($values[$key]);
             }
         };
         $iterator->setIterator($emit);
@@ -263,23 +222,5 @@ class Iterator implements \Amp\Iterator, \Iterator
             }
         };
         return new self($emit);
-    }
-
-    /**
-     * @return array
-     */
-    public function getSearchState(): array
-    {
-        ['ids' => $ids, 'iterators' => $iterators] = $this->context;
-        $contexts = array_map(function ($iterator) {
-            return $iterator->getContext();
-        }, $iterators);
-        foreach ($contexts as $key => &$context) {
-            if (isset($ids[$key])) {
-                array_unshift($context, $ids[$key]);
-            }
-        }
-        unset($context);
-        return $contexts;
     }
 }

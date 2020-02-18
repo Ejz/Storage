@@ -770,7 +770,9 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
                     $asc = (bool) mt_rand(0, 1);
                     return $this->iterate($table, compact('asc', 'min', 'max') + $params);
                 }, $intervals);
-                $iterator = Iterator::merge($iterators);
+                $iterator = Iterator::merge($iterators, function () {
+                    return mt_rand(-1, 1);
+                });
                 while (yield $iterator->advance()) {
                     yield $emit($iterator->getCurrent());
                 }

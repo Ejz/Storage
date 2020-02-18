@@ -7,7 +7,7 @@ use RuntimeException;
 class AbstractPool implements PoolInterface
 {
     /** @var array */
-    private $pool;
+    protected $pool;
 
     /** @var string */
     private const ERROR_INVALID_OBJECT = 'ERROR_INVALID_OBJECT';

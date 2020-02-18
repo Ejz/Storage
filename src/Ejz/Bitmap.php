@@ -141,7 +141,6 @@ class Bitmap implements NameInterface, BitmapInterface
                 'sortby' => self::ID_FIELD,
                 'asc' => true,
                 'fks' => [],
-                'config' => [],
             ];
             [
                 'query' => $query,
@@ -149,51 +148,30 @@ class Bitmap implements NameInterface, BitmapInterface
                 'sortby' => $sortby,
                 'asc' => $asc,
                 'fks' => $fks,
-                'config' => $config,
             ] = $params;
             $fks = (array) $fks;
-            $config += $this->config;
-            [
-                'iterator_chunk_size' => $iterator_chunk_size,
-            ] = $config;
-            // return;
-            if (is_string($query)) {
-                $args = [
-                    $index,
-                    $query,
-                    'SORTBY',
-                    $sortby,
-                    $asc ? 'ASC' : 'DESC',
-                    'WITHCURSOR',
-                ];
-                foreach ($fks as $fk) {
-                    $args[] = 'APPENDFK';
-                    $args[] = $fk;
-                }
-                $ret = $this->client->SEARCH(...$args);
-                [$size, $cursor] = [$ret[0], $ret[1] ?? null];
-            } else {
-                ['size' => $size, 'cursor' => $cursor, 'ids' => $ids, 'fks' => $fks] = $query;
+            $args = [
+                $index,
+                $query,
+                'SORTBY',
+                $sortby,
+                $asc ? 'ASC' : 'DESC',
+                'LIMIT',
+                0,
+                1000,
+            ];
+            foreach ($fks as $fk) {
+                $args[] = 'APPENDFK';
+                $args[] = $fk;
             }
-            $iterator->setContext(compact('cursor', 'ids', 'size', 'fks'));
-            while ($cursor !== null || isset($ids)) {
-                if (!isset($ids)) {
-                    $ids = $this->client->CURSOR($cursor, 'LIMIT', $iterator_chunk_size);
-                    $iterator->setContext($ids, 'ids');
-                    if (count($ids) < $iterator_chunk_size) {
-                        $cursor = null;
-                        $iterator->setContext($cursor, 'cursor');
-                    }
-                }
-                while (($value = array_shift($ids)) !== null) {
-                    var_dump($value);
-                    $value = $fks ? $value : [$value];
-                    $id = array_shift($value);
-                    yield $emit([$id, $value]);
-                    $iterator->setContext($ids, 'ids');
-                }
-                $ids = null;
-                $iterator->setContext($ids, 'ids');
+            $ids = $this->client->SEARCH(...$args);
+            $size = array_shift($ids);
+            // var_dump($size);
+            $iterator->setContext($size, 'size');
+            while (($value = array_shift($ids)) !== null) {
+                $value = $fks ? $value : [$value];
+                $id = array_shift($value);
+                yield $emit([$id, $value]);
             }
         };
         $iterator->setIterator($emit);
