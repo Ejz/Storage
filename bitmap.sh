@@ -14,6 +14,9 @@ elif [ -f ".env.phpunit" ]; then
 fi
 
 ENV="$1"
+if [ -z "$ENV" -a "$BITMAP_ENVS" ]; then
+    ENV=`echo "$BITMAP_ENVS" | cut -d"," -f1`
+fi
 [ "$ENV" ] || exit
 ENV=${ENV^^}
 shift

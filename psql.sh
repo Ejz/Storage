@@ -14,6 +14,9 @@ elif [ -f ".env.phpunit" ]; then
 fi
 
 ENV="$1"
+if [ -z "$ENV" -a "$DB_ENVS" ]; then
+    ENV=`echo "$DB_ENVS" | cut -d"," -f1`
+fi
 [ "$ENV" ] || exit
 ENV=${ENV^^}
 shift
