@@ -96,4 +96,41 @@ class TestCaseIterator extends AbstractTestCase
         $values = array_keys($values);
         $this->assertEquals([], $values);
     }
+
+    /**
+     * @test
+     */
+    public function test_case_iterator_limit()
+    {
+        $iterator = [[1, ''], [2, ''], [3, '']];
+        $values = iterator_to_array(Iterator::limit(new Iterator($iterator), 0));
+        $values = array_keys($values);
+        $this->assertEquals([], $values);
+        $values = iterator_to_array(Iterator::limit(new Iterator($iterator), 1));
+        $values = array_keys($values);
+        $this->assertEquals([1], $values);
+        $values = iterator_to_array(Iterator::limit(new Iterator($iterator), 10));
+        $values = array_keys($values);
+        $this->assertEquals([1, 2, 3], $values);
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_iterator_offset_limit()
+    {
+        $iterator = [[1, ''], [2, ''], [3, '']];
+        $values = iterator_to_array(Iterator::offsetLimit(new Iterator($iterator), 0, 1));
+        $values = array_keys($values);
+        $this->assertEquals([1], $values);
+        $values = iterator_to_array(Iterator::offsetLimit(new Iterator($iterator), 1, 0));
+        $values = array_keys($values);
+        $this->assertEquals([], $values);
+        $values = iterator_to_array(Iterator::offsetLimit(new Iterator($iterator), 0, 10));
+        $values = array_keys($values);
+        $this->assertEquals([1, 2, 3], $values);
+        $values = iterator_to_array(Iterator::offsetLimit(new Iterator($iterator), 10, 0));
+        $values = array_keys($values);
+        $this->assertEquals([], $values);
+    }
 }

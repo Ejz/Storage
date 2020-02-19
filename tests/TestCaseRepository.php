@@ -973,4 +973,24 @@ class TestCaseRepository extends AbstractTestCase
             $this->assertTrue($id > 0 && $beans === [null] && $beans[0] === null);
         }
     }
+
+    /**
+     * @test
+     */
+    public function test_case_repository_get_order()
+    {
+        $repository = \Container\getRepository('t', [
+            'database' => [
+                'cluster' => 'm:*;',
+            ],
+        ]);
+        $repository->createSync();
+        $id1 = $repository->insertSync();
+        $id2 = $repository->insertSync();
+        $ids = [];
+        foreach ($repository->get([$id2, 1E6, $id1, 1E6, $id2]) as $_ => $value) {
+            $ids[] = $_;
+        }
+        $this->assertTrue([$id2, (int) 1E6, $id1, (int) 1E6, $id2] === $ids);
+    }
 }

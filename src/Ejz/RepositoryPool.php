@@ -11,21 +11,13 @@ class RepositoryPool extends AbstractPool
      */
     protected function checkObject($object): bool
     {
-        $_ = $object instanceof Repository;
-        return $_ && parent::checkObject($object);
-    }
-
-    /**
-     * @param string $name
-     *
-     * @return ?NameInterface
-     */
-    public function get(string $name): ?NameInterface
-    {
-        $repository = parent::get($name);
-        if ($repository !== null) {
-            $repository->setContext($this, 'repositoryPool');
+        if (!$object instanceof Repository) {
+            return false;
         }
-        return $repository;
+        if (!parent::checkObject($object)) {
+            return false;
+        }
+        $object->setContext($this, 'repositoryPool');
+        return true;
     }
 }
