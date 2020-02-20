@@ -589,7 +589,7 @@ class Repository implements NameInterface, ContextInterface
     {
         $id = AbstractBean::ID;
         $params += [
-            'sortby' => $id,
+            'sortby' => null,
             'asc' => true,
             'fks' => [],
         ];
@@ -601,7 +601,7 @@ class Repository implements NameInterface, ContextInterface
         $index = $this->getBitmapIndex();
         $bitmap = $this->getReadableMasterBitmapPool()->random();
         $names = [null];
-        if ($sortby === $id && $this->hasSortScore()) {
+        if ($sortby === null && $this->hasSortScore()) {
             $names = $this->getReadableMasterDatabasePool()->names();
         }
         $size = 0;

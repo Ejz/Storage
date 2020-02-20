@@ -73,13 +73,6 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
     }
 
     /**
-     */
-    public function __destruct()
-    {
-        $this->close();
-    }
-
-    /**
      * @param string $sql
      * @param array  ...$args
      *

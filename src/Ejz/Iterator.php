@@ -278,9 +278,12 @@ class Iterator implements \Amp\Iterator, \Iterator, ContextInterface
      */
     public static function limit(self $iterator, int $limit): self
     {
-        return self::filter($iterator, function ($value) use (&$limit) {
-            return $limit-- > 0;
-        });
+        $emit = function ($emit) use ($iterator, $limit) {
+            while (($limit-- > 0) && (yield $iterator->advance())) {
+                yield $emit($iterator->getCurrent());
+            }
+        };
+        return new self($emit);
     }
 
     /**
@@ -292,9 +295,8 @@ class Iterator implements \Amp\Iterator, \Iterator, ContextInterface
      */
     public static function offsetLimit(self $iterator, int $offset, int $limit): self
     {
-        $position = 0;
-        return self::filter($iterator, function ($value) use (&$position, $offset, &$limit) {
-            return $position++ >= $offset && $limit-- > 0;
-        });
+        $iterator = self::offset($iterator, $offset);
+        $iterator = self::limit($iterator, $limit);
+        return $iterator;
     }
 }

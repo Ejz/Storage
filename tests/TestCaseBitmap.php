@@ -34,8 +34,6 @@ class TestCaseBitmap extends AbstractTestCase
         }
         $keys = array_keys(iterator_to_array($bm->search('tt')));
         $this->assertEquals(range(1, 1000), $keys);
-        $keys = array_keys(iterator_to_array($bm->search('tt', ['asc' => false])));
-        $this->assertEquals(array_reverse(range(1, 1000)), $keys);
     }
 
     /**

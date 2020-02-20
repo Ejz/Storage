@@ -135,7 +135,7 @@ class Bitmap implements NameInterface, BitmapInterface
             $params += [
                 'query' => '*',
                 'cursor' => [],
-                'sortby' => AbstractBean::ID,
+                'sortby' => null,
                 'asc' => true,
                 'fks' => [],
             ];
@@ -150,13 +150,16 @@ class Bitmap implements NameInterface, BitmapInterface
             $args = [
                 $index,
                 $query,
-                'SORTBY',
-                $sortby,
-                $asc ? 'ASC' : 'DESC',
+                $sortby !== null ? 'SORTBY' : null,
+                $sortby ?? null,
+                $sortby !== null ? ($asc ? 'ASC' : 'DESC') : null,
                 'LIMIT',
                 0,
                 1000,
             ];
+            $args = array_filter($args, function ($arg) {
+                return $arg !== null;
+            });
             foreach ($fks as $fk) {
                 $args[] = 'APPENDFK';
                 $args[] = $fk;

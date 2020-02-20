@@ -790,12 +790,6 @@ class TestCaseRepository extends AbstractTestCase
             $this->assertTrue($id >= $ex);
             $ex = $id;
         }
-        $ex = null;
-        foreach ($repository->search('*', ['asc' => false]) as $id => $bean) {
-            $ex = $ex ?? $id;
-            $this->assertTrue($id <= $ex);
-            $ex = $id;
-        }
         foreach ($repository->search('@boolean:1') as $id => $bean) {
             $this->assertTrue(((bool) $bean->boolean) === true);
         }
@@ -863,12 +857,6 @@ class TestCaseRepository extends AbstractTestCase
             $collect[] = [$id, $bean->int];
         }
         $this->assertEquals($idAsc(), $collect);
-        //
-        $collect = [];
-        foreach ($repository->search('*', ['asc' => false]) as $id => $bean) {
-            $collect[] = [$id, $bean->int];
-        }
-        $this->assertEquals(array_reverse($idAsc()), $collect);
         //
         $collect = [];
         foreach ($repository->search('*', ['sortby' => 'int']) as $id => $bean) {
