@@ -201,12 +201,12 @@ class Repository implements NameInterface, ContextInterface
             $ids = array_map('intval', $ids);
             $ids = array_values($ids);
             $table = $this->getDatabaseTable();
-            $dbs = [];
+            $pools = [];
             $_ids = array_flip($ids);
             $meta = [];
             $cached = [];
-            $cache = null;
             $cacheConfig = $this->getCacheConfig();
+            $cache = null;
             foreach ($ids as $id) {
                 if ($id <= 0) {
                     continue;
@@ -223,13 +223,15 @@ class Repository implements NameInterface, ContextInterface
                     $ct = [$name, $ck];
                     $meta[$id] = [$ck, $ct];
                 }
-                $db = $this->getMasterDatabasePool($id)->random();
-                if ($db === null) {
+                $pool = $this->getMasterDatabasePool($id);
+                $names = $pool->names();
+                if (!$names) {
                     continue;
                 }
-                $name = $db->getName();
-                $dbs[$name] = $dbs[$name] ?? ['db' => $db, 'ids' => []];
-                $dbs[$name]['ids'][] = $id;
+                sort($names, SORT_STRING);
+                $name = implode(',', $names);
+                $pools[$name] = $pools[$name] ?? ['pool' => $pool, 'ids' => []];
+                $pools[$name]['ids'][] = $id;
             }
             $map = function ($value) use ($cacheConfig, $meta, $cache) {
                 [$id] = $value;
@@ -250,13 +252,13 @@ class Repository implements NameInterface, ContextInterface
                 return [$id, $bean];
             };
             $iterators = [Iterator::map(new Iterator($cached), $map)];
-            foreach ($dbs as $db) {
+            foreach ($pools as $pool) {
                 $params = $params ?? [
                     'pk' => [$this->getDatabasePk()],
                     'fields' => array_values($this->getDatabaseFields()),
                     'returnFields' => true,
                 ];
-                $iterator = $db['db']->get($table, $db['ids'], $params);
+                $iterator = $pool['pool']->random()->get($table, $pool['ids'], $params);
                 $iterators[] = Iterator::map($iterator, $map);
             }
             $iterator = Iterator::merge($iterators, function ($value1, $value2) use ($_ids) {

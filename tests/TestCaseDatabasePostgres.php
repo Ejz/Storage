@@ -367,7 +367,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
         $max = mt_rand($min, 250);
         $config = [
             'iterator_chunk_size' => mt_rand(10, 30),
-            'rand_iterator_intervals' => mt_rand(1, 30),
+            'rand_iterator_intervals' => mt_rand(2, 30),
         ];
         $params = compact('min', 'max', 'config') + ['asc' => null];
         $keys = array_keys(iterator_to_array($db->iterate('tt', $params)));
