@@ -13,13 +13,38 @@ elif [ -f ".env.phpunit" ]; then
     export $(cat .env.phpunit | xargs)
 fi
 
+function in_array() {
+    local what="$1"
+    shift
+    for elem; do
+        if [ "$elem" = "$what" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+ENVS="$BITMAP_ENVS"
+ENVS=`echo "$ENVS" | tr ',' ' '`
+ENVS=($ENVS)
 ENV="$1"
-if [ -z "$ENV" -a "$BITMAP_ENVS" ]; then
-    ENV=`echo "$BITMAP_ENVS" | cut -d"," -f1`
+if [ -z "$ENV" ]; then
+    ENV="0"
+else
+    shift
 fi
-[ "$ENV" ] || exit
+
+if [ -n "$ENV" -a "$ENV" -eq "$ENV" ] 2>/dev/null; then
+    n="$ENV"
+    ENV="${ENVS[$n]}"
+fi
+
 ENV=${ENV^^}
-shift
+
+if ! in_array "$ENV" "${ENVS[@]}"; then
+    echo 1>&2 "ENV NOT FOUND!"
+    exit 1
+fi
 
 HOST=`printenv "BITMAP_${ENV}_HOST"`
 HOST="${HOST:-$BITMAP_HOST}"
