@@ -186,7 +186,11 @@ class Repository implements NameInterface, ContextInterface
                 $promises += $pool->insert($table, $pk, $id, $fields);
             }
             [$errors] = yield Promise\any($promises);
-            return $errors ? 0 : $id;
+            if ($errors) {
+                return 0;
+            }
+            $this->onInsert($id);
+            return $id;
         }, $bean);
     }
 
@@ -205,23 +209,27 @@ class Repository implements NameInterface, ContextInterface
             $_ids = array_flip($ids);
             $meta = [];
             $cached = [];
-            $cacheConfig = $this->getCacheConfig();
             $cache = null;
+            $cacheConfig = $this->getCacheConfig();
+            if ($cacheConfig !== null) {
+                $name = $this->getName();
+                $keys = array_map(function ($id) use ($name) {
+                    return $name . '.' . $id;
+                }, $ids);
+                $key2id = array_combine($keys, $ids);
+                $cache = $this->getCache();
+                $cached = $cache->getMultiple($keys);
+                $cached = array_filter($cached, function ($value, $key) use (&$meta, $key2id, $name) {
+                    if ($value !== null) {
+                        return true;
+                    }
+                    $meta[$key2id[$key]] = [$key, [$name, $key]];
+                    return false;
+                }, ARRAY_FILTER_USE_BOTH);
+            }
             foreach ($ids as $id) {
                 if ($id <= 0) {
                     continue;
-                }
-                if ($cacheConfig !== null) {
-                    $cache = $cache ?? $this->getCache();
-                    $name = $name ?? $this->getName();
-                    $ck = $name . '.' . $id;
-                    $v = $cache->get($ck);
-                    if ($v !== null) {
-                        $cached[] = $v;
-                        continue;
-                    }
-                    $ct = [$name, $ck];
-                    $meta[$id] = [$ck, $ct];
                 }
                 $pool = $this->getMasterDatabasePool($id);
                 $names = $pool->names();
@@ -238,16 +246,16 @@ class Repository implements NameInterface, ContextInterface
                 [$id, $bean] = $this->toDatabaseBean($value);
                 if (isset($meta[$id])) {
                     [$ck, $ct] = $meta[$id];
-                    $cache->set($ck, $value, $cacheConfig['ttl'], $ct);
+                    $set = [$ck => $value];
                     foreach ($cacheConfig['cacheableFields'] as $field) {
                         $v = $bean->$field;
                         if ($v === null) {
                             continue;
                         }
                         $where = new WhereCondition([$field => $v]);
-                        $ck = md5(serialize($where->stringify()));
-                        $cache->set($ck, $id, $cacheConfig['ttl'], $ct);
+                        $set[md5(serialize($where->stringify()))] = $id;
                     }
+                    $cache->setMultiple($set, $cacheConfig['ttl'], $ct);
                 }
                 return [$id, $bean];
             };
@@ -434,6 +442,14 @@ class Repository implements NameInterface, ContextInterface
     public function onUpdate(array $ids)
     {
         $this->dropCache($ids);
+    }
+
+    /**
+     * @param int $id
+     */
+    public function onInsert(int $id)
+    {
+        $this->dropCache([$id]);
     }
 
     /**

@@ -39,9 +39,9 @@ class Iterator implements \Amp\Iterator, \Iterator, ContextInterface
     public function setIterator($iterator)
     {
         if (!is_callable($iterator)) {
-            $_ = $iterator;
-            $iterator = function ($emit) use ($_) {
-                foreach ($_ as $value) {
+            $it = $iterator;
+            $iterator = function ($emit) use ($it) {
+                foreach ($it as $value) {
                     yield $emit($value);
                 }
             };
