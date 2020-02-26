@@ -480,9 +480,10 @@ class Repository implements NameInterface, ContextInterface
                 'returnFields' => true,
             ] + $params + [
                 'asc' => true,
+                'pool' => null,
             ];
-            ['asc' => $asc] = $params;
-            $pool = $this->getReadableMasterDatabasePool();
+            ['asc' => $asc, 'pool' => $pool] = $params;
+            $pool = $pool ?? $this->getReadableMasterDatabasePool();
             $table = $this->getDatabaseTable();
             $iterators = $pool->each(function ($database) use ($table, $params) {
                 $iterator = $database->iterate($table, $params);
@@ -499,18 +500,23 @@ class Repository implements NameInterface, ContextInterface
 
     /**
      * @param mixed $conditions
+     * @param array $params     (optional)
      *
      * @return Iterator
      */
-    public function filter($conditions): Iterator
+    public function filter($conditions, array $params = []): Iterator
     {
         $where = is_array($conditions) ? new WhereCondition($conditions) : $conditions;
         $cacheConfig = $this->getCacheConfig();
-        if ($cacheConfig !== null && count($cacheConfig['cacheableFields'])) {
+        if (
+            $cacheConfig !== null &&
+            count($cacheConfig['cacheableFields']) &&
+            count($where) === 1
+        ) {
             $ck = md5(serialize($where->stringify()));
             $id = $this->getCache()->get($ck);
         }
-        return isset($id) ? $this->get([$id]) : $this->iterate(compact('where'));
+        return isset($id) ? $this->get([$id]) : $this->iterate(compact('where') + $params);
     }
 
     /**
@@ -556,41 +562,45 @@ class Repository implements NameInterface, ContextInterface
     {
         return \Amp\call(function ($coverage) {
             $pk = $this->getDatabasePk();
-            foreach (range(0, 999) as $mod) {
-                $filters[] = [$pk, $mod, '=', '%s %% 1000'];
-            }
-            foreach (range(0, 999) as $mult) {
-                $filters[] = [$pk, $mult * 1000 + 500, '>'];
-                $filters[] = [$pk, $mult * 1000, '>'];
-            }
-            foreach ($filters as $filter) {
-                if (mt_rand(1, 100) > $coverage) {
-                    continue;
+            $pool = $this->getReadableMasterDatabasePool();
+            $names = $pool->names();
+            foreach ($names as $name) {
+                $_pool = $pool->filter($name);
+                foreach (range(0, 999) as $mod) {
+                    $filters[] = [$pk, $mod, '=', '%s %% 1000'];
                 }
-                $iterator = $this->filter([$filter]);
-                $scores = [];
-                [$min, $max] = [null, null];
-                foreach ($iterator as $id => $bean) {
-                    $score = $this->getSortScore($bean);
-                    $scores[$id] = $score;
-                    $min = $min === null ? $score : min($score, $min);
-                    $max = $max === null ? $score : max($score, $max);
-                    if (count($scores) > 1000) {
-                        break;
+                foreach (range(0, 999) as $mult) {
+                    $filters[] = [$pk, $mult * 1000 + 500, '>'];
+                    $filters[] = [$pk, $mult * 1000, '>'];
+                }
+                foreach ($filters as $filter) {
+                    if (mt_rand(1, 100) > $coverage) {
+                        continue;
                     }
-                }
-                if (count($scores) < 1000 || $min === $max) {
-                    continue;
-                }
-                // var_dump($filter);
-                foreach ($this->getSortChains($scores) as $ids) {
-                    $max = max($ids);
-                    $ids[] = -$max;
-                    array_unshift($ids, -$max);
-                    for ($i = count($ids); $i > 1; $i--) {
-                        [$id1, $id2] = [$ids[$i - 2], $ids[$i - 1]];
-                        if (!$this->reidSync($id1, $id2)) {
-                            return false;
+                    $iterator = $this->filter([$filter], ['pool' => $_pool]);
+                    $scores = [];
+                    [$min, $max] = [null, null];
+                    foreach ($iterator as $id => $bean) {
+                        $score = $this->getSortScore($bean);
+                        $scores[$id] = $score;
+                        $min = $min === null ? $score : min($score, $min);
+                        $max = $max === null ? $score : max($score, $max);
+                        if (count($scores) == 1000) {
+                            break;
+                        }
+                    }
+                    if (count($scores) != 1000 || $min === $max) {
+                        continue;
+                    }
+                    foreach ($this->getSortChains($scores) as $ids) {
+                        $max = max($ids);
+                        $ids[] = -$max;
+                        array_unshift($ids, -$max);
+                        for ($i = count($ids); $i > 1; $i--) {
+                            [$id1, $id2] = [$ids[$i - 2], $ids[$i - 1]];
+                            if (!$this->reidSync($id1, $id2)) {
+                                return false;
+                            }
                         }
                     }
                 }

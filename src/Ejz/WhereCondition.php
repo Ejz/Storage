@@ -2,7 +2,9 @@
 
 namespace Ejz;
 
-class WhereCondition
+use Countable;
+
+class WhereCondition implements Countable
 {
     /** @var array */
     private $conditions;
@@ -61,5 +63,13 @@ class WhereCondition
         }
         $where = $where ?: ['(FALSE)'];
         return ['WHERE ' . implode(' AND ', $where), $args];
+    }
+
+    /**
+     * @return int
+     */
+    public function count(): int
+    {
+        return count($this->conditions);
     }
 }
