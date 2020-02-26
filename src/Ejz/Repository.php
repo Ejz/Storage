@@ -548,24 +548,41 @@ class Repository implements NameInterface, ContextInterface
     }
 
     /**
+     * @param int $coverage (optional)
+     *
      * @return Promise
      */
-    public function sort(): Promise
+    public function sort(int $coverage = 100): Promise
     {
-        return \Amp\call(function () {
+        return \Amp\call(function ($coverage) {
             $pk = $this->getDatabasePk();
-            $div = mt_rand(1, 1);
-            foreach (range(0, $div - 1) as $mod) {
-                $scores = [];
-                $iterator = $this->filter([[
-                    $pk,
-                    $mod,
-                    '=',
-                    '%s %% ' . $div,
-                ]]);
-                foreach ($iterator as $id => $bean) {
-                    $scores[$id] = $this->getSortScore($bean);
+            foreach (range(0, 999) as $mod) {
+                $filters[] = [$pk, $mod, '=', '%s %% 1000'];
+            }
+            foreach (range(0, 999) as $mult) {
+                $filters[] = [$pk, $mult * 1000 + 500, '>'];
+                $filters[] = [$pk, $mult * 1000, '>'];
+            }
+            foreach ($filters as $filter) {
+                if (mt_rand(1, 100) > $coverage) {
+                    continue;
                 }
+                $iterator = $this->filter([$filter]);
+                $scores = [];
+                [$min, $max] = [null, null];
+                foreach ($iterator as $id => $bean) {
+                    $score = $this->getSortScore($bean);
+                    $scores[$id] = $score;
+                    $min = $min === null ? $score : min($score, $min);
+                    $max = $max === null ? $score : max($score, $max);
+                    if (count($scores) > 1000) {
+                        break;
+                    }
+                }
+                if (count($scores) < 1000 || $min === $max) {
+                    continue;
+                }
+                // var_dump($filter);
                 foreach ($this->getSortChains($scores) as $ids) {
                     $max = max($ids);
                     $ids[] = -$max;
@@ -579,9 +596,9 @@ class Repository implements NameInterface, ContextInterface
                 }
             }
             return true;
-        });
+        }, $coverage);
     }
-        
+
     /**
      */
     public function populateBitmap(): Promise

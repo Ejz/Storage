@@ -155,4 +155,14 @@ class AbstractBean
             throw new RuntimeException(sprintf(self::ERROR_INVALID_FIELD, $name));
         }
     }
+
+    /**
+     * @param string $name
+     *
+     * @return bool
+     */
+    public function __isset(string $name): bool
+    {
+        return isset($this->_fields[$name]);
+    }
 }

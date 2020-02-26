@@ -667,25 +667,19 @@ class TestCaseRepository extends AbstractTestCase
         ]);
         $repository->createSync();
         $text1s = [];
-        foreach (range(1, array_rand(array_flip([10, 100, 1000]))) as $_) {
+        foreach (range(1, 2000) as $_) {
             $_ = mt_rand(1, 100);
             $text1s[] = $_;
             $repository->insertSync(['text1' => $_]);
         }
         $this->assertTrue($repository->sortSync());
-        // return;
-        // $min = min($text1s);
-        // $max = max($text1s);
-        // $this->assertTrue($min < $max);
-        // $collect = [[], []];
-        // foreach ($storage->getDatabasePool()->names() as $name) {
-        //     $gen = $repository->iterate(['asc' => true, 'poolFilter' => $name]);
-        //     $collect[0][] = $gen->current()->text1;
-        //     $gen = $repository->iterate(['asc' => false, 'poolFilter' => $name]);
-        //     $collect[1][] = $gen->current()->text1;
-        // }
-        // $this->assertEquals(min($collect[1]), $min);
-        // $this->assertEquals(max($collect[0]), $max);
+        $this->assertTrue($repository->sortSync());
+        $this->assertTrue($repository->sortSync());
+        foreach ($repository->iterate() as $bean) {
+            $ex = $ex ?? $bean->text1;
+            $this->assertTrue($bean->text1 <= $ex, "$ex {$bean->text1} {$bean->id}");
+            $ex = $bean->text1;
+        }
     }
 
     /**
