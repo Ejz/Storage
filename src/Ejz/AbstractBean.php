@@ -163,6 +163,9 @@ class AbstractBean
      */
     public function __isset(string $name): bool
     {
+        if ($name === self::ID) {
+            return $this->_id !== null;
+        }
         return isset($this->_fields[$name]);
     }
 }
