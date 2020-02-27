@@ -177,7 +177,14 @@ class Bitmap implements NameInterface, BitmapInterface
         $iterator->setIterator($emit);
         return $iterator;
     }
-    
+
+    /**
+     */
+    public function close()
+    {
+        $this->client->close();
+    }
+
     /**
      * @param AbstractType $type
      *
@@ -195,6 +202,8 @@ class Bitmap implements NameInterface, BitmapInterface
                 (string) Type::bitmapInt() => 'INTEGER',
                 (string) Type::bitmapArray() => 'ARRAY',
                 (string) Type::bitmapForeignKey() => 'FOREIGNKEY',
+                (string) Type::bitmapFulltext() => 'FULLTEXT',
+                (string) Type::bitmapTriplets() => 'TRIPLETS',
             ];
         }
         return $map[(string) $type];
