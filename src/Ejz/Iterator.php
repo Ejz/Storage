@@ -257,6 +257,23 @@ class Iterator implements \Amp\Iterator, \Iterator, ContextInterface
     }
 
     /**
+     * @param array $iterators
+     *
+     * @return self
+     */
+    public static function concat(array $iterators): self
+    {
+        $emit = function ($emit) use ($iterators) {
+            foreach ($iterators as $iterator) {
+                while (yield $iterator->advance()) {
+                    yield $emit($iterator->getCurrent());
+                }
+            }
+        };
+        return new self($emit);
+    }
+
+    /**
      * @param self $iterator
      * @param int  $offset
      *

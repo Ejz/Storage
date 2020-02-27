@@ -202,4 +202,20 @@ class Type
     {
         return new Type\TypeBitmapDateTime();
     }
+
+    /**
+     * @return Type\AbstractType
+     */
+    public static function bitmapFulltext(): Type\AbstractType
+    {
+        return new Type\TypeBitmapFulltext();
+    }
+
+    /**
+     * @return Type\AbstractType
+     */
+    public static function bitmapTriplets(): Type\AbstractType
+    {
+        return new Type\TypeBitmapTriplets();
+    }
 }
