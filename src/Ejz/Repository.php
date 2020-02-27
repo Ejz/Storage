@@ -1227,11 +1227,21 @@ class Repository implements NameInterface, ContextInterface
     {
         $fields = $this->getBitmapFields();
         foreach ($fields as $field) {
+            if ($field->getName() !== $fk) {
+                continue;
+            }
             if (!$field->getType()->is(Type::bitmapForeignKey())) {
                 continue;
             }
-            $parent = $field->getType()->getParentTable();
-            return $this->getContext()['repositoryPool']->get($parent);
+            $index = $field->getType()->getParentTable();
+            $repositoryPool = $this->getContext()['repositoryPool'];
+            $names = $repositoryPool->names();
+            foreach ($names as $name) {
+                $repository = $repositoryPool->get($name);
+                if ($repository->getBitmapIndex() === $index) {
+                    return $repository;
+                }
+            }
         }
     }
 
