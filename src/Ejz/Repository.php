@@ -206,7 +206,7 @@ class Repository implements NameInterface, ContextInterface
             $ids = array_values($ids);
             $table = $this->getDatabaseTable();
             $pools = [];
-            $_ids = array_flip($ids);
+            $_ids = array_flip(array_unique($ids));
             $meta = [];
             $cached = [];
             $cache = null;

@@ -254,7 +254,7 @@ class TestCaseRepository extends AbstractTestCase
     {
         $repository = \Container\getRepository('t', [
             'database' => [
-                'cluster' => 'm:0;s:*;',
+                'cluster' => 'm:*;ms:1:id;s:*;',
                 'fields' => [
                     'field1' => Type::string(),
                     'field2' => Type::string(true),
@@ -268,6 +268,9 @@ class TestCaseRepository extends AbstractTestCase
         $id3 = $repository->insertSync();
         $id4 = $repository->insertSync();
         $id5 = $repository->insertSync();
+        foreach ($repository->get([$id5, $id2, $id1, $id5, $id4, $id3]) as $id => $bean) {
+            $this->assertTrue($bean !== null);
+        }
         $keys = array_keys(iterator_to_array($repository->get([$id5, $id2, $id1, $id5, $id4, $id3])));
         $this->assertEquals([$id5, $id2, $id1, $id4, $id3], $keys);
         $bean = $repository->get([$id1])->current();
