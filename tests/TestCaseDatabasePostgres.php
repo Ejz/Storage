@@ -4,9 +4,35 @@ namespace Tests;
 
 use Ejz\Field;
 use Ejz\WhereCondition;
+use Ejz\DatabasePostgresException;
 
 class TestCaseDatabasePostgres extends AbstractTestCase
 {
+    /**
+     * @test
+     */
+    public function test_case_database_postgres_parse_array()
+    {
+        $db = $this->databasePool->random();
+        $db->execSync('SELECT 1');
+        $connection = $this->getPrivateProperty($db, 'connection');
+        $cases = [
+            '' => [],
+            '{}' => [],
+            '{asd}' => ['asd'],
+            '{foo,bar}' => ['foo', 'bar'],
+            '{"foo","bar"}' => ['foo', 'bar'],
+            '{{foo,bar},foo,bar}' => [['foo', 'bar'], 'foo', 'bar'],
+            '{{foo,bar},{"foo"},{"bar"}}' => [['foo', 'bar'], ['foo'], ['bar']],
+            '{"\\"","\\\\"}' => ['"', '\\'],
+            '{NULL,"NULL"}' => [null, 'NULL'],
+        ];
+        foreach ($cases as $parse => $assert) {
+            [$result] = $this->callPrivateMethod($connection, 'parseArray', $parse);
+            $this->assertEquals($assert, $result);
+        }
+    }
+
     /**
      * @test
      */
@@ -29,7 +55,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
      */
     public function test_case_database_postgres_exec_1()
     {
-        $this->expectException(\Amp\Postgres\QueryExecutionError::class);
+        $this->expectException(DatabasePostgresException::class);
         $db = $this->databasePool->random();
         $db->execSync('CREATE TABLE');
     }
@@ -309,7 +335,10 @@ class TestCaseDatabasePostgres extends AbstractTestCase
         }
         $asc = !!mt_rand(0, 1);
         $params = ['asc' => $asc, 'config' => ['iterator_chunk_size' => mt_rand(1, 3)]];
-        $keys = array_keys(iterator_to_array($db->iterate('tt', $params)));
+        $values = iterator_to_array($db->iterate('tt', $params));
+        $keys = array_map(function ($value) {
+            return $value[0];
+        }, $values);
         $_ = $asc ? range(1, 60) : array_reverse(range(1, 60));
         $this->assertEquals($_, $keys);
     }
@@ -348,7 +377,10 @@ class TestCaseDatabasePostgres extends AbstractTestCase
                 'iterator_chunk_size' => mt_rand(1, 30),
             ];
             $params = compact('min', 'max', 'config');
-            $keys = array_keys(iterator_to_array($db->iterate('tt', $params)));
+            $values = iterator_to_array($db->iterate('tt', $params));
+            $keys = array_map(function ($value) {
+                return $value[0];
+            }, $values);
             $this->assertEquals(range($min, $max), $keys);
         }
     }
@@ -370,7 +402,10 @@ class TestCaseDatabasePostgres extends AbstractTestCase
             'rand_iterator_intervals' => mt_rand(2, 30),
         ];
         $params = compact('min', 'max', 'config') + ['asc' => null];
-        $keys = array_keys(iterator_to_array($db->iterate('tt', $params)));
+        $values = iterator_to_array($db->iterate('tt', $params));
+        $keys = array_map(function ($value) {
+            return $value[0];
+        }, $values);
         $this->assertNotEquals(range($min, $max), $keys);
         $this->assertNotEquals(array_reverse(range($min, $max)), $keys);
         sort($keys);
@@ -387,8 +422,11 @@ class TestCaseDatabasePostgres extends AbstractTestCase
         $id1 = $db->insertSync('tt', 'tt_id');
         $id2 = $db->insertSync('tt', 'tt_id');
         $id3 = $db->insertSync('tt', 'tt_id');
-        $keys = array_keys(iterator_to_array($db->get('tt', [$id2, $id3, $id1])));
-        $this->assertTrue($keys === [2, 3, 1]);
+        $values = iterator_to_array($db->get('tt', [$id2, $id3, $id1]));
+        $keys = array_map(function ($value) {
+            return $value[0];
+        }, $values);
+        $this->assertTrue($keys === [$id2, $id3, $id1]);
     }
 
     /**

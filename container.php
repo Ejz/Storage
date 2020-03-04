@@ -49,7 +49,7 @@ function getDatabase(string $name): object
     $user = getenv("DB_{$name}_USER") ?: getenv('DB_USER');
     $password = getenv("DB_{$name}_PASSWORD") ?: getenv('DB_PASSWORD');
     $db = getenv("DB_{$name}_NAME") ?: getenv('DB_NAME');
-    $dsn = "host={$host} port={$port} user={$user} password={$password} db={$db}";
+    $dsn = "host={$host} port={$port} user={$user} password={$password} dbname={$db}";
     return new \Ejz\DatabasePostgres($name, $dsn);
 }
 

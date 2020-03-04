@@ -32,12 +32,13 @@ class WhereCondition implements Countable
     }
 
     /**
-     * @param string $quote (optional)
+     * @param ?callable $quote (optional)
      *
      * @return array
      */
-    public function stringify(string $quote = ''): array
+    public function stringify(?callable $quote = null): array
     {
+        $quote = '"';
         $where = [];
         $args = [];
         $map = ['=' => 'IN', '!=' => 'NOT IN'];

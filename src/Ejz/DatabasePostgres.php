@@ -15,13 +15,13 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
     use NameTrait;
     use SyncTrait;
 
-    /** @var ConnectionConfig */
-    protected $connectionConfig;
+    /** @var string */
+    protected $dsn;
 
     /** @var array */
     protected $config;
 
-    /** @var ?Connection */
+    /** @var ?DatabasePostgresConnection */
     protected $connection;
 
     /** @var string */
@@ -44,9 +44,8 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
     public function __construct(string $name, string $dsn, array $config = [])
     {
         $this->setName($name);
-        $this->connectionConfig = ConnectionConfig::fromString($dsn);
+        $this->dsn = $dsn;
         $this->config = $config + [
-            'quote' => '"',
             'iterator_chunk_size' => 100,
             'rand_iterator_intervals' => 100,
         ];
@@ -59,7 +58,8 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
     private function connect(): Promise
     {
         return \Amp\call(function () {
-            $this->connection = yield \Amp\Postgres\connect($this->connectionConfig);
+            $connection = yield DatabasePostgresConnection::connect($this->dsn);
+            $this->connection = $connection;
         });
     }
 
@@ -69,6 +69,7 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
     {
         if ($this->connection !== null) {
             $this->connection->close();
+            $this->connection = null;
         }
     }
 
@@ -84,20 +85,7 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
             if ($this->connection === null) {
                 yield $this->connect();
             }
-            if ($args) {
-                $statement = yield $this->connection->prepare($sql);
-                $result = yield $statement->execute($args);
-            } else {
-                $result = yield $this->connection->query($sql);
-            }
-            if ($result instanceof PgSqlCommandResult) {
-                return $result->getAffectedRowCount();
-            }
-            $return = [];
-            while (yield $result->advance()) {
-                $return[] = $result->getCurrent();
-            }
-            return $return;
+            return yield $this->connection->query($sql, $args);
         }, $sql, $args);
     }
 
@@ -136,26 +124,10 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
     {
         return \Amp\call(function ($sql, $args) {
             $all = yield $this->all($sql, ...$args);
-            return $this->all2col($all);
+            return array_map(function ($row) {
+                return current($row);
+            }, $all);
         }, $sql, $args);
-    }
-
-    /**
-     * @param array $all
-     *
-     * @return array
-     */
-    private function all2col(array $all): array
-    {
-        if (!$all) {
-            return [];
-        }
-        $key = array_keys($all[0])[0];
-        $return = [];
-        foreach ($all as $row) {
-            $return[] = $row[$key];
-        }
-        return $return;
     }
 
     /**
@@ -181,14 +153,11 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
     public function drop(string $table): Promise
     {
         return \Amp\call(function ($table) {
-            if (!yield $this->tableExists($table)) {
-                return false;
-            }
-            $q = $this->config['quote'];
-            yield $this->exec("DROP TABLE {$q}{$table}{$q} CASCADE");
             $sequence = sprintf(self::SEQUENCE_NAME, $table);
-            yield $this->exec("DROP SEQUENCE IF EXISTS {$q}{$sequence}{$q} CASCADE");
-            return true;
+            $table = $this->quoteName($table);
+            yield $this->exec("DROP TABLE IF EXISTS {$table} CASCADE");
+            $sequence = $this->quoteName($sequence);
+            yield $this->exec("DROP SEQUENCE IF EXISTS {$sequence} CASCADE");
         }, $table);
     }
 
@@ -225,10 +194,10 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
     {
         return \Amp\call(function ($table) {
             if (!yield $this->tableExists($table)) {
-                return false;
+                return;
             }
-            $q = $this->config['quote'];
-            yield $this->exec("TRUNCATE {$q}{$table}{$q} CASCADE");
+            $table = $this->quoteName($table);
+            yield $this->exec("TRUNCATE {$table} CASCADE");
             return true;
         }, $table);
     }
@@ -245,9 +214,9 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
             if (!yield $this->tableExists($table)) {
                 return null;
             }
-            $q = $this->config['quote'];
-            [$where, $args] = $where === null ? ['', []] : $where->stringify($q);
-            $sql = "SELECT COUNT(1) FROM {$q}{$table}{$q} {$where}";
+            $table = $this->quoteName($table);
+            [$where, $args] = $where === null ? ['', []] : $where->stringify();
+            $sql = "SELECT COUNT(1) FROM {$table} {$where}";
             return (int) yield $this->val($sql, ...$args);
         }, $table, $where);
     }
@@ -267,7 +236,7 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
                 SELECT column_name FROM information_schema.columns
                 WHERE table_schema = ? AND table_name = ?
             ';
-            return yield $this->col($sql, 'public', $table);
+            return $this->col($sql, 'public', $table);
         }, $table);
     }
 
@@ -313,9 +282,9 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
                     nspname = ? AND
                     NOT indisprimary
             ';
-            $all = yield $this->all($sql, 'r', $table, 'public');
+            $iterator = yield $this->all($sql, 'r', $table, 'public');
             $indexes = [];
-            foreach ($all as ['i' => $i, 'c' => $c]) {
+            foreach ($iterator as ['i' => $i, 'c' => $c]) {
                 @ $indexes[$i][] = $c;
             }
             return $indexes;
@@ -358,7 +327,7 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
                     pg_attribute.attnum = ANY(pg_index.indkey) AND
                     indisprimary
             ';
-            return yield $this->col($sql, $table, 'public');
+            return $this->col($sql, $table, 'public');
         }, $table);
     }
 
@@ -391,7 +360,6 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
     private function minMax(string $table, bool $asc): Promise
     {
         return \Amp\call(function ($table, $asc) {
-            $q = $this->config['quote'];
             $pk = yield $this->pk($table);
             if ($pk === null || $pk === []) {
                 return $pk ?? null;
@@ -399,7 +367,7 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
             $asc = $asc ? 'ASC' : 'DESC';
             [$select, $order] = [[], []];
             foreach ($pk as $field) {
-                $_ = $q . $field . $q;
+                $_ = $this->quoteName($field);
                 $select[] = $_;
                 $order[] = $_ . ' ' . $asc;
             }
@@ -407,7 +375,7 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
             $sql = sprintf(
                 $sql,
                 implode(', ', $select),
-                $q . $table . $q,
+                $this->quoteName($table),
                 implode(', ', $order)
             );
             $one = yield $this->one($sql);
@@ -466,20 +434,20 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
         array $indexes,
         array $fks
     ): array {
-        $q = $this->config['quote'];
+        $q = [$this, 'quoteName'];
         $enq = function ($fields) use ($q) {
             return implode(', ', array_map(function ($field) use ($q) {
-                return $q . $field . $q;
+                return $q($field);
             }, $fields));
         };
         $sequence = sprintf(self::SEQUENCE_NAME, $table);
         $commands = [];
         // CREATE TABLE
-        $commands[] = "CREATE TABLE {$q}{$table}{$q}()";
+        $commands[] = "CREATE TABLE {$q($table)}()";
         // CREATE SEQUENCE
-        $commands[] = "DROP SEQUENCE IF EXISTS {$q}{$sequence}{$q} CASCADE";
+        $commands[] = "DROP SEQUENCE IF EXISTS {$q($sequence)} CASCADE";
         $commands[] = "
-            CREATE SEQUENCE {$q}{$sequence}{$q}
+            CREATE SEQUENCE {$q($sequence)}
             AS BIGINT
             START {$pkStart}
             INCREMENT {$pkIncrement}
@@ -488,15 +456,15 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
         ";
         // ADD PRIMARY KEY
         $commands[] = "
-            ALTER TABLE {$q}{$table}{$q}
-            ADD COLUMN {$q}{$pk}{$q} BIGINT
+            ALTER TABLE {$q($table)}
+            ADD COLUMN {$q($pk)} BIGINT
             DEFAULT 0 NOT NULL
         ";
         $_pk = sprintf(self::PK_CONSTRAINT_NAME, $table);
         $commands[] = "
-            ALTER TABLE {$q}{$table}{$q}
-            ADD CONSTRAINT {$q}{$_pk}{$q}
-            PRIMARY KEY ({$q}{$pk}{$q})
+            ALTER TABLE {$q($table)}
+            ADD CONSTRAINT {$q($_pk)}
+            PRIMARY KEY ({$q($pk)})
         ";
         // FIELDS
         foreach ($fields as $field) {
@@ -506,8 +474,8 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
             $default = $default !== '' ? 'DEFAULT ' . $default : '';
             $type = $this->getFieldTypeString($type);
             $commands[] = "
-                ALTER TABLE {$q}{$table}{$q}
-                ADD COLUMN {$q}{$field}{$q}
+                ALTER TABLE {$q($table)}
+                ADD COLUMN {$q($field)}
                 {$type} {$null} {$default}
             ";
         }
@@ -518,7 +486,7 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
             $u = $index->isUnique() ? 'UNIQUE' : '';
             $_index = sprintf(self::INDEX_NAME, $table, $index);
             $commands[] = "
-                CREATE {$u} INDEX {$q}{$_index}{$q} ON {$q}{$table}{$q}
+                CREATE {$u} INDEX {$q($_index)} ON {$q($table)}
                 USING {$t} ({$enq($f)})
             ";
         }
@@ -529,9 +497,9 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
             $childFields = $fk->getChildFields();
             $_fk = sprintf(self::FOREIGN_KEY_NAME, $table, (string) $fk);
             $commands[] = "
-                ALTER TABLE {$q}{$table}{$q} ADD CONSTRAINT {$q}{$_fk}{$q}
+                ALTER TABLE {$q($table)} ADD CONSTRAINT {$q($_fk)}
                 FOREIGN KEY ({$enq($childFields)})
-                REFERENCES {$q}{$parentTable}{$q} ({$enq($parentFields)})
+                REFERENCES {$q($parentTable)} ({$enq($parentFields)})
                 ON DELETE CASCADE ON UPDATE CASCADE
             ";
         }
@@ -565,19 +533,19 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
      */
     private function getInsertCommand(string $table, string $pk, int $id, array $fields): array
     {
-        $q = $this->config['quote'];
-        [$columns, $values, $args] = [[$q . $pk . $q], ['?'], [$id]];
+        $q = [$this, 'quoteName'];
+        [$columns, $values, $args] = [[$q($pk)], ['?'], [$id]];
         foreach ($fields as $field) {
-            $columns[] = $q . $field->getName() . $q;
+            $columns[] = $q($field->getName());
             $values[] = $field->getInsertString();
             $args[] = $field->exportValue();
         }
         $columns = implode(', ', $columns);
         $values = implode(', ', $values);
         $command = "
-            INSERT INTO {$q}{$table}{$q}
+            INSERT INTO {$q($table)}
             ({$columns}) VALUES ({$values})
-            RETURNING {$q}{$pk}{$q}
+            RETURNING {$q($pk)}
         ";
         return [$command, $args];
     }
@@ -590,7 +558,8 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
     public function getNextId(string $table): Promise
     {
         $sequence = sprintf(self::SEQUENCE_NAME, $table);
-        return $this->val("SELECT nextval('{$sequence}'::regclass)");
+        $sequence = $this->quoteValue($sequence);
+        return $this->val("SELECT nextval({$sequence}::regclass)");
     }
 
     /**
@@ -622,17 +591,17 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
      */
     private function getUpdateCommand(string $table, string $pk, array $ids, array $fields): array
     {
-        $q = $this->config['quote'];
+        $q = [$this, 'quoteName'];
         [$args, $update] = [[], []];
         foreach ($fields as $field) {
-            $f = $q . $field->getName() . $q;
-            $update[] = $f . ' = ' . $field->getUpdateString($q);
+            $f = $q($field->getName());
+            $update[] = $f . ' = ' . $field->getUpdateString('"');
             $args[] = $field->exportValue();
         }
         $update = implode(', ', $update);
         $args = array_merge($args, $ids);
         $_ = implode(', ', array_fill(0, count($ids), '?'));
-        $command = "UPDATE {$q}{$table}{$q} SET {$update} WHERE {$q}{$pk}{$q} IN ({$_})";
+        $command = "UPDATE {$q($table)} SET {$update} WHERE {$q($pk)} IN ({$_})";
         return [$command, $args];
     }
 
@@ -663,9 +632,9 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
      */
     private function getDeleteCommand(string $table, string $pk, array $ids): array
     {
-        $q = $this->config['quote'];
+        $q = [$this, 'quoteName'];
         $_ = implode(', ', array_fill(0, count($ids), '?'));
-        $command = "DELETE FROM {$q}{$table}{$q} WHERE {$q}{$pk}{$q} IN ({$_})";
+        $command = "DELETE FROM {$q($table)} WHERE {$q($pk)} IN ({$_})";
         return [$command, $ids];
     }
 
@@ -695,8 +664,8 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
      */
     private function getReidCommand(string $table, string $pk, int $id1, int $id2): array
     {
-        $q = $this->config['quote'];
-        $command = "UPDATE {$q}{$table}{$q} SET {$q}{$pk}{$q} = ? WHERE {$q}{$pk}{$q} = ?";
+        $q = [$this, 'quoteName'];
+        $command = "UPDATE {$q($table)} SET {$q($pk)} = ? WHERE {$q($pk)} = ?";
         return [$command, [$id2, $id1]];
     }
 
@@ -733,7 +702,6 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
             ] = $params;
             $config += $this->config;
             [
-                'quote' => $q,
                 'iterator_chunk_size' => $iterator_chunk_size,
                 'rand_iterator_intervals' => $rand_iterator_intervals,
             ] = $config;
@@ -741,6 +709,7 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
             if ($pk === null || count($pk) !== 1) {
                 return;
             }
+            $q = [$this, 'quoteName'];
             $fields = $fields ?? yield $this->fields($table);
             if ($asc === null) {
                 $min = $min ?? (yield $this->min($table))[0];
@@ -772,7 +741,7 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
                 return;
             }
             [$pk] = $pk;
-            $qpk = $q . $pk . $q;
+            $qpk = $q($pk);
             $collect = [];
             foreach ($fields as $field) {
                 if (!$field instanceof Field) {
@@ -782,11 +751,11 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
             }
             $fields = $collect;
             $select = array_map(function ($field) use ($q) {
-                $as = $q . $field->getAlias() . $q;
-                return $field->getSelectString($q) . ' AS ' . $as;
+                $as = $q($field->getAlias());
+                return $field->getSelectString('"') . ' AS ' . $as;
             }, $fields);
             $_pk = 'pk_' . md5($pk);
-            $select[] = $qpk . ' AS ' . $q . $_pk . $q;
+            $select[] = $qpk . ' AS ' . $q($_pk);
             if (is_bool($asc)) {
                 $order = 'ORDER BY ' . $qpk . ' ' . ($asc ? 'ASC' : 'DESC');
             } elseif (is_array($asc)) {
@@ -799,7 +768,7 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
             $template = sprintf(
                 'SELECT %s FROM %s %%s %s LIMIT %%s',
                 implode(', ', $select),
-                $q . $table . $q,
+                $q($table),
                 $order
             );
             if ($where !== null && !$where instanceof WhereCondition) {
@@ -816,7 +785,7 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
                 if (($asc === true && $max !== null) || ($asc === false && $min !== null)) {
                     $_where->append($pk, $asc ? $max : $min, $op2);
                 }
-                [$_where, $_args] = $_where->stringify($q);
+                [$_where, $_args] = $_where->stringify();
                 $lim = min($limit, $iterator_chunk_size);
                 $sql = sprintf($template, $_where, $lim);
                 $all = yield $this->all($sql, ...$_args);
@@ -891,6 +860,45 @@ class DatabasePostgres implements NameInterface, DatabaseInterface
             }
         };
         return new Iterator($emit);
+    }
+
+    /**
+     * @param string $value
+     *
+     * @return string
+     */
+    public function quoteValue(string $value): string
+    {
+        if ($this->connection === null) {
+            $this->connectSync();
+        }
+        return $this->connection->quoteValue($value);
+    }
+
+    /**
+     * @param string $name
+     *
+     * @return string
+     */
+    public function quoteName(string $name): string
+    {
+        if ($this->connection === null) {
+            $this->connectSync();
+        }
+        return $this->connection->quoteName($name);
+    }
+
+    /**
+     * @param string $binary
+     *
+     * @return string
+     */
+    public function quoteBinary(string $binary): string
+    {
+        if ($this->connection === null) {
+            $this->connectSync();
+        }
+        return $this->connection->quoteBinary($binary);
     }
 
     /**

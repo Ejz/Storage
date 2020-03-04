@@ -15,6 +15,9 @@ class Iterator implements \Amp\Iterator, \Iterator, ContextInterface
     /** @var ?bool */
     private $next;
 
+    /** @var int */
+    private $pos;
+
     /**
      * @param mixed $iterator (optional)
      */
@@ -48,6 +51,7 @@ class Iterator implements \Amp\Iterator, \Iterator, ContextInterface
         }
         $this->iterator = new \Amp\Producer($iterator);
         $this->next = null;
+        $this->pos = 0;
     }
 
     /**
@@ -55,7 +59,11 @@ class Iterator implements \Amp\Iterator, \Iterator, ContextInterface
      */
     public function advance(): Promise
     {
-        return $this->iterator->advance();
+        $promise = $this->iterator->advance();
+        $promise->onResolve(function () {
+            $this->pos++;
+        });
+        return $promise;
     }
 
     /**
@@ -74,7 +82,7 @@ class Iterator implements \Amp\Iterator, \Iterator, ContextInterface
         if ($this->next === null) {
             $this->next();
         }
-        return $this->next === true ? $this->iterator->getCurrent()[1] : null;
+        return $this->next === true ? $this->iterator->getCurrent() : null;
     }
 
     /**
@@ -85,7 +93,7 @@ class Iterator implements \Amp\Iterator, \Iterator, ContextInterface
         if ($this->next === null) {
             $this->next();
         }
-        return $this->next === true ? $this->iterator->getCurrent()[0] : null;
+        return $this->next === true ? ($this->pos - 1) : null;
     }
 
     /**
