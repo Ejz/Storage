@@ -14,9 +14,6 @@ class RepositoryPool extends AbstractPool
         if (!$object instanceof Repository) {
             return false;
         }
-        if (!parent::checkObject($object)) {
-            return false;
-        }
         $object->setContext($this, 'repositoryPool');
         return true;
     }

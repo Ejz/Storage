@@ -2,17 +2,12 @@
 
 namespace Ejz;
 
-use Ejz\Type\AbstractType;
-
-class Field
+class Field implements NameInterface
 {
     use NameTrait;
 
     /** @var AbstractType */
     private $type;
-
-    /** @var string */
-    private $alias;
 
     /** @var mixed */
     private $value;
@@ -23,43 +18,14 @@ class Field
     /**
      * @param string        $name
      * @param ?AbstractType $type  (optional)
-     * @param ?string       $alias (optional)
+     * @param mixed         $value (optional)
      */
-    public function __construct(string $name, ?AbstractType $type = null, ?string $alias = null)
+    public function __construct(string $name, ?AbstractType $type = null, $value = null)
     {
         $this->setName($name);
-        $this->type = $type ?? Type::default(true);
-        $this->alias = $alias ?? $this->name;
-        $this->setValue(null);
+        $this->type = $type ?? DatabaseType::default(true);
+        $this->setValue($value);
         $this->slave = false;
-    }
-
-    /**
-     * @param string $quote
-     *
-     * @return string
-     */
-    public function getSelectString(string $quote): string
-    {
-        $selectString = $this->type->getSelectString();
-        return str_replace('%s', $quote . $this->name . $quote, $selectString);
-    }
-
-    /**
-     * @return string
-     */
-    public function getInsertString(): string
-    {
-        return $this->type->getInsertString();
-    }
-
-    /**
-     * @return string
-     */
-    public function getUpdateString(string $quote): string
-    {
-        $updateString = $this->type->getUpdateString();
-        return str_replace('%s', $quote . $this->name . $quote, $updateString);
     }
 
     /**
@@ -67,8 +33,7 @@ class Field
      */
     public function importValue($value)
     {
-        $value = $this->type->import($value);
-        $this->setValue($value);
+        $this->value = $this->type->importValue($value);
     }
 
     /**
@@ -76,7 +41,7 @@ class Field
      */
     public function exportValue()
     {
-        return $this->type->export($this->value);
+        return $this->type->exportValue($this->value);
     }
 
     /**
@@ -88,24 +53,11 @@ class Field
     }
 
     /**
-     * @return string
-     */
-    public function getAlias(): string
-    {
-        return $this->alias;
-    }
-
-    /**
      * @param mixed $value
-     *
-     * @return bool
      */
-    public function setValue($value): bool
+    public function setValue($value)
     {
-        $old = $this->type->serialize($this->value);
-        $this->value = $this->type->set($value);
-        $new = $this->type->serialize($this->value);
-        return $old !== $new;
+        $this->value = $this->type->hydrateValue($value);
     }
 
     /**

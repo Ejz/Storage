@@ -4,7 +4,7 @@ namespace Ejz;
 
 use Amp\Promise;
 
-interface BitmapInterface
+interface BitmapInterface extends NameInterface
 {
     /**
      * @param string $index

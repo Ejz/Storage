@@ -34,11 +34,13 @@ abstract class AbstractTestCase extends TestCase
         $this->cache = \Container\getCache();
         $tables = $this->databasePool->tablesSync();
         $tables = array_merge(...array_values($tables));
+        $tables = array_unique($tables);
         foreach ($tables as $table) {
             $this->databasePool->dropSync($table);
         }
         $indexes = $this->bitmapPool->indexesSync();
         $indexes = array_merge(...array_values($indexes));
+        $indexes = array_unique($indexes);
         foreach ($indexes as $index) {
             $this->bitmapPool->dropSync($index);
         }

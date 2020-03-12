@@ -47,6 +47,16 @@ class AbstractPool implements PoolInterface
     }
 
     /**
+     * @param string $name
+     *
+     * @return bool
+     */
+    public function has(string $name): bool
+    {
+        return isset($this->pool[$name]);
+    }
+
+    /**
      * @return ?NameInterface
      */
     public function random(): ?NameInterface
@@ -110,18 +120,10 @@ class AbstractPool implements PoolInterface
     }
 
     /**
-     * @deprecated
+     * @return array
      */
-    public function names()
+    public function names(): array
     {
         return array_keys($this->pool);
-    }
-
-    /**
-     * @deprecated
-     */
-    public function size(): int
-    {
-        return $this->count();
     }
 }

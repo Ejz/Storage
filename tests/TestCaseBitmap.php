@@ -3,8 +3,9 @@
 namespace Tests;
 
 use Ejz\Field;
+use Ejz\FieldPool;
 use Ejz\WhereCondition;
-use Ejz\Type;
+use Ejz\BitmapType;
 
 class TestCaseBitmap extends AbstractTestCase
 {
@@ -32,7 +33,10 @@ class TestCaseBitmap extends AbstractTestCase
         foreach (range(1, 1000) as $id) {
             $bm->addSync('tt', $id);
         }
-        $keys = array_keys(iterator_to_array($bm->search('tt')));
+        $keys = [];
+        foreach ($bm->search('tt') as [$id]) {
+            $keys[] = $id;
+        }
         $this->assertEquals(range(1, 1000), $keys);
     }
 
@@ -43,14 +47,15 @@ class TestCaseBitmap extends AbstractTestCase
     {
         $bm = $this->bitmapPool->random();
         $bm->createSync('parent');
-        $fields = [new Field('fk', Type::bitmapForeignKey('parent'))];
+        $fields = new FieldPool([new Field('fk', BitmapType::foreignKey('parent'))]);
         $bm->createSync('child', $fields);
         $fk = new Field('fk');
         $fk->setValue(1);
-        $bm->addSync('child', 1, [$fk]);
+        $f = new FieldPool([$fk]);
+        $bm->addSync('child', 1, $f);
         $all = iterator_to_array($bm->search('child', [
             'fks' => 'fk',
         ]));
-        $this->assertTrue($all === [1 => [1]]);
+        $this->assertTrue($all === [[1, [1]]]);
     }
 }

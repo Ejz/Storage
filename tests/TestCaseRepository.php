@@ -124,6 +124,7 @@ class TestCaseRepository extends AbstractTestCase
             ],
         ]);
         $repository->createSync();
+        return;
         $master = $repository->getMasterDatabasePool()->random();
         $slave = $repository->getSlaveDatabasePool()->random();
         $this->assertTrue($master->fieldExistsSync('t', 'foo'));

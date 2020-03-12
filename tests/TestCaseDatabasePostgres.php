@@ -3,6 +3,7 @@
 namespace Tests;
 
 use Ejz\Field;
+use Ejz\DatabaseType;
 use Ejz\WhereCondition;
 use Ejz\DatabasePostgresException;
 
@@ -11,7 +12,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_database_postgres_parse_array()
+    public function test_case_database_postgres_connection_parse_array()
     {
         $db = $this->databasePool->random();
         $db->execSync('SELECT 1');
@@ -29,6 +30,34 @@ class TestCaseDatabasePostgres extends AbstractTestCase
         ];
         foreach ($cases as $parse => $assert) {
             [$result] = $this->callPrivateMethod($connection, 'parseArray', $parse);
+            $this->assertEquals($assert, $result);
+        }
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_database_postgres_connection_substitute()
+    {
+        $db = $this->databasePool->random();
+        $db->execSync('SELECT 1');
+        $connection = $this->getPrivateProperty($db, 'connection');
+        $cases = [
+            ['SELECT ?', [1], 'SELECT 1'],
+            ['SELECT ?', [null], 'SELECT NULL'],
+            ['SELECT ?', [1.2], 'SELECT 1.2'],
+            ['SELECT ??', [], 'SELECT ?'],
+            ['SELECT ???', [1], 'SELECT ?1'],
+            ['SELECT ?', [[1, 2]], 'SELECT \'{1,2}\''],
+            ['SELECT ?', [[null]], 'SELECT \'{NULL}\''],
+            ['SELECT #', ['table'], 'SELECT "table"'],
+            ['SELECT %', ['foo'], 'SELECT foo'],
+            ['SELECT 1 %% 2', [], 'SELECT 1 % 2'],
+            ['nextval(?::regclass)', ['seq'], 'nextval(\'seq\'::regclass)'],
+            ['SELECT $', ['f'], 'SELECT \'\\x66\''],
+        ];
+        foreach ($cases as [$substitute, $args, $assert]) {
+            $result = $this->callPrivateMethod($connection, 'substitute', $substitute, $args);
             $this->assertEquals($assert, $result);
         }
     }
@@ -134,11 +163,17 @@ class TestCaseDatabasePostgres extends AbstractTestCase
         $db = $this->databasePool->random();
         $db->execSync('CREATE TABLE t1 (i INT)');
         $db->execSync('INSERT INTO t1 (i) VALUES (1), (5), (10), (100)');
-        $this->assertTrue($db->countSync('t1') === 4);
-        $_ = ['i' => 1];
-        $this->assertTrue($db->countSync('t1', new WhereCondition($_)) === 1);
-        $_ = ['i' => [1, 5]];
-        $this->assertTrue($db->countSync('t1', new WhereCondition($_)) === 2);
+        $cases = [
+            [null, 4],
+            [new WhereCondition(['i' => 1]), 1],
+            [new WhereCondition(['i' => [1, 5]]), 2],
+            [new WhereCondition([['i', 1, '!=']]), 3],
+            [new WhereCondition([['i', 5, '%', '$field $operation $value = 0']]), 3],
+            [new WhereCondition([['i', 5, '%', '$field $operation $value != 0']]), 1],
+        ];
+        foreach ($cases as [$where, $assert]) {
+            $this->assertEquals($assert, $db->countSync('t1', $where));
+        }
     }
 
     /**
@@ -271,7 +306,8 @@ class TestCaseDatabasePostgres extends AbstractTestCase
     public function test_case_database_postgres_update()
     {
         $db = $this->databasePool->random();
-        $db->createSync('tt', 'tt_id', 1, 1, [new Field('f1')]);
+        $f = new Field('f1');
+        $db->createSync('tt', 'tt_id', 1, 1, [$f]);
         $this->assertTrue($db->fieldExistsSync('tt', 'f1'));
         $f = new Field('f1');
         $f->setValue('foo');
@@ -355,7 +391,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
             $f->setValue(mt_rand(1, 10));
             $db->insertSync('tt', 'tt_id', null, [$f]);
         }
-        $params = ['where' => ['str' => mt_rand(1, 10)]];
+        $params = ['where' => ['str' => (string) mt_rand(1, 10)]];
         $cnt = count(iterator_to_array($db->iterate('tt', $params)));
         $this->assertTrue(10 <= $cnt && $cnt <= 90);
     }

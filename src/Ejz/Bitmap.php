@@ -3,12 +3,10 @@
 namespace Ejz;
 
 use Throwable;
-// use Amp\Iterator;
 use Amp\Promise;
-use Ejz\Type\AbstractType;
 use RuntimeException;
 
-class Bitmap implements NameInterface, BitmapInterface
+class Bitmap implements BitmapInterface
 {
     use NameTrait;
     use SyncTrait;
@@ -49,6 +47,22 @@ class Bitmap implements NameInterface, BitmapInterface
     }
 
     /**
+     * @param string $index
+     *
+     * @return Promise
+     */
+    public function truncate(string $index): Promise
+    {
+        return \Amp\call(function ($index) {
+            if (!yield $this->indexExists($index)) {
+                return false;
+            }
+            // $this->client->TRUNCATE($index);
+            return true;
+        }, $index);
+    }
+
+    /**
      * @return Promise
      */
     public function indexes(): Promise
@@ -82,12 +96,13 @@ class Bitmap implements NameInterface, BitmapInterface
             $args = ['FIELDS'];
             foreach ($fields as $field) {
                 $args[] = $field->getName();
+                $args[] = $this->getFieldTypeString($field);
                 $type = $field->getType();
-                $args[] = $this->getFieldTypeString($type);
-                if ($type->is(Type::bitmapForeignKey())) {
-                    $args[] = $type->getParentTable();
+                $name = $type->getName();
+                if ($name === BitmapType::foreignKey()->getName()) {
+                    $args[] = $type->getParent();
                 }
-                if ($type->is(Type::bitmapArray())) {
+                if ($name === BitmapType::array()->getName()) {
                     $args[] = 'SEPARATOR';
                     $args[] = $type->getSeparator();
                 }
@@ -110,11 +125,10 @@ class Bitmap implements NameInterface, BitmapInterface
             $args = ['VALUES'];
             foreach ($fields as $field) {
                 $value = $field->exportValue();
-                if ($value === null) {
-                    continue;
+                if ($value !== null) {
+                    $args[] = $field->getName();
+                    $args[] = $value;
                 }
-                $args[] = $field->getName();
-                $args[] = $value;
             }
             $args = count($args) > 1 ? $args : [];
             $this->client->ADD($index, $id, ...$args);
@@ -186,26 +200,26 @@ class Bitmap implements NameInterface, BitmapInterface
     }
 
     /**
-     * @param AbstractType $type
+     * @param Field $field
      *
      * @return string
      */
-    private function getFieldTypeString(AbstractType $type): string
+    private function getFieldTypeString(Field $field): string
     {
         static $map;
         if ($map === null) {
             $map = [
-                (string) Type::bitmapBool() => 'BOOLEAN',
-                (string) Type::bitmapDate() => 'DATE',
-                (string) Type::bitmapDateTime() => 'DATETIME',
-                (string) Type::bitmapString() => 'STRING',
-                (string) Type::bitmapInt() => 'INTEGER',
-                (string) Type::bitmapArray() => 'ARRAY',
-                (string) Type::bitmapForeignKey() => 'FOREIGNKEY',
-                (string) Type::bitmapFulltext() => 'FULLTEXT',
-                (string) Type::bitmapTriplets() => 'TRIPLETS',
+                (string) BitmapType::bool() => 'BOOLEAN',
+                (string) BitmapType::date() => 'DATE',
+                (string) BitmapType::dateTime() => 'DATETIME',
+                (string) BitmapType::string() => 'STRING',
+                (string) BitmapType::int() => 'INTEGER',
+                (string) BitmapType::array() => 'ARRAY',
+                (string) BitmapType::foreignKey() => 'FOREIGNKEY',
+                (string) BitmapType::fulltext() => 'FULLTEXT',
+                (string) BitmapType::triplets() => 'TRIPLETS',
             ];
         }
-        return $map[(string) $type];
+        return $map[$field->getType()->getName()];
     }
 }

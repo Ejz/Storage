@@ -4,7 +4,7 @@ namespace Ejz;
 
 use Amp\Promise;
 
-interface DatabaseInterface
+interface DatabaseInterface extends NameInterface
 {
     /**
      * @param string $sql
@@ -133,20 +133,20 @@ interface DatabaseInterface
 
     /**
      * @param string $table
-     * @param string $pk
-     * @param int    $pkStart     (optional)
-     * @param int    $pkIncrement (optional)
-     * @param array  $fields      (optional)
-     * @param array  $indexes     (optional)
-     * @param array  $foreignKeys (optional)
+     * @param string $primaryKey
+     * @param int    $primaryKeyStart     (optional)
+     * @param int    $primaryKeyIncrement (optional)
+     * @param array  $fields              (optional)
+     * @param array  $indexes             (optional)
+     * @param array  $foreignKeys         (optional)
      *
      * @return Promise
      */
     public function create(
         string $table,
-        string $pk,
-        int $pkStart = 1,
-        int $pkIncrement = 1,
+        string $primaryKey,
+        int $primaryKeyStart = 1,
+        int $primaryKeyIncrement = 1,
         array $fields = [],
         array $indexes = [],
         array $foreignKeys = []
@@ -154,13 +154,18 @@ interface DatabaseInterface
 
     /**
      * @param string $table
-     * @param string $pk
-     * @param ?int   $int    (optional)
-     * @param array  $fields (optional)
+     * @param string $primaryKey
+     * @param ?int   $int        (optional)
+     * @param array  $fields     (optional)
      *
      * @return Promise
      */
-    public function insert(string $table, string $pk, ?int $id = null, array $fields = []): Promise;
+    public function insert(
+        string $table,
+        string $primaryKey,
+        ?int $id = null,
+        array $fields = []
+    ): Promise;
 
     /**
      * @param string $table
@@ -171,13 +176,18 @@ interface DatabaseInterface
 
     /**
      * @param string $table
-     * @param string $pk
+     * @param string $primaryKey
      * @param array  $ids
      * @param array  $fields
      *
      * @return Promise
      */
-    public function update(string $table, string $pk, array $ids, array $fields): Promise;
+    public function update(
+        string $table,
+        string $primaryKey,
+        array $ids,
+        array $fields
+    ): Promise;
 
     /**
      * @param string $table

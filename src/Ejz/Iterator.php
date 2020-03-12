@@ -130,30 +130,20 @@ class Iterator implements \Amp\Iterator, \Iterator, ContextInterface
         if (count($iterators) === 1) {
             return current($iterators);
         }
-        $iterator = new self();
-        $emit = function ($emit) use ($iterators, $sort, $iterator) {
+        $emit = function ($emit) use ($iterators, $sort) {
             $values = [];
-            $ids = [];
             while (true) {
-                do {
-                    $diff = array_diff_key($iterators, $values);
-                    $results = yield array_map(function ($iterator) {
-                        return $iterator->advance();
-                    }, $diff);
-                    foreach ($results as $key => $value) {
-                        if ($value === false) {
-                            unset($iterators[$key]);
-                            unset($diff[$key]);
-                            continue;
-                        }
-                        $value = $iterators[$key]->getCurrent();
-                        if (!isset($ids[$value[0]])) {
-                            $ids[$value[0]] = true;
-                            $values[$key] = $value;
-                            unset($diff[$key]);
-                        }
+                $results = yield array_map(function ($iterator) {
+                    return $iterator->advance();
+                }, array_diff_key($iterators, $values));
+                foreach ($results as $key => $value) {
+                    if ($value === false) {
+                        unset($iterators[$key]);
+                        continue;
                     }
-                } while ($diff);
+                    $value = $iterators[$key]->getCurrent();
+                    $values[$key] = $value;
+                }
                 if (!$values) {
                     break;
                 }
@@ -163,8 +153,7 @@ class Iterator implements \Amp\Iterator, \Iterator, ContextInterface
                 unset($values[$key]);
             }
         };
-        $iterator->setIterator($emit);
-        return $iterator;
+        return new self($emit);
     }
 
     /**

@@ -128,7 +128,7 @@ class DatabasePostgresConnection
         if ($this->deferred !== null) {
             $deferred = $this->deferred;
             $this->deferred = null;
-            $deferred->fail(new DatabasePostgresException(self::DEFERRED_ERROR . $this->defsql));
+            $deferred->fail(new DatabasePostgresException(self::DEFERRED_ERROR));
         }
         if ($this->connection !== null) {
             \pg_close($this->connection);
@@ -175,7 +175,6 @@ class DatabasePostgresConnection
         if ($result === false) {
             throw new DatabasePostgresException(\pg_last_error());
         }
-        $this->defsql = $args[0];
         $this->deferred = new Deferred();
         Loop::enable($this->poll);
         try {
@@ -234,11 +233,24 @@ class DatabasePostgresConnection
         $sql = preg_replace('~\s+~', ' ', $sql);
         $args = array_values($args);
         $pos = 0;
-        $sql = preg_replace_callback('~\?~i', function ($match) use (&$pos, $args) {
-            $value = $args[$pos++] ?? null;
-            return $this->quoteValue($this->castTo($value, null));
+        $sql = preg_replace_callback('~((\\?|#|%|\\$)+)~i', function ($match) use (&$pos, $args) {
+            $len = strlen($match[0]);
+            $single = $match[0][0];
+            $return = str_repeat($single, (int) ($len / 2));
+            if ($len % 2 === 1) {
+                $value = $args[$pos++] ?? null;
+                if ($single === '?') {
+                    $value = $this->castTo($value);
+                } elseif ($single === '#') {
+                    $value = $this->quoteName($value);
+                } elseif ($single === '$') {
+                    $value = $value === null ? 'NULL' : '\'' . $this->quoteBinary($value) . '\'';
+                }
+                $return .= $value;
+            }
+            return $return;
         }, $sql);
-        return $sql;
+        return trim($sql);
     }
 
     /**
@@ -281,12 +293,11 @@ class DatabasePostgresConnection
     }
 
     /**
-     * @param mixed   $value
-     * @param ?string $type
+     * @param mixed $value
      *
      * @return string
      */
-    private function castTo($value, ?string $type): string
+    private function castTo($value): string
     {
         $array = function ($value) use (&$array) {
             $value = \array_map(function ($value) use (&$array) {
@@ -307,19 +318,18 @@ class DatabasePostgresConnection
             }, $value);
             return '{' . \implode(',', $value) . '}';
         };
-        $type = $type ?? \gettype($value);
-        switch ($type) {
+        switch (\gettype($value)) {
             case 'NULL':
                 return 'NULL';
             case 'boolean':
-                return $value ? 't' : 'f';
+                return $value ? 'TRUE' : 'FALSE';
             case 'array':
-                return $array($value);
+                return $this->quoteValue($array($value));
             case 'integer':
             case 'double':
                 return (string) $value;
             case 'string':
-                return $value;
+                return $this->quoteValue($value);
         }
     }
 

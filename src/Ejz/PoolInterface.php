@@ -14,6 +14,13 @@ interface PoolInterface extends Countable
     public function get(string $name): ?NameInterface;
 
     /**
+     * @param string $name
+     *
+     * @return bool
+     */
+    public function has(string $name): bool;
+
+    /**
      * @return ?NameInterface
      */
     public function random(): ?NameInterface;
@@ -31,4 +38,9 @@ interface PoolInterface extends Countable
      * @return array
      */
     public function each(callable $function): array;
+
+    /**
+     * @return array
+     */
+    public function names(): array;
 }
