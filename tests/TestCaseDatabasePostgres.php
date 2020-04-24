@@ -344,19 +344,19 @@ class TestCaseDatabasePostgres extends AbstractTestCase
     public function test_case_database_postgres_reid()
     {
         $db = $this->databasePool->random();
-        $db->createSync('tt', 'tt_id', 1, 1);
-        $id = $db->insertSync('tt', 'tt_id');
-        $this->assertTrue($id === 1);
-        $ok = function ($tt_id) use ($db) {
-            return !!$db->countSync('tt', new WhereCondition(compact('tt_id')));
-        };
-        $this->assertTrue($ok(1));
-        $_ = $db->reidSync('tt', 'tt_id', 1, 2);
-        $this->assertTrue($_);
-        $this->assertTrue(!$ok(1));
-        $this->assertTrue($ok(2));
-        $_ = $db->reidSync('tt', 'tt_id', 1, 2);
-        $this->assertTrue(!$_);
+        $db->createSync('tt', 'tt_id', 1, 1, [new Field('val')]);
+        $db->insertSync('tt', 'tt_id', 1, [new Field('val', null, '1')]);
+        $db->insertSync('tt', 'tt_id', 2, [new Field('val', null, '2')]);
+        $db->insertSync('tt', 'tt_id', 3, [new Field('val', null, '3')]);
+        $db->reidSync('tt', 'tt_id', [1, 2, 3]);
+        $all = $db->allSync('SELECT * FROM tt');
+        $col = [];
+        foreach ($all as $row) {
+            $col[$row['tt_id']] = $row['val'];
+        }
+        $this->assertTrue($col[2] === '1');
+        $this->assertTrue($col[3] === '2');
+        $this->assertTrue($col[1] === '3');
     }
 
     /**

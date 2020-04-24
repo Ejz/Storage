@@ -658,33 +658,66 @@ class DatabasePostgres implements DatabaseInterface
     /**
      * @param string $table
      * @param string $primaryKey
-     * @param int    $id1
-     * @param int    $id2
+     * @param array  $ids
      *
      * @return Promise
      */
-    public function reid(string $table, string $primaryKey, int $id1, int $id2): Promise
+    public function reid(string $table, string $primaryKey, array $ids): Promise
     {
-        return \Amp\call(function ($table, $primaryKey, $id1, $id2) {
-            if ($id1 === $id2) {
+        return \Amp\call(function ($table, $primaryKey, $ids) {
+            if (!$ids) {
                 return false;
             }
-            $args = $this->getReidCommand($table, $primaryKey, $id1, $id2);
-            return (bool) yield $this->exec(...$args);
-        }, $table, $primaryKey, $id1, $id2);
+            $commands = $this->getReidCommands($table, $primaryKey, $ids);
+            foreach ($commands as $args) {
+                if (!yield $this->exec(...$args)) {
+                    return false;
+                }
+            }
+            return true;
+        }, $table, $primaryKey, $ids);
     }
 
     /**
      * @param string $table
      * @param string $primaryKey
-     * @param int    $id1
-     * @param int    $id2
+     * @param array  $ids
      *
      * @return array
      */
-    private function getReidCommand(string $table, string $primaryKey, int $id1, int $id2): array
+    private function getReidCommands(string $table, string $primaryKey, array $ids): array
     {
-        return ['UPDATE # SET # = ? WHERE # = ?', $table, $primaryKey, $id2, $primaryKey, $id1];
+        $commands = [];
+        $c = count($ids);
+        $_ = implode(', ', array_fill(0, $c, '?'));
+        $command = [
+            'UPDATE # SET # = - # WHERE # IN (' . $_ . ')',
+            $table,
+            $primaryKey,
+            $primaryKey,
+            $primaryKey,
+        ];
+        array_push($command, ...$ids);
+        $commands[] = $command;
+        $json = [];
+        for ($i = 0; $i < $c - 1; $i++) {
+            $json[- $ids[$i]] = $ids[$i + 1];
+        }
+        $json[- $ids[$c - 1]] = $ids[0];
+        $command = [
+            'UPDATE # SET # = ((?::JSONB)->>(#::TEXT))::BIGINT WHERE # IN (' . $_ . ')',
+            $table,
+            $primaryKey,
+            json_encode((object) $json),
+            $primaryKey,
+            $primaryKey,
+        ];
+        $ids = array_map(function ($id) {
+            return - $id;
+        }, $ids);
+        array_push($command, ...$ids);
+        $commands[] = $command;
+        return $commands;
     }
 
     /**

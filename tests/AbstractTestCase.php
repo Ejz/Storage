@@ -38,13 +38,14 @@ abstract class AbstractTestCase extends TestCase
         foreach ($tables as $table) {
             $this->databasePool->dropSync($table);
         }
-        $indexes = $this->bitmapPool->indexesSync();
-        $indexes = array_merge(...array_values($indexes));
-        $indexes = array_unique($indexes);
-        foreach ($indexes as $index) {
-            $this->bitmapPool->dropSync($index);
-        }
-        $this->cache->clear();
+        // $indexes = $this->bitmapPool->indexesSync();
+        // var_dump()
+        // $indexes = array_merge(...array_values($indexes));
+        // $indexes = array_unique($indexes);
+        // foreach ($indexes as $index) {
+        //     $this->bitmapPool->dropSync($index);
+        // }
+        // $this->cache->getClient()->FLUSHDB();
     }
 
     /**

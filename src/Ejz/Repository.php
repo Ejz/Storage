@@ -391,9 +391,8 @@ class Repository implements NameInterface, ContextInterface
             $fields = $bean->getFields();
             $id = $bean->id;
             if ($this->hasSortScore()) {
-                $field = new Field(self::BITMAP_SYSTEM_FIELD, BitmapType::array());
-                $field->setValue($this->getMasterDatabasePool($id)->names());
-                $fields[] = $field;
+                $value = $this->getMasterDatabasePool($id)->names();
+                $fields[] = new Field(self::BITMAP_SYSTEM_FIELD, BitmapType::array(), $value);
             }
             yield $pool->add($index, $id, $fields);
             return $id;
@@ -497,7 +496,7 @@ class Repository implements NameInterface, ContextInterface
     {
         $cache = $this->getCache();
         $name = $this->getName();
-        foreach (array_chunk($ids, 1000) as $chunk) {
+        foreach (array_chunk($ids, 1000, false) as $chunk) {
             $cache->drop(...array_map(function ($id) use ($name) {
                 return $name . '.' . $id;
             }, $chunk));
@@ -570,27 +569,35 @@ class Repository implements NameInterface, ContextInterface
     }
 
     /**
-     * @param int $id1
-     * @param int $id2
+     * @param array $ids
      *
      * @return Promise
      */
-    public function reid(int $id1, int $id2): Promise
+    public function reid(array $ids): Promise
     {
-        return \Amp\call(function ($id1, $id2) {
-            $pool1 = $this->getWritableDatabasePool($id1);
-            $pool2 = $this->getWritableDatabasePool($id2);
-            $names1 = $pool1->names();
-            $names2 = $pool2->names();
-            if ($names1 !== $names2) {
+        return \Amp\call(function ($ids) {
+            $pools = array_map(function ($id) {
+                return $this->getWritableDatabasePool($id);
+            }, $ids);
+            $ex = null;
+            foreach ($pools as $pool) {
+                $ex = $ex ?? $pool;
+                if ($ex->names() !== $pool->names()) {
+                    return false;
+                }
+                $ex = $pool;
+            }
+            if ($ex === null) {
                 return false;
             }
             $table = $this->getDatabaseTable();
             $primaryKey = $this->getDatabasePrimaryKey();
-            yield $pool1->reid($table, $primaryKey, $id1, $id2);
-            $this->dropCache([$id1]);
+            if (!yield $ex->reid($table, $primaryKey, $ids)) {
+                return false;
+            }
+            $this->dropCache($ids);
             return true;
-        }, $id1, $id2);
+        }, $ids);
     }
 
     /**
@@ -629,18 +636,12 @@ class Repository implements NameInterface, ContextInterface
                             break;
                         }
                     }
-                    if (count($scores) != 1000 || $min === $max) {
+                    if (count($scores) < 2 || $min === $max) {
                         continue;
                     }
                     foreach ($this->getSortChains($scores) as $ids) {
-                        $max = max($ids);
-                        $ids[] = -$max;
-                        array_unshift($ids, -$max);
-                        for ($i = count($ids); $i > 1; $i--) {
-                            [$id1, $id2] = [$ids[$i - 2], $ids[$i - 1]];
-                            if (!$this->reidSync($id1, $id2)) {
-                                return false;
-                            }
+                        if (!$this->reidSync($ids)) {
+                            return false;
                         }
                     }
                 }
@@ -650,6 +651,7 @@ class Repository implements NameInterface, ContextInterface
     }
 
     /**
+     * @return Promise
      */
     public function populateBitmap(): Promise
     {
@@ -672,17 +674,21 @@ class Repository implements NameInterface, ContextInterface
      */
     public function search($query, array $params = []): Iterator
     {
-        $id = AbstractBean::ID;
         $params += [
             'sortby' => null,
             'asc' => true,
-            'fks' => [],
+            'foreignKeys' => [],
+            'config' => [],
         ];
         [
             'sortby' => $sortby,
             'asc' => $asc,
-            'fks' => $fks,
+            'config' => $config,
         ] = $params;
+        $config += $this->config;
+        [
+            'search_chunk_size' => $search_chunk_size,
+        ] = $config;
         $index = $this->getBitmapIndex();
         $bitmap = $this->getReadableMasterBitmapPool()->random();
         $names = [null];
@@ -691,39 +697,29 @@ class Repository implements NameInterface, ContextInterface
         }
         $size = 0;
         $iterators = array_map(function ($name) use (
-            $bitmap, $index, $query, $params, &$size
+            $bitmap, $index, $query, $params, &$size, $search_chunk_size
         ) {
-            if ($name !== null) {
-                $query = "({$query}) & (@_names:{$name})";
-            }
+            $_ = self::BITMAP_SYSTEM_FIELD;
+            $query = $name === null ? $query : "({$query}) & (@{$_}:{$name})";
             $params = compact('query') + $params;
             $iterator = $bitmap->search($index, $params);
             $size += $iterator->getContext()['size'];
-            $iterator = Iterator::chunk($iterator, 30);
+            $iterator = Iterator::chunk($iterator, $search_chunk_size);
             $repositories = [$this];
-            $fks = $params['fks'];
-            foreach ((array) $fks as $fk) {
-                $repositories[] = $this->getRepositoryForFk($fk);
+            foreach ((array) $params['foreignKeys'] as $foreignKey) {
+                $repositories[] = $this->getRepositoryForForeignKey($foreignKey);
             }
-            $emit = function ($emit) use ($iterator, $repositories) {
+            $count = count($repositories);
+            $emit = function ($emit) use ($iterator, $repositories, $count) {
                 while (yield $iterator->advance()) {
                     $chunk = $iterator->getCurrent();
-                    $ids = [];
-                    foreach ($chunk as [$id, $fks]) {
-                        @ $ids[0][] = $id;
-                        $len = $len ?? count($fks);
-                        for ($i = 0; $i < $len; $i++) {
-                            @ $ids[$i + 1][] = $fks[$i];
-                        }
-                    }
                     $iterators = [];
-                    foreach ($ids as $idx => $_ids) {
-                        $iterators[] = $repositories[$idx]->get($_ids);
+                    for ($i = 0; $i < $count; $i++) {
+                        $iterators[] = $repositories[$i]->get(array_column($chunk, $i));
                     }
                     $paired = Iterator::pair($iterators);
                     while (yield $paired->advance()) {
                         $value = $paired->getCurrent();
-                        $value = array_merge(...$value);
                         yield $emit($value);
                     }
                 }
@@ -739,9 +735,12 @@ class Repository implements NameInterface, ContextInterface
      */
     private function normalize()
     {
+        $this->config = $this->config + [
+            'database' => [],
+            'bitmap' => [],
+            'search_chunk_size' => 30,
+        ];
         $cluster = 'm:!*;ms:1:id;s:!*;ss:1:id;';
-        $this->config['database'] = $this->config['database'] ?? [];
-        $this->config['bitmap'] = $this->config['bitmap'] ?? [];
         $this->config['database']['cluster'] = $this->config['database']['cluster'] ?? 'w:!*;';
         $this->config['bitmap']['cluster'] = $this->config['bitmap']['cluster'] ?? 'w:!*;';
         $this->config['database']['cluster'] = $cluster . $this->config['database']['cluster'];
@@ -768,34 +767,29 @@ class Repository implements NameInterface, ContextInterface
         $indexes = $this->config['database']['indexes'] ?? [];
         $collect = [];
         foreach ($indexes as $name => $index) {
-            $is_assoc = count($index) === count(array_filter(array_keys($index), 'is_string'));
-            if (!$is_assoc) {
-                $index = ['fields' => $index];
+            if ($index instanceof AbstractIndexType) {
+                $index = ['type' => $index, 'fields' => [$name]];
             }
-            $type = $index['type'] ?? null;
-            $collect[] = new Index($name, $index['fields'], $type);
+            $index['slave'] = $index['slave'] ?? false;
+            $collect[$name] = $index;
         }
         $this->config['database']['indexes'] = $collect;
         //
-        $fks = $this->config['database']['fks'] ?? [];
+        $foreignKeys = $this->config['database']['foreignKeys'] ?? [];
         $collect = [];
-        foreach ($fks as $name => $fk) {
-            if (is_string($fk)) {
-                [$t, $f] = explode('.', $fk);
-                $fk = [
-                    'childFields' => explode(',', $f),
-                    'parentFields' => explode(',', $f),
-                    'parentTable' => $t,
+        foreach ($foreignKeys as $name => $foreignKey) {
+            if (is_string($foreignKey)) {
+                [$one, $two] = explode('.', $foreignKey);
+                $foreignKey = [
+                    'childFields' => explode(',', $two),
+                    'parentFields' => explode(',', $two),
+                    'parentTable' => $one,
                 ];
             }
-            $collect[] = new ForeignKey(
-                $name,
-                (array) $fk['childFields'],
-                $fk['parentTable'],
-                (array) $fk['parentFields']
-            );
+            $foreignKey['slave'] = $foreignKey['slave'] ?? false;
+            $collect[$name] = $foreignKey;
         }
-        $this->config['database']['fks'] = $collect;
+        $this->config['database']['foreignKeys'] = $collect;
         //
         $fields = $this->config['bitmap']['fields'] ?? [];
         $collect = [];
@@ -813,12 +807,7 @@ class Repository implements NameInterface, ContextInterface
         //
         $getSortScore = $this->config['getSortScore'] ?? null;
         $this->config['hasSortScore'] = $_ = is_callable($getSortScore);
-        if (!$_) {
-            $getSortScore = function () {
-                return 0;
-            };
-        }
-        $this->config['getSortScore'] = $getSortScore;
+        $this->config['getSortScore'] = $_ ? $getSortScore : function () { return 0; };
         //
         $this->config['cache'] = $this->config['cache'] ?? null;
         if ($this->config['cache'] !== null) {
@@ -1118,17 +1107,9 @@ class Repository implements NameInterface, ContextInterface
     /**
      * @return string
      */
-    public function getDatabasePk(): string
-    {
-        return $this->getDatabasePrimaryKey();
-    }
-
-    /**
-     * @return string
-     */
     public function getDatabasePrimaryKey(): string
     {
-        return $this->config['database']['pk'];
+        return $this->config['database']['primaryKey'];
     }
 
     /**
@@ -1272,26 +1253,27 @@ class Repository implements NameInterface, ContextInterface
     }
 
     /**
-     * @param string $fk
+     * @param string $foreignKey
      *
      * @return self
      */
-    public function getRepositoryForFk(string $fk): self
+    public function getRepositoryForForeignKey(string $foreignKey): self
     {
         $fields = $this->getBitmapFields();
         foreach ($fields as $field) {
-            if ($field->getName() !== $fk) {
+            if ($field->getName() !== $foreignKey) {
                 continue;
             }
-            if (!$field->getType()->is(Type::bitmapForeignKey())) {
+            $type = $field->getType();
+            if ($type->getName() !== BitmapType::foreignKey()->getName()) {
                 continue;
             }
-            $index = $field->getType()->getParentTable();
+            $parent = $type->getParent();
             $repositoryPool = $this->getContext()['repositoryPool'];
             $names = $repositoryPool->names();
             foreach ($names as $name) {
                 $repository = $repositoryPool->get($name);
-                if ($repository->getBitmapIndex() === $index) {
+                if ($repository->getBitmapIndex() === $parent) {
                     return $repository;
                 }
             }

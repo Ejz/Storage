@@ -191,22 +191,21 @@ interface DatabaseInterface extends NameInterface
 
     /**
      * @param string $table
-     * @param string $pk
+     * @param string $primaryKey
      * @param array  $ids
      *
      * @return Promise
      */
-    public function delete(string $table, string $pk, array $ids): Promise;
+    public function delete(string $table, string $primaryKey, array $ids): Promise;
 
     /**
      * @param string $table
-     * @param string $pk
-     * @param int    $id1
-     * @param int    $id2
+     * @param string $primaryKey
+     * @param array  $ids
      *
      * @return Promise
      */
-    public function reid(string $table, string $pk, int $id1, int $id2): Promise;
+    public function reid(string $table, string $primaryKey, array $ids): Promise;
 
     /**
      * @param string $table

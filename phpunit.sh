@@ -22,7 +22,7 @@ if [ "$action" = "begin" -o "$action" = "start" ]; then
     cleanup
     #
     $sudo docker pull redis
-    $sudo docker run --name phpunit_REDIS -p "$in":6380:6379 -d redis
+    $sudo docker run --name phpunit_redis -p "$in":6380:6379 -d redis
     echo REDIS_HOST="$in" >>"$dotenv"
     echo REDIS_PORT=6380 >>"$dotenv"
     echo >>"$dotenv"
@@ -34,7 +34,7 @@ if [ "$action" = "begin" -o "$action" = "start" ]; then
     for BITMAP in `echo "$BITMAP_ENVS" | tr ',' ' '`; do
         i=$((i + 1))
         p=$((i + 61000))
-        $sudo docker run --name phpunit_BITMAP_"$BITMAP" -p "$in":"$p":61000 -d ejzspb/bitmap
+        $sudo docker run --name phpunit_bitmap_"$BITMAP" -p "$in":"$p":61000 -d ejzspb/bitmap
         echo BITMAP_"$BITMAP"_HOST="$in" >>"$dotenv"
         echo BITMAP_"$BITMAP"_PORT="$p" >>"$dotenv"
     done
@@ -47,7 +47,7 @@ if [ "$action" = "begin" -o "$action" = "start" ]; then
     for DB in `echo "$DB_ENVS" | tr ',' ' '`; do
         i=$((i + 1))
         p=$((i + 5432))
-        $sudo docker run --name phpunit_DB_"$DB" -p "$in":"$p":5432 \
+        $sudo docker run --name phpunit_db_"$DB" -p "$in":"$p":5432 \
             -e POSTGRES_PASSWORD=1 -d postgres:11
         echo DB_"$DB"_HOST="$in" >>"$dotenv"
         echo DB_"$DB"_PORT="$p" >>"$dotenv"
