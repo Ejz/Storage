@@ -5,33 +5,35 @@ namespace Ejz;
 class DatabaseType
 {
     /**
-     * @param bool $nullable (optional)
+     * @param array $options (optional)
      *
      * @return AbstractType
      */
-    public static function default(bool $nullable = false): AbstractType
+    public static function DEFAULT(array $options = []): AbstractType
     {
-        return new class(__FUNCTION__, $nullable) extends AbstractType {
+        return new class(__FUNCTION__, $options) extends AbstractType {
+            public function setValue($value)
+            {
+                return $value;
+            }
         };
     }
 
     /**
-     * @param bool $nullable (optional)
+     * @param array $options (optional)
      *
      * @return AbstractType
      */
-    public static function string(bool $nullable = false): AbstractType
+    public static function STRING(array $options = []): AbstractType
     {
-        return new class(__FUNCTION__, $nullable) extends AbstractType {
-            /**
-             * @param mixed $value
-             *
-             * @return mixed
-             */
-            public function hydrateValue($value)
+        $options += [
+            'databaseType' => 'TEXT',
+        ];
+        return new class(__FUNCTION__, $options) extends AbstractType {
+            public function setValue($value)
             {
                 if ($value === null) {
-                    return $this->nullable ? null : '';
+                    return $this->isNullable() ? null : '';
                 }
                 return (string) $value;
             }
@@ -39,22 +41,17 @@ class DatabaseType
     }
 
     /**
-     * @param bool $nullable (optional)
+     * @param array $options (optional)
      *
      * @return AbstractType
      */
-    public static function int(bool $nullable = false): AbstractType
+    public static function INTEGER(array $options = []): AbstractType
     {
-        return new class(__FUNCTION__, $nullable) extends AbstractType {
-            /**
-             * @param mixed $value
-             *
-             * @return mixed
-             */
-            public function hydrateValue($value)
+        return new class(__FUNCTION__, $options) extends AbstractType {
+            public function setValue($value)
             {
                 if ($value === null) {
-                    return $this->nullable ? null : 0;
+                    return $this->isNullable() ? null : 0;
                 }
                 return (int) $value;
             }
@@ -62,22 +59,20 @@ class DatabaseType
     }
 
     /**
-     * @param bool $nullable (optional)
+     * @param array $options (optional)
      *
      * @return AbstractType
      */
-    public static function float(bool $nullable = false): AbstractType
+    public static function FLOAT(array $options = []): AbstractType
     {
-        return new class(__FUNCTION__, $nullable) extends AbstractType {
-            /**
-             * @param mixed $value
-             *
-             * @return mixed
-             */
-            public function hydrateValue($value)
+        $options += [
+            'databaseType' => 'REAL',
+        ];
+        return new class(__FUNCTION__, $options) extends AbstractType {
+            public function setValue($value)
             {
                 if ($value === null) {
-                    return $this->nullable ? null : 0.0;
+                    return $this->isNullable() ? null : 0.0;
                 }
                 return (float) $value;
             }
@@ -85,22 +80,17 @@ class DatabaseType
     }
 
     /**
-     * @param bool $nullable (optional)
+     * @param array $options (optional)
      *
      * @return AbstractType
      */
-    public static function bool(bool $nullable = false): AbstractType
+    public static function BOOLEAN(array $options = []): AbstractType
     {
-        return new class(__FUNCTION__, $nullable) extends AbstractType {
-            /**
-             * @param mixed $value
-             *
-             * @return mixed
-             */
-            public function hydrateValue($value)
+        return new class(__FUNCTION__, $options) extends AbstractType {
+            public function setValue($value)
             {
                 if ($value === null) {
-                    return $this->nullable ? null : false;
+                    return $this->isNullable() ? null : false;
                 }
                 return (bool) $value;
             }
@@ -108,22 +98,17 @@ class DatabaseType
     }
 
     /**
-     * @param bool $nullable (optional)
+     * @param array $options (optional)
      *
      * @return AbstractType
      */
-    public static function date(bool $nullable = false): AbstractType
+    public static function DATE(array $options = []): AbstractType
     {
-        return new class(__FUNCTION__, $nullable) extends AbstractType {
-            /**
-             * @param mixed $value
-             *
-             * @return mixed
-             */
-            public function hydrateValue($value)
+        return new class(__FUNCTION__, $options) extends AbstractType {
+            public function setValue($value)
             {
                 if ($value === null) {
-                    return $this->nullable ? null : date('Y-m-d', 0);
+                    return $this->isNullable() ? null : date('Y-m-d', 0);
                 }
                 return date('Y-m-d', strtotime($value));
             }
@@ -131,22 +116,20 @@ class DatabaseType
     }
 
     /**
-     * @param bool $nullable (optional)
+     * @param array $options (optional)
      *
      * @return AbstractType
      */
-    public static function dateTime(bool $nullable = false): AbstractType
+    public static function DATETIME(array $options = []): AbstractType
     {
-        return new class(__FUNCTION__, $nullable) extends AbstractType {
-            /**
-             * @param mixed $value
-             *
-             * @return mixed
-             */
-            public function hydrateValue($value)
+        $options += [
+            'databaseType' => 'TIMESTAMP(0) WITHOUT TIME ZONE',
+        ];
+        return new class(__FUNCTION__, $options) extends AbstractType {
+            public function setValue($value)
             {
                 if ($value === null) {
-                    return $this->nullable ? null : date('Y-m-d H:i:s', 0);
+                    return $this->isNullable() ? null : date('Y-m-d H:i:s', 0);
                 }
                 return date('Y-m-d H:i:s', strtotime($value));
             }
@@ -154,42 +137,30 @@ class DatabaseType
     }
 
     /**
-     * @param bool $nullable (optional)
+     * @param array $options (optional)
      *
      * @return AbstractType
      */
-    public static function json(bool $nullable = false): AbstractType
+    public static function JSON(array $options = []): AbstractType
     {
-        return new class(__FUNCTION__, $nullable) extends AbstractType {
-            /**
-             * @param mixed $value
-             *
-             * @return mixed
-             */
-            public function hydrateValue($value)
+        $options += [
+            'databaseType' => 'JSONB',
+        ];
+        return new class(__FUNCTION__, $options) extends AbstractType {
+            public function setValue($value)
             {
                 if ($value === null) {
-                    return $this->nullable ? null : [];
+                    return $this->isNullable() ? null : [];
                 }
                 return (array) $value;
             }
 
-            /**
-             * @param mixed $value
-             *
-             * @return mixed
-             */
             public function importValue($value)
             {
                 $value = $value !== null ? json_decode($value, true) : null;
-                return $this->hydrateValue($value);
+                return $this->setValue($value);
             }
 
-            /**
-             * @param mixed $value
-             *
-             * @return mixed
-             */
             public function exportValue($value)
             {
                 return $value !== null ? json_encode($value) : null;
@@ -198,34 +169,38 @@ class DatabaseType
     }
 
     /**
-     * @param bool $nullable (optional)
+     * @param array $options (optional)
      *
      * @return AbstractType
      */
-    public static function bigInt(bool $nullable = false): AbstractType
+    public static function BIGINT(array $options = []): AbstractType
     {
-        $type = self::int($nullable);
-        $type->setName(__FUNCTION__);
-        return $type;
+        return new class(__FUNCTION__, $options) extends AbstractType {
+            public function setValue($value)
+            {
+                if ($value === null) {
+                    return $this->isNullable() ? null : 0;
+                }
+                return (int) $value;
+            }
+        };
     }
 
     /**
-     * @param bool $nullable (optional)
+     * @param array $options (optional)
      *
      * @return AbstractType
      */
-    public static function intArray(bool $nullable = false): AbstractType
+    public static function INTARRAY(array $options = []): AbstractType
     {
-        return new class(__FUNCTION__, $nullable) extends AbstractType {
-            /**
-             * @param mixed $value
-             *
-             * @return mixed
-             */
-            public function hydrateValue($value)
+        $options += [
+            'databaseType' => 'INTEGER[]',
+        ];
+        return new class(__FUNCTION__, $options) extends AbstractType {
+            public function setValue($value)
             {
                 if ($value === null) {
-                    return $this->nullable ? null : [];
+                    return $this->isNullable() ? null : [];
                 }
                 return array_map('intval', (array) $value);
             }
@@ -233,22 +208,20 @@ class DatabaseType
     }
 
     /**
-     * @param bool $nullable (optional)
+     * @param array $options (optional)
      *
      * @return AbstractType
      */
-    public static function stringArray(bool $nullable = false): AbstractType
+    public static function STRARRAY(array $options = []): AbstractType
     {
-        return new class(__FUNCTION__, $nullable) extends AbstractType {
-            /**
-             * @param mixed $value
-             *
-             * @return mixed
-             */
-            public function hydrateValue($value)
+        $options += [
+            'databaseType' => 'TEXT[]',
+        ];
+        return new class(__FUNCTION__, $options) extends AbstractType {
+            public function setValue($value)
             {
                 if ($value === null) {
-                    return $this->nullable ? null : [];
+                    return $this->isNullable() ? null : [];
                 }
                 return array_map('strval', (array) $value);
             }
@@ -256,84 +229,48 @@ class DatabaseType
     }
 
     /**
-     * @param array $enums    (optional)
-     * @param bool  $nullable (optional)
+     * @param array $options (optional)
      *
      * @return AbstractType
      */
-    public static function enum(array $enums = [], bool $nullable = false): AbstractType
+    public static function ENUM(array $options = []): AbstractType
     {
-        return new class(__FUNCTION__, $nullable, $enums) extends AbstractType {
-            /** @var array */
-            private $enums;
-
-            /**
-             * @param string $name
-             * @param bool   $nullable
-             * @param array  $enums
-             */
-            public function __construct(string $name, bool $nullable, array $enums)
+        $options += [
+            'databaseType' => 'TEXT',
+            'enums' => [],
+        ];
+        $options['enums'] = array_map('strval', (array) $options['enums']);
+        $options['enums'] = array_unique($options['enums']);
+        $options['enums'] = array_values($options['enums']);
+        return new class(__FUNCTION__, $options) extends AbstractType {
+            public function setValue($value)
             {
-                parent::__construct($name, $nullable);
-                $enums = array_map('strval', $enums);
-                $enums = array_unique($enums);
-                $enums = array_values($enums);
-                $this->enums = $enums;
-            }
-
-            /**
-             * @return array
-             */
-            public function getEnums(): array
-            {
-                return $this->enums;
-            }
-
-            /**
-             * @param mixed $value
-             *
-             * @return mixed
-             */
-            public function hydrateValue($value)
-            {
-                if ($value !== null) {
-                    $value = (string) $value;
-                    if (in_array($value, $this->enums, true)) {
-                        return $value;
-                    }
+                $enums = $this->options['enums'];
+                if ($value === null) {
+                    return $this->isNullable() ? null : $enums[0];
                 }
-                return $this->nullable ? null : $this->enums[0];
+                $value = (string) $value;
+                return in_array($value, $enums, true) ? $value : $enums[0];
             }
         };
     }
 
     /**
-     * @param bool $nullable (optional)
+     * @param array $options (optional)
      *
      * @return AbstractType
      */
-    public static function binary(bool $nullable = false): AbstractType
+    public static function BINARY(array $options = []): AbstractType
     {
-        return new class(__FUNCTION__, $nullable) extends AbstractType {
-            /**
-             * @param string $name
-             * @param bool   $nullable
-             */
-            public function __construct(string $name, bool $nullable)
-            {
-                parent::__construct($name, $nullable);
-                $this->binary = true;
-            }
-
-            /**
-             * @param mixed $value
-             *
-             * @return mixed
-             */
-            public function hydrateValue($value)
+        $options += [
+            'databaseType' => 'BYTEA',
+            'binary' => true,
+        ];
+        return new class(__FUNCTION__, $options) extends AbstractType {
+            public function setValue($value)
             {
                 if ($value === null) {
-                    return $this->nullable ? null : '';
+                    return $this->isNullable() ? null : '';
                 }
                 return (string) $value;
             }
@@ -341,56 +278,57 @@ class DatabaseType
     }
 
     /**
-     * @param bool $nullable (optional)
+     * @param array $options (optional)
      *
      * @return AbstractType
      */
-    public static function compressedBinary(bool $nullable = false): AbstractType
+    public static function COMPRESSED(array $options = []): AbstractType
     {
-        return new class(__FUNCTION__, $nullable) extends AbstractType {
-            /**
-             * @param string $name
-             * @param bool   $nullable
-             */
-            public function __construct(string $name, bool $nullable)
-            {
-                parent::__construct($name, $nullable);
-                $this->binary = true;
-            }
-
-            /**
-             * @param mixed $value
-             *
-             * @return mixed
-             */
-            public function hydrateValue($value)
+        $options += [
+            'databaseType' => 'BYTEA',
+            'binary' => true,
+        ];
+        return new class(__FUNCTION__, $options) extends AbstractType {
+            public function setValue($value)
             {
                 if ($value === null) {
-                    return $this->nullable ? null : '';
+                    return $this->isNullable() ? null : '';
                 }
                 return (string) $value;
             }
 
-            /**
-             * @param mixed $value
-             *
-             * @return mixed
-             */
             public function importValue($value)
             {
                 $value = $value !== null ? gzinflate($value) : null;
-                return $this->hydrateValue($value);
+                return $this->setValue($value);
             }
 
-            /**
-             * @param mixed $value
-             *
-             * @return mixed
-             */
             public function exportValue($value)
             {
                 return $value !== null ? gzdeflate($value) : null;
             }
         };
+    }
+
+    /**
+     * @param string $name
+     * @param array  $arguments
+     *
+     * @return AbstractType
+     */
+    public static function __callStatic(string $name, array $arguments): AbstractType
+    {
+        $name = strtoupper($name);
+        $map = [
+            'INT' => 'INTEGER',
+            'BOOL' => 'BOOLEAN',
+            'COMPRESSEDBINARY' => 'COMPRESSED',
+            'REAL' => 'FLOAT',
+            'TEXT' => 'STRING',
+            'STRINGARRAY' => 'STRARRAY',
+            'INTEGERARRAY' => 'INTARRAY',
+        ];
+        $map = $map[$name];
+        return self::$map(...$arguments);
     }
 }

@@ -11,6 +11,6 @@ class DatabasePool extends AbstractPool
      */
     protected function checkObject($object): bool
     {
-        return $object instanceof DatabaseInterface;
+        return $object instanceof Database;
     }
 }

@@ -2,27 +2,21 @@
 
 namespace Ejz;
 
-use Amp\Loop;
 use Amp\Promise;
-use Amp\Postgres\Connection;
-use Amp\Postgres\ConnectionConfig;
-use Amp\Postgres\PgSqlCommandResult;
-use Ejz\Type\AbstractType;
-use RuntimeException;
 
-class DatabasePostgres implements DatabaseInterface
+class Database implements NameInterface
 {
     use NameTrait;
     use SyncTrait;
 
     /** @var string */
-    protected $dsn;
+    private $dsn;
 
     /** @var array */
-    protected $config;
+    private $config;
 
-    /** @var ?DatabasePostgresConnection */
-    protected $connection;
+    /** @var ?DatabaseConnection */
+    private $connection;
 
     /** @var string */
     private const SEQUENCE_NAME = '%s_seq';
@@ -58,7 +52,7 @@ class DatabasePostgres implements DatabaseInterface
     private function connect(): Promise
     {
         return \Amp\call(function () {
-            $connection = yield DatabasePostgresConnection::connect($this->dsn);
+            $connection = yield DatabaseConnection::connect($this->dsn);
             $this->connection = $connection;
         });
     }
@@ -461,11 +455,12 @@ class DatabasePostgres implements DatabaseInterface
         ];
         // FIELDS
         foreach ($fields as $field) {
+            $type = $field->getType();
             $commands[] = [
                 'ALTER TABLE # ADD COLUMN # % NULL',
                 $table,
                 $field->getName(),
-                $this->getFieldTypeString($field),
+                $type->getOptions()['databaseType'] ?? $type->getName()
             ];
         }
         // INDEXES
@@ -793,7 +788,7 @@ class DatabasePostgres implements DatabaseInterface
             $types = [];
             foreach ($fields as &$field) {
                 if (!$field instanceof Field) {
-                    $field = new Field($field);
+                    $field = new Field($field, DatabaseType::DEFAULT());
                 }
                 $types[$field->getName()] = $field->getType();
             }
@@ -920,35 +915,6 @@ class DatabasePostgres implements DatabaseInterface
             $extwo = $two;
         }
         return $intervals;
-    }
-
-    /**
-     * @param Field $field
-     *
-     * @return string
-     */
-    private function getFieldTypeString(Field $field): string
-    {
-        static $map;
-        if ($map === null) {
-            $map = [
-                (string) DatabaseType::default()          => 'TEXT',
-                (string) DatabaseType::string()           => 'TEXT',
-                (string) DatabaseType::int()              => 'INTEGER',
-                (string) DatabaseType::float()            => 'REAL',
-                (string) DatabaseType::bool()             => 'BOOLEAN',
-                (string) DatabaseType::date()             => 'DATE',
-                (string) DatabaseType::dateTime()         => 'TIMESTAMP(0) WITHOUT TIME ZONE',
-                (string) DatabaseType::json()             => 'JSONB',
-                (string) DatabaseType::bigInt()           => 'BIGINT',
-                (string) DatabaseType::intArray()         => 'INTEGER[]',
-                (string) DatabaseType::stringArray()      => 'TEXT[]',
-                (string) DatabaseType::enum()             => 'TEXT',
-                (string) DatabaseType::binary()           => 'BYTEA',
-                (string) DatabaseType::compressedBinary() => 'BYTEA',
-            ];
-        }
-        return $map[$field->getType()->getName()];
     }
 
     /**
