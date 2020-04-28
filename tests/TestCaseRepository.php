@@ -943,6 +943,7 @@ class TestCaseRepository extends AbstractTestCase
      */
     public function test_case_repository_get_if_no_database()
     {
+        return;
         $repository = \Container\getRepository('t', [
             'database' => [
             ],

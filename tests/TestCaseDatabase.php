@@ -5,14 +5,14 @@ namespace Tests;
 use Ejz\Field;
 use Ejz\DatabaseType;
 use Ejz\WhereCondition;
-use Ejz\DatabasePostgresException;
+use Ejz\DatabaseException;
 
-class TestCaseDatabasePostgres extends AbstractTestCase
+class TestCaseDatabase extends AbstractTestCase
 {
     /**
      * @test
      */
-    public function test_case_database_postgres_connection_parse_array()
+    public function test_case_database_connection_parse_array()
     {
         $db = $this->databasePool->random();
         $db->execSync('SELECT 1');
@@ -37,7 +37,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_database_postgres_connection_substitute()
+    public function test_case_database_connection_substitute()
     {
         $db = $this->databasePool->random();
         $db->execSync('SELECT 1');
@@ -65,7 +65,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_database_postgres_exec_0()
+    public function test_case_database_exec_0()
     {
         $db = $this->databasePool->random();
         $db->execSync('CREATE TABLE t (tt TEXT)');
@@ -82,9 +82,9 @@ class TestCaseDatabasePostgres extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_database_postgres_exec_1()
+    public function test_case_database_exec_1()
     {
-        $this->expectException(DatabasePostgresException::class);
+        $this->expectException(DatabaseException::class);
         $db = $this->databasePool->random();
         $db->execSync('CREATE TABLE');
     }
@@ -92,7 +92,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_database_postgres_all_one_col_val()
+    public function test_case_database_all_one_col_val()
     {
         $db = $this->databasePool->random();
         $db->execSync('CREATE TABLE t (t1 TEXT, t2 TEXT)');
@@ -115,7 +115,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_database_postgres_tables()
+    public function test_case_database_tables()
     {
         $db = $this->databasePool->random();
         $db->execSync('CREATE TABLE t1 ()');
@@ -129,7 +129,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_database_postgres_drop()
+    public function test_case_database_drop()
     {
         $db = $this->databasePool->random();
         $db->execSync('CREATE TABLE t1 ()');
@@ -141,7 +141,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_database_postgres_count_truncate()
+    public function test_case_database_count_truncate()
     {
         $db = $this->databasePool->random();
         $this->assertTrue($db->countSync('t1') === null);
@@ -158,7 +158,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_database_postgres_count_where()
+    public function test_case_database_count_where()
     {
         $db = $this->databasePool->random();
         $db->execSync('CREATE TABLE t1 (i INT)');
@@ -179,7 +179,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_database_postgres_fields()
+    public function test_case_database_fields()
     {
         $db = $this->databasePool->random();
         $db->execSync('CREATE TABLE t1 (t1 TEXT, ti INT, pk1 INT NOT NULL, pk2 INT NOT NULL)');
@@ -200,7 +200,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_database_postgres_indexes()
+    public function test_case_database_indexes()
     {
         $db = $this->databasePool->random();
         $db->execSync('CREATE TABLE t1 (t1_field TEXT, t2_field INT NOT NULL)');
@@ -223,7 +223,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_database_postgres_pk()
+    public function test_case_database_pk()
     {
         $db = $this->databasePool->random();
         $db->execSync('CREATE TABLE t0 (t0 TEXT)');
@@ -241,7 +241,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_database_postgres_min_max()
+    public function test_case_database_min_max()
     {
         $db = $this->databasePool->random();
         //
@@ -264,8 +264,8 @@ class TestCaseDatabasePostgres extends AbstractTestCase
         $db->execSync('INSERT INTO t2 (pk1, pk2) VALUES (?, ?)', '2', 'b');
         $db->execSync('INSERT INTO t2 (pk1, pk2) VALUES (?, ?)', '3', 'c');
         $db->execSync('INSERT INTO t2 (pk1, pk2) VALUES (?, ?)', '1', 'a');
-        $this->assertTrue(!is_int($db->minSync('t2'))[0]);
-        $this->assertTrue(!is_int($db->maxSync('t2'))[0]);
+        $this->assertTrue(!is_int($db->minSync('t2')[0]));
+        $this->assertTrue(!is_int($db->maxSync('t2')[0]));
         $this->assertEquals(['1', 'a'], $db->minSync('t2'));
         $this->assertEquals(['3', 'c'], $db->maxSync('t2'));
         //
@@ -278,7 +278,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_database_postgres_create()
+    public function test_case_database_create()
     {
         $db = $this->databasePool->random();
         $db->createSync('tt', 'tt_id');
@@ -290,7 +290,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_database_postgres_insert()
+    public function test_case_database_insert()
     {
         $db = $this->databasePool->random();
         $db->createSync('tt', 'tt_id', 4, 2);
@@ -303,13 +303,13 @@ class TestCaseDatabasePostgres extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_database_postgres_update()
+    public function test_case_database_update()
     {
         $db = $this->databasePool->random();
-        $f = new Field('f1');
+        $f = new Field('f1', DatabaseType::STRING());
         $db->createSync('tt', 'tt_id', 1, 1, [$f]);
         $this->assertTrue($db->fieldExistsSync('tt', 'f1'));
-        $f = new Field('f1');
+        $f = new Field('f1', DatabaseType::STRING());
         $f->setValue('foo');
         $id = $db->insertSync('tt', 'tt_id', null, [$f]);
         $val = $db->valSync('SELECT f1 FROM tt WHERE tt_id = ?', $id);
@@ -324,7 +324,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_database_postgres_delete()
+    public function test_case_database_delete()
     {
         $db = $this->databasePool->random();
         $db->createSync('tt', 'tt_id', 1, 1);
@@ -341,13 +341,13 @@ class TestCaseDatabasePostgres extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_database_postgres_reid()
+    public function test_case_database_reid()
     {
         $db = $this->databasePool->random();
-        $db->createSync('tt', 'tt_id', 1, 1, [new Field('val')]);
-        $db->insertSync('tt', 'tt_id', 1, [new Field('val', null, '1')]);
-        $db->insertSync('tt', 'tt_id', 2, [new Field('val', null, '2')]);
-        $db->insertSync('tt', 'tt_id', 3, [new Field('val', null, '3')]);
+        $db->createSync('tt', 'tt_id', 1, 1, [new Field('val', DatabaseType::STRING())]);
+        $db->insertSync('tt', 'tt_id', 1, [new Field('val', DatabaseType::STRING(), '1')]);
+        $db->insertSync('tt', 'tt_id', 2, [new Field('val', DatabaseType::STRING(), '2')]);
+        $db->insertSync('tt', 'tt_id', 3, [new Field('val', DatabaseType::STRING(), '3')]);
         $db->reidSync('tt', 'tt_id', [1, 2, 3]);
         $all = $db->allSync('SELECT * FROM tt');
         $col = [];
@@ -362,7 +362,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_database_postgres_iterate_0()
+    public function test_case_database_iterate_0()
     {
         $db = $this->databasePool->random();
         $db->createSync('tt', 'tt_id');
@@ -382,10 +382,10 @@ class TestCaseDatabasePostgres extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_database_postgres_iterate_1()
+    public function test_case_database_iterate_1()
     {
         $db = $this->databasePool->random();
-        $f = new Field('str');
+        $f = new Field('str', DatabaseType::STRING());
         $db->createSync('tt', 'tt_id', 1, 1, [$f]);
         foreach (range(1, 500) as $_) {
             $f->setValue(mt_rand(1, 10));
@@ -399,7 +399,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_database_postgres_iterate_2()
+    public function test_case_database_iterate_2()
     {
         $db = $this->databasePool->random();
         $db->createSync('tt', 'tt_id');
@@ -424,19 +424,22 @@ class TestCaseDatabasePostgres extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_database_postgres_iterate_3()
+    public function test_case_database_iterate_3()
     {
         $db = $this->databasePool->random();
         $db->createSync('tt', 'tt_id');
         foreach (range(1, 500) as $_) {
             $db->insertSync('tt', 'tt_id');
         }
-        $min = mt_rand(1, 100);
-        $max = mt_rand($min, 250);
+        do {
+            $min = mt_rand(1, 100);
+            $max = mt_rand($min, 250);
+        } while (abs($min - $max) < 50);
         $config = [
             'iterator_chunk_size' => mt_rand(10, 30),
             'rand_iterator_intervals' => mt_rand(2, 30),
         ];
+        // var_dump($min, $max, $config);
         $params = compact('min', 'max', 'config') + ['asc' => null];
         $values = iterator_to_array($db->iterate('tt', $params));
         $keys = array_map(function ($value) {
@@ -451,7 +454,7 @@ class TestCaseDatabasePostgres extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_database_postgres_get()
+    public function test_case_database_get()
     {
         $db = $this->databasePool->random();
         $db->createSync('tt', 'tt_id');
@@ -468,17 +471,30 @@ class TestCaseDatabasePostgres extends AbstractTestCase
     /**
      * @test
      */
-    public function test_case_database_postgres_rand_intervals()
+    public function test_case_database_rand_intervals()
     {
         $db = $this->databasePool->random();
         //
-        $intervals = $this->call($db, 'getIntervalsForRandIterator', 1, 3, 3);
+        $intervals = $this->callPrivateMethod($db, 'getIntervalsForRandIterator', 1, 3, 3);
         $this->assertEquals([[1, 1], [2, 2], [3, 3]], $intervals);
-        $intervals = $this->call($db, 'getIntervalsForRandIterator', 1, 3, 30);
+        $intervals = $this->callPrivateMethod($db, 'getIntervalsForRandIterator', 1, 3, 30);
         $this->assertEquals([1, 1], $intervals[0]);
         $this->assertEquals([3, 3], $intervals[count($intervals) - 1]);
-        $intervals = $this->call($db, 'getIntervalsForRandIterator', 1, 30, 10);
+        $intervals = $this->callPrivateMethod($db, 'getIntervalsForRandIterator', 1, 30, 10);
         $this->assertEquals([1, 3], $intervals[0]);
         $this->assertEquals([28, 30], $intervals[count($intervals) - 1]);
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_database_pool()
+    {
+        $pool = $this->databasePool;
+        $pool->execSync('create table t()');
+        $res = $pool->each(function ($db) {
+            return $db->tableExistsSync('t');
+        });
+        $this->assertEquals(array_fill_keys($pool->names(), true), $res);
     }
 }
