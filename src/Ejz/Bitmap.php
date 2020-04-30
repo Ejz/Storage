@@ -3,11 +3,8 @@
 namespace Ejz;
 
 use Amp\Promise;
+use Amp\Success;
 use Amp\Deferred;
-use Amp\Http\Client\Connection\ConnectionLimitingPool;
-use Amp\Http\Client\HttpClientBuilder;
-use Amp\Http\Client\HttpClient;
-use Amp\Http\Client\Request;
 
 class Bitmap implements NameInterface
 {
@@ -16,9 +13,6 @@ class Bitmap implements NameInterface
 
     /** @var dsn */
     private $dsn;
-
-    /** @var HttpClient */
-    private $client;
 
     /** @var array */
     private $config;
@@ -37,10 +31,6 @@ class Bitmap implements NameInterface
         $this->config = $config + [
             'iterator_chunk_size' => 100,
         ];
-        $pool = ConnectionLimitingPool::byAuthority(2);
-        $this->client = (new HttpClientBuilder())
-            ->usingPool($pool)
-            ->build();
     }
 
     /**
@@ -110,9 +100,11 @@ class Bitmap implements NameInterface
             $args[] = $field->getName();
             $type = $field->getType();
             $query .= ' ' . $type->getName();
-            [$_query, $_args] = $type->getCreateOptions();
-            $query .= $_query ? ' ' . $_query : '';
-            $args = array_merge($args, $_args);
+            if (method_exists($type, 'getCreateOptions')) {
+                [$_query, $_args] = $type->getCreateOptions();
+                $query .= $_query ? ' ' . $_query : '';
+                $args = array_merge($args, $_args);
+            }
         }
         return $this->query($query, ...$args);
         
@@ -194,6 +186,8 @@ class Bitmap implements NameInterface
                     'min' => null,
                     'max' => null,
                     'foreignKeys' => [],
+                    'forceForeignKeyFormat' => false,
+                    'emitTotal' => false,
                     'config' => [],
                 ];
                 [
@@ -203,6 +197,8 @@ class Bitmap implements NameInterface
                     'min' => $min,
                     'max' => $max,
                     'foreignKeys' => $foreignKeys,
+                    'forceForeignKeyFormat' => $forceForeignKeyFormat,
+                    'emitTotal' => $emitTotal,
                     'config' => $config,
                 ] = $params;
                 $config += $this->config;
@@ -223,10 +219,18 @@ class Bitmap implements NameInterface
                     $args = array_merge($args, $foreignKeys);
                 }
                 $command .= ' WITHCURSOR TIMEOUT 3600';
-                $command .= ' LIMIT ' . min($limit, $iterator_chunk_size);
+                $command .= ' LIMIT ' . $iterator_chunk_size;
                 $response = yield $resolver($command, $args, true);
-                $iterator->setContext($response['total'], 'size');
+                if ($emitTotal) {
+                    yield $emit($response['total']);
+                }
                 $cursor = $response['cursor'];
+                if (isset($response['ids']) && $forceForeignKeyFormat) {
+                    $response['records'] = array_map(function ($id) {
+                        return compact('id');
+                    }, $response['ids']);
+                    unset($response['ids']);
+                }
                 foreach (($response['ids'] ?? $response['records']) as $elem) {
                     yield $emit($elem);
                 }
@@ -235,6 +239,12 @@ class Bitmap implements NameInterface
                     $args = [$cursor];
                     $response = yield $resolver($command, $args, false);
                     $cursor = $response['cursor'];
+                    if (isset($response['ids']) && $forceForeignKeyFormat) {
+                        $response['records'] = array_map(function ($id) {
+                            return compact('id');
+                        }, $response['ids']);
+                        unset($response['ids']);
+                    }
                     foreach (($response['ids'] ?? $response['records']) as $elem) {
                         yield $emit($elem);
                     }
@@ -270,31 +280,30 @@ class Bitmap implements NameInterface
      */
     private function sendQueries(array $queries): Promise
     {
-        return \Amp\call(function ($queries) {
-            $collect = [];
-            foreach ($queries as $id => [$query, $args]) {
-                $collect[] = [
-                    'id' => $id,
-                    'query' => $this->substitute($query, $args),
-                ];
-            }
-            $request = new Request($this->dsn, 'POST');
-            $request->setBody(json_encode($collect));
-            $request->setHeader('Content-Type', 'application/json');
-            $response = yield $this->client->request($request);
-            $buffer = yield $response->getBody()->buffer();
-            $results = json_decode($buffer, true);
-            if (!$results) {
-                throw new BitmapException(self::NO_RESULTS_ERROR);
-            }
-            $collect = [];
-            foreach ($results as $result) {
-                $id = $result['id'];
-                unset($result['id']);
-                $collect[$id] = $result;
-            }
-            return $collect;
-        }, $queries);
+        $ch = \curl_init($this->dsn);
+        $collect = [];
+        foreach ($queries as $id => [$query, $args]) {
+            $collect[] = [
+                'id' => $id,
+                'query' => $this->substitute($query, $args),
+            ];
+        }
+        \curl_setopt($ch, \CURLOPT_POSTFIELDS, \json_encode($collect));
+        \curl_setopt($ch, \CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+        \curl_setopt($ch, \CURLOPT_RETURNTRANSFER, true);
+        $results = \curl_exec($ch);
+        \curl_close($ch);
+        $results = \json_decode($results, true);
+        if (!$results) {
+            throw new BitmapException(self::NO_RESULTS_ERROR);
+        }
+        $collect = [];
+        foreach ($results as $result) {
+            $id = $result['id'];
+            unset($result['id']);
+            $collect[$id] = $result;
+        }
+        return new Success($collect);
     }
 
     /**

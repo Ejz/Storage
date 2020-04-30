@@ -2,25 +2,29 @@
 
 namespace Ejz;
 
-class AbstractType implements NameInterface
+abstract class AbstractType implements NameInterface
 {
     use NameTrait;
 
-    /** @var bool */
-    protected $nullable;
-
-    /** @var bool */
-    protected $binary;
+    /** @var array */
+    protected $options;
 
     /**
      * @param string $name
-     * @param bool   $nullable
+     * @param array  $options (optional)
      */
-    public function __construct(string $name, bool $nullable)
+    public function __construct(string $name, array $options = [])
     {
         $this->setName($name);
-        $this->nullable = $nullable;
-        $this->binary = false;
+        $this->options = $options;
+    }
+
+    /**
+     * @return array
+     */
+    public function getOptions(): array
+    {
+        return $this->options;
     }
 
     /**
@@ -28,7 +32,7 @@ class AbstractType implements NameInterface
      */
     public function isNullable(): bool
     {
-        return $this->nullable;
+        return $this->options['nullable'] ?? false;
     }
 
     /**
@@ -36,30 +40,7 @@ class AbstractType implements NameInterface
      */
     public function isBinary(): bool
     {
-        return $this->binary;
-    }
-
-    /**
-     * @param mixed $value
-     *
-     * @return mixed
-     */
-    public function hydrateValue($value)
-    {
-        if ($value === null) {
-            return $this->nullable ? null : '';
-        }
-        return $value;
-    }
-
-    /**
-     * @param mixed $value
-     *
-     * @return mixed
-     */
-    public function importValue($value)
-    {
-        return $this->hydrateValue($value);
+        return $this->options['binary'] ?? false;
     }
 
     /**
@@ -71,4 +52,21 @@ class AbstractType implements NameInterface
     {
         return $value;
     }
+
+    /**
+     * @param mixed $value
+     *
+     * @return mixed
+     */
+    public function importValue($value)
+    {
+        return $this->setValue($value);
+    }
+
+    /**
+     * @param mixed $value
+     *
+     * @return mixed
+     */
+    abstract public function setValue($value);
 }
