@@ -6,7 +6,6 @@ use Amp\Promise;
 use Amp\Success;
 use Amp\Deferred;
 use RuntimeException;
-use Ejz\Type\AbstractType;
 use Closure;
 
 class Repository implements NameInterface, ContextInterface

@@ -24,9 +24,6 @@ class AbstractBean
     /** @var string */
     private const ERROR_INVALID_FIELD = 'ERROR_INVALID_FIELD: %s';
 
-    /** @var string */
-    public const ID = 'id';
-
     /**
      * @param Repository $repository
      * @param ?int       $id
@@ -46,22 +43,6 @@ class AbstractBean
     public function getRepository(): Repository
     {
         return $this->_repository;
-    }
-
-    /**
-     * @return ?int
-     */
-    public function getId(): ?int
-    {
-        return $this->_id;
-    }
-
-    /**
-     * @param ?int $id
-     */
-    public function setId(?int $id)
-    {
-        $this->_id = $id;
     }
 
     /**
@@ -111,8 +92,10 @@ class AbstractBean
      */
     public function setValues(array $values)
     {
-        foreach ($values as $key => $value) {
-            $this->$key = $value;
+        foreach ($values as $name => $value) {
+            $this->checkField($name);
+            $this->_fields[$name]->setValue($value);
+            $this->_changed[$name] = true;
         }
     }
 
@@ -122,14 +105,13 @@ class AbstractBean
      */
     public function __set(string $name, $value)
     {
-        if ($name === self::ID) {
+        if ($name === 'id') {
             $this->_id = $value;
             return;
         }
         $this->checkField($name);
-        if ($this->_fields[$name]->setValue($value)) {
-            $this->_changed[] = $name;
-        }
+        $this->_fields[$name]->setValue($value);
+        $this->_changed[$name] = true;
     }
 
     /**
@@ -139,7 +121,7 @@ class AbstractBean
      */
     public function __get(string $name)
     {
-        if ($name === self::ID) {
+        if ($name === 'id') {
             return $this->_id;
         }
         $this->checkField($name);
@@ -151,7 +133,7 @@ class AbstractBean
      */
     private function checkField(string $name)
     {
-        if (!isset($this->_fields[$name])) {
+        if (!array_key_exists($name, $this->_fields)) {
             throw new RuntimeException(sprintf(self::ERROR_INVALID_FIELD, $name));
         }
     }
@@ -163,9 +145,9 @@ class AbstractBean
      */
     public function __isset(string $name): bool
     {
-        if ($name === self::ID) {
+        if ($name === 'id') {
             return $this->_id !== null;
         }
-        return isset($this->_fields[$name]);
+        return array_key_exists($name, $this->_fields);
     }
 }

@@ -11,6 +11,6 @@ class BitmapPool extends AbstractPool
      */
     protected function checkObject($object): bool
     {
-        return $object instanceof BitmapInterface;
+        return $object instanceof Bitmap;
     }
 }

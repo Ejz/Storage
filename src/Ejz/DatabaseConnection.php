@@ -149,6 +149,7 @@ class DatabaseConnection
             throw new DatabasePostgresConnection();
         }
         return \Amp\call(function ($sql, $args) {
+            // var_dump($this->substitute($sql, $args));
             $sql = $this->substitute($sql, $args);
             return $this->createResult(yield from $this->send('pg_send_query', $sql));
         }, $sql, $args);
@@ -202,7 +203,8 @@ class DatabaseConnection
                 while (($array = \pg_fetch_array($result, null, \PGSQL_ASSOC)) !== false) {
                     $pos = 0;
                     $array = array_map(function ($value) use (&$pos, &$types) {
-                        return $this->castFrom($value, $types[$pos++]);
+                        $type = $types[$pos++];
+                        return $value === null ? null : $this->castFrom($value, $type);
                     }, $array);
                     $return[] = $array;
                 }
@@ -359,6 +361,8 @@ class DatabaseConnection
         switch ($type) {
             case 16: // bool
                 return $value === 't';
+            case 17: // bytea
+                return \hex2bin(\substr($value, 2));
 
             case 20: // int8
             case 21: // int2
@@ -375,7 +379,7 @@ class DatabaseConnection
             case 1000: // boolean[]
                 return $this->parseArray($value, function ($value) {
                     return $value === 't';
-                });
+                })[0];
 
             case 1005: // int2[]
             case 1007: // int4[]
@@ -385,16 +389,16 @@ class DatabaseConnection
             case 1028: // oid[]
                 return $this->parseArray($value, function ($value) {
                     return (int) $value;
-                });
+                })[0];
 
             case 1021: // real[]
             case 1022: // double-precision[]
                 return $this->parseArray($value, function ($value) {
                     return (float) $value;
-                });
+                })[0];
 
             case 1009: // text[]
-                return $this->parseArray($value, null);
+                return $this->parseArray($value, null)[0];
 
             default:
                 return $value;
@@ -416,9 +420,9 @@ class DatabaseConnection
             $len = strlen($value);
             $pos = $quoted ? 1 : 0;
             for (; $pos < $len; $pos++) {
-                if ($value[$pos] === '\\' && in_array($value[$pos + 1], ['\\', '"'])) {
+                if ($value[$pos] === '\\' && \in_array($value[$pos + 1], ['\\', '"'])) {
                     $pos++;
-                } elseif (in_array($value[$pos], $end, true)) {
+                } elseif (\in_array($value[$pos], $end, true)) {
                     break;
                 }
                 $result[] = $value[$pos];
@@ -430,11 +434,11 @@ class DatabaseConnection
             return [$result, $pos - ($quoted ? 0 : 1)];
         };
         $result = [];
-        $len = strlen($value);
+        $len = \strlen($value);
         for ($i = 1; $i < $len; $i++) {
             switch ($value[$i]) {
                 case '{':
-                    [$array, $pos] = $this->parseArray(substr($value, $i), $cast);
+                    [$array, $pos] = $this->parseArray(\substr($value, $i), $cast);
                     $result[] = $array;
                     $i += $pos;
                     break;
@@ -443,7 +447,7 @@ class DatabaseConnection
                 case ',':
                     break;
                 default:
-                    [$string, $pos] = $parseString(substr($value, $i));
+                    [$string, $pos] = $parseString(\substr($value, $i));
                     $result[] = $cast !== null ? $cast($string) : $string;
                     $i += $pos;
             }

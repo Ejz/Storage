@@ -16,32 +16,16 @@ class Field implements NameInterface
     private $slave;
 
     /**
-     * @param string        $name
-     * @param ?AbstractType $type  (optional)
-     * @param mixed         $value (optional)
+     * @param string       $name
+     * @param AbstractType $type
+     * @param mixed        $value (optional)
      */
-    public function __construct(string $name, ?AbstractType $type = null, $value = null)
+    public function __construct(string $name, AbstractType $type, $value = null)
     {
         $this->setName($name);
-        $this->type = $type ?? DatabaseType::default(true);
+        $this->type = $type;
         $this->setValue($value);
         $this->slave = false;
-    }
-
-    /**
-     * @param mixed $value
-     */
-    public function importValue($value)
-    {
-        $this->value = $this->type->importValue($value);
-    }
-
-    /**
-     * @return mixed
-     */
-    public function exportValue()
-    {
-        return $this->type->exportValue($this->value);
     }
 
     /**
@@ -53,11 +37,27 @@ class Field implements NameInterface
     }
 
     /**
+     * @return mixed
+     */
+    public function exportValue()
+    {
+        return $this->type->exportValue($this->value);
+    }
+
+    /**
      * @param mixed $value
      */
     public function setValue($value)
     {
-        $this->value = $this->type->hydrateValue($value);
+        $this->value = $this->type->setValue($value);
+    }
+
+    /**
+     * @param mixed $value
+     */
+    public function importValue($value)
+    {
+        $this->value = $this->type->importValue($value);
     }
 
     /**

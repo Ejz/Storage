@@ -41,15 +41,19 @@ class Iterator implements \Amp\Iterator, \Iterator, ContextInterface
      */
     public function setIterator($iterator)
     {
-        if (!is_callable($iterator)) {
-            $it = $iterator;
-            $iterator = function ($emit) use ($it) {
-                foreach ($it as $value) {
-                    yield $emit($value);
-                }
-            };
+        if ($iterator instanceof \Amp\Iterator) {
+            $this->iterator = $iterator;
+        } else {
+            if (!is_callable($iterator)) {
+                $it = $iterator;
+                $iterator = function ($emit) use ($it) {
+                    foreach ($it as $value) {
+                        yield $emit($value);
+                    }
+                };
+            }
+            $this->iterator = new \Amp\Producer($iterator);
         }
-        $this->iterator = new \Amp\Producer($iterator);
         $this->next = null;
         $this->pos = 0;
     }
@@ -60,7 +64,7 @@ class Iterator implements \Amp\Iterator, \Iterator, ContextInterface
     public function advance(): Promise
     {
         $promise = $this->iterator->advance();
-        $promise->onResolve(function () {
+        $promise->onResolve(function ($e, $r) {
             $this->pos++;
         });
         return $promise;
@@ -114,6 +118,7 @@ class Iterator implements \Amp\Iterator, \Iterator, ContextInterface
     }
 
     /**
+     *
      */
     public function rewind()
     {
@@ -215,7 +220,7 @@ class Iterator implements \Amp\Iterator, \Iterator, ContextInterface
                 $results = array_map(function ($iterator) {
                     return $iterator->getCurrent();
                 }, $iterators);
-                yield $emit(array_values($results));
+                yield $emit($results);
             }
         };
         return new self($emit);

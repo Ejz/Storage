@@ -22,9 +22,9 @@ class DatabaseBean extends AbstractBean
     /**
      * @return string
      */
-    public function getPk(): string
+    public function getPrimaryKey(): string
     {
-        return $this->_repository->getDatabasePk();
+        return $this->_repository->getDatabasePrimaryKey();
     }
 
     /**
@@ -43,23 +43,21 @@ class DatabaseBean extends AbstractBean
     }
 
     /**
-     * @param bool $force (optional)
-     *
      * @return Promise
      */
-    public function update(bool $force = false): Promise
+    public function update(): Promise
     {
         if ($this->_id === null) {
             throw new RuntimeException(self::ERROR_UPDATE_WITHOUT_ID);
         }
-        return \Amp\call(function ($force) {
-            $changed = array_flip($this->_changed);
-            if (!$changed && !$force) {
+        return \Amp\call(function () {
+            $changed = $this->_changed;
+            if (!$changed) {
                 return false;
             }
             $fields = [];
             foreach ($this->_fields as $name => $field) {
-                if ($force || isset($changed[$name])) {
+                if (isset($changed[$name])) {
                     $fields[] = $field;
                 }
             }
@@ -67,7 +65,7 @@ class DatabaseBean extends AbstractBean
             $ret = (bool) yield $promise;
             $this->_changed = [];
             return $ret;
-        }, $force);
+        });
     }
 
     /**
@@ -95,7 +93,7 @@ class DatabaseBean extends AbstractBean
             throw new RuntimeException(self::ERROR_REID_WITHOUT_ID);
         }
         return \Amp\call(function ($id) {
-            $result = yield $this->_repository->reid($this->_id, $id);
+            $result = yield $this->_repository->reid([$this->_id, $id]);
             $this->id = $id;
             return $result;
         }, $id);
