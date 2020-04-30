@@ -10,6 +10,7 @@ namespace Tests;
 use Ejz\Repository;
 use Amp\Promise;
 use Ejz\DatabaseType;
+use Ejz\BitmapType;
 use Ejz\DatabaseIndex;
 use Ejz\DatabaseForeignKey;
 use Ejz\WhereCondition;
@@ -732,11 +733,11 @@ class TestCaseRepository extends AbstractTestCase
     public function test_case_repository_cache_1()
     {
         $ttl = 3;
-        $repository = \Container\getRepository('t', [
+        $repository = \Container\get(Repository::class, 't', [
             'database' => [
                 'cluster' => 'm:*;ms:*:id;',
                 'fields' => [
-                    'text1' => Type::string(),
+                    'text1' => DatabaseType::STRING(),
                 ],
             ],
             'cache' => [
@@ -744,7 +745,7 @@ class TestCaseRepository extends AbstractTestCase
                 'cacheableFields' => ['text1'],
             ],
         ]);
-        $pk = $repository->getDatabasePk();
+        $pk = $repository->getDatabasePrimaryKey();
         $repository->createSync();
         $id = $repository->insertSync(['text1' => 'foo1']);
         $text1 = $repository->get([$id])->current()->text1;
@@ -764,17 +765,17 @@ class TestCaseRepository extends AbstractTestCase
      */
     public function test_case_repository_bitmap_0()
     {
-        $repository = \Container\getRepository('t', [
+        $repository = \Container\get(Repository::class, 't', [
             'database' => [
                 'cluster' => 'm:*;ms:*:id;',
                 'fields' => [
-                    'boolean' => Type::string(),
+                    'boolean' => DatabaseType::BOOL(),
                 ],
             ],
             'bitmap' => [
                 'cluster' => 'm:*;ms:*:id;',
                 'fields' => [
-                    'boolean' => Type::bitmapBool(),
+                    'boolean' => BitmapType::BOOL(),
                 ],
             ],
         ]);
@@ -789,16 +790,17 @@ class TestCaseRepository extends AbstractTestCase
         }
         $repository->populateBitmap();
         $ex = null;
-        foreach ($repository->search('*') as $id => $bean) {
+        foreach ($repository->search('*') as $bean) {
+            $id = $bean->id;
             $ex = $ex ?? $id;
             $this->assertTrue($id >= $ex);
             $ex = $id;
         }
-        foreach ($repository->search('@boolean:1') as $id => $bean) {
-            $this->assertTrue(((bool) $bean->boolean) === true);
+        foreach ($repository->search('@boolean:1') as $bean) {
+            $this->assertTrue($bean->boolean);
         }
-        foreach ($repository->search('@boolean:0') as $id => $bean) {
-            $this->assertTrue(((bool) $bean->boolean) === false);
+        foreach ($repository->search('@boolean:0') as $bean) {
+            $this->assertFalse($bean->boolean);
         }
         $_0 = $repository->search('@boolean:0')->getContext()['size'];
         $_1 = $repository->search('@boolean:1')->getContext()['size'];

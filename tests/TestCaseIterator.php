@@ -138,4 +138,15 @@ class TestCaseIterator extends AbstractTestCase
         $iterator = new Iterator($emitter->iterate());
         $this->assertTrue(iterator_to_array($iterator) === range(1, 10));
     }
+
+    /**
+     * @test
+     */
+    public function test_case_iterator_pair()
+    {
+        $it1 = new Iterator([1, 2]);
+        $it2 = new Iterator([3, 4, 5]);
+        $res = iterator_to_array(Iterator::pair(compact('it1', 'it2')));
+        $this->assertEquals($res, [['it1' => 1, 'it2' => 3], ['it1' => 2, 'it2' => 4]]);
+    }
 }

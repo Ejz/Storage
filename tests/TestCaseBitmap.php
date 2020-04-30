@@ -4,6 +4,7 @@ namespace Tests;
 
 use Ejz\Field;
 use Ejz\BitmapType;
+use Ejz\Iterator;
 
 class TestCaseBitmap extends AbstractTestCase
 {
@@ -38,6 +39,17 @@ class TestCaseBitmap extends AbstractTestCase
         $this->assertEquals(range(1, 1000), $keys);
         $keys = [];
         foreach ($bm->search('tt', ['min' => 70]) as $id) {
+            $keys[] = $id;
+        }
+        $this->assertEquals(range(70, 1000), $keys);
+        //
+        $keys = [];
+        foreach (Iterator::offset($bm->search('tt', ['emitTotal' => true]), 1) as $id) {
+            $keys[] = $id;
+        }
+        $this->assertEquals(range(1, 1000), $keys);
+        $keys = [];
+        foreach (Iterator::offset($bm->search('tt', ['min' => 70, 'emitTotal' => true]), 1) as $id) {
             $keys[] = $id;
         }
         $this->assertEquals(range(70, 1000), $keys);
@@ -113,7 +125,8 @@ class TestCaseBitmap extends AbstractTestCase
     {
         $bm = $this->bitmapPool->random();
         $bm->createSync('parent');
-        $field = new Field('parent_id', BitmapType::FOREIGNKEY(['references' => 'parent']));
+        $options = ['references' => 'parent', 'nullable' => true];
+        $field = new Field('parent_id', BitmapType::FOREIGNKEY($options));
         $bm->createSync('child', [$field]);
         $bm->addSync('parent', 1);
         $bm->addSync('parent', 2);
@@ -123,6 +136,10 @@ class TestCaseBitmap extends AbstractTestCase
         $field->setValue(2);
         $bm->addSync('child', 3, [$field]);
         $it = $bm->search('child', ['foreignKeys' => 'parent_id']);
+        foreach ($it as $row) {
+            $this->assertTrue(isset($row['id']));
+        }
+        $it = $bm->search('child', ['forceForeignKeyFormat' => true]);
         foreach ($it as $row) {
             $this->assertTrue(isset($row['id']));
         }
