@@ -308,6 +308,16 @@ class Database implements NameInterface
      */
     public function pk(string $table): Promise
     {
+        return $this->primaryKeys($table);
+    }
+
+    /**
+     * @param string $table
+     *
+     * @return Promise
+     */
+    public function primaryKeys(string $table): Promise
+    {
         return \Amp\call(function ($table) {
             if (!yield $this->tableExists($table)) {
                 return null;
@@ -464,23 +474,23 @@ class Database implements NameInterface
             ];
         }
         // INDEXES
-        foreach ($indexes as $index) {
-            $fields = $index->getFields();
+        foreach ($indexes as $name => $index) {
+            $fields = $index['fields'];
             $command = [
                 'CREATE % INDEX # ON # USING % (' . $comma($fields) . ')',
-                $index->isUnique() ? 'UNIQUE' : '',
-                sprintf(self::INDEX_NAME, $table, $index->getName()),
+                $index['type'] === 'UNIQUE' ? 'UNIQUE' : '',
+                sprintf(self::INDEX_NAME, $table, $name),
                 $table,
-                $this->getIndexTypeString($index),
+                $index['databaseIndex'] ?? $index['type']
             ];
             array_push($command, ...$fields);
             $commands[] = $command;
         }
         // FOREIGN KEYS
-        foreach ($foreignKeys as $foreignKey) {
-            $parentTable = $foreignKey->getParentTable();
-            $parentFields = $foreignKey->getParentFields();
-            $childFields = $foreignKey->getChildFields();
+        foreach ($foreignKeys as $name => $foreignKey) {
+            $parentTable = $foreignKey['parentTable'];
+            $parentFields = $foreignKey['parentFields'];
+            $childFields = $foreignKey['childFields'];
             $command = [
                 '
                     ALTER TABLE # ADD CONSTRAINT #
@@ -489,7 +499,7 @@ class Database implements NameInterface
                     ON DELETE CASCADE ON UPDATE CASCADE
                 ',
                 $table,
-                sprintf(self::FOREIGN_KEY_NAME, $table, $foreignKey->getName()),
+                sprintf(self::FOREIGN_KEY_NAME, $table, $name),
             ];
             array_push($command, ...$childFields);
             array_push($command, $parentTable);
@@ -915,25 +925,5 @@ class Database implements NameInterface
             $extwo = $two;
         }
         return $intervals;
-    }
-
-    /**
-     * @param Index $index
-     *
-     * @return string
-     */
-    private function getIndexTypeString(Index $index): string
-    {
-        static $map;
-        if ($map === null) {
-            $map = [
-                Index::INDEX_TYPE_BTREE => 'BTREE',
-                Index::INDEX_TYPE_HASH => 'HASH',
-                Index::INDEX_TYPE_GIST => 'GIST',
-                Index::INDEX_TYPE_GIN => 'GIN',
-                Index::INDEX_TYPE_UNIQUE => 'BTREE',
-            ];
-        }
-        return $map[$index->getType()->getName()];
     }
 }

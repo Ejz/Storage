@@ -2,32 +2,53 @@
 
 namespace Ejz;
 
-use Throwable;
 use Amp\Promise;
-use RuntimeException;
+use Amp\Deferred;
+use Amp\Http\Client\Connection\ConnectionLimitingPool;
+use Amp\Http\Client\HttpClientBuilder;
+use Amp\Http\Client\HttpClient;
+use Amp\Http\Client\Request;
 
-class Bitmap implements BitmapInterface
+class Bitmap implements NameInterface
 {
     use NameTrait;
     use SyncTrait;
 
-    /** @var RedisClient */
-    protected $client;
+    /** @var dsn */
+    private $dsn;
+
+    /** @var HttpClient */
+    private $client;
 
     /** @var array */
-    protected $config;
+    private $config;
+
+    /** @var string */
+    private const NO_RESULTS_ERROR = 'NO_RESULTS_ERROR';
 
     /**
-     * @param string      $name
-     * @param RedisClient $client
+     * @param string $name
+     * @param string $dsn
      */
-    public function __construct(string $name, RedisClient $client, array $config = [])
+    public function __construct(string $name, string $dsn, array $config = [])
     {
         $this->setName($name);
-        $this->client = $client;
+        $this->dsn = $dsn;
         $this->config = $config + [
-            'iterator_chunk_size' => 30,
+            'iterator_chunk_size' => 100,
         ];
+        $pool = ConnectionLimitingPool::byAuthority(2);
+        $this->client = (new HttpClientBuilder())
+            ->usingPool($pool)
+            ->build();
+    }
+
+    /**
+     * @return Promise
+     */
+    public function indexes(): Promise
+    {
+        return $this->query('LIST');
     }
 
     /**
@@ -41,7 +62,7 @@ class Bitmap implements BitmapInterface
             if (!yield $this->indexExists($index)) {
                 return false;
             }
-            $this->client->DROP($index);
+            $this->query('DROP #', $index);
             return true;
         }, $index);
     }
@@ -57,19 +78,9 @@ class Bitmap implements BitmapInterface
             if (!yield $this->indexExists($index)) {
                 return false;
             }
-            // $this->client->TRUNCATE($index);
+            $this->query('TRUNCATE #', $index);
             return true;
         }, $index);
-    }
-
-    /**
-     * @return Promise
-     */
-    public function indexes(): Promise
-    {
-        return \Amp\call(function () {
-            return $this->client->LIST();
-        });
     }
 
     /**
@@ -92,25 +103,20 @@ class Bitmap implements BitmapInterface
      */
     public function create(string $index, array $fields = []): Promise
     {
-        return \Amp\call(function ($index, $fields) {
-            $args = ['FIELDS'];
-            foreach ($fields as $field) {
-                $args[] = $field->getName();
-                $args[] = $this->getFieldTypeString($field);
-                $type = $field->getType();
-                $name = $type->getName();
-                if ($name === BitmapType::foreignKey()->getName()) {
-                    $args[] = $type->getParent();
-                }
-                if ($name === BitmapType::array()->getName()) {
-                    $args[] = 'SEPARATOR';
-                    $args[] = $type->getSeparator();
-                }
-            }
-            $args = count($args) > 1 ? $args : [];
-            $this->client->CREATE($index, ...$args);
-        }, $index, $fields);
-    }  
+        $query = 'CREATE # FIELDS';
+        $args = [$index];
+        foreach ($fields as $field) {
+            $query .= ' #';
+            $args[] = $field->getName();
+            $type = $field->getType();
+            $query .= ' ' . $type->getName();
+            [$_query, $_args] = $type->getCreateOptions();
+            $query .= $_query ? ' ' . $_query : '';
+            $args = array_merge($args, $_args);
+        }
+        return $this->query($query, ...$args);
+        
+    }
 
     /**
      * @param string $index
@@ -121,105 +127,208 @@ class Bitmap implements BitmapInterface
      */
     public function add(string $index, int $id, array $fields = []): Promise
     {
-        return \Amp\call(function ($index, $id, $fields) {
-            $args = ['VALUES'];
-            foreach ($fields as $field) {
-                $value = $field->exportValue();
-                if ($value !== null) {
-                    $args[] = $field->getName();
-                    $args[] = $value;
-                }
-            }
-            $args = count($args) > 1 ? $args : [];
-            $this->client->ADD($index, $id, ...$args);
-            return $id;
-        }, $index, $id, $fields);
+        $query = 'ADD # ? VALUES';
+        $args = [$index, $id];
+        foreach ($fields as $field) {
+            $query .= ' # ?';
+            $args[] = $field->getName();
+            $args[] = $field->exportValue();
+        }
+        return $this->query($query, ...$args);
     }
 
     /**
      * @param string $index
      * @param array  $params (optional)
      *
-     * @return Iterator
+     * @return Iterator|array
      */
-    public function search(string $index, array $params = []): Iterator
+    public function search(string $index, array $params = [])
     {
-        $iterator = new Iterator();
-        $emit = function ($emit) use ($index, $params, $iterator) {
-            $params += [
-                'query' => '*',
-                'cursor' => [],
-                'sortby' => null,
-                'asc' => true,
-                'fks' => [],
-            ];
-            [
-                'query' => $query,
-                'cursor' => $cursor,
-                'sortby' => $sortby,
-                'asc' => $asc,
-                'fks' => $fks,
-            ] = $params;
-            $fks = (array) $fks;
-            $args = [
-                $index,
-                $query,
-                $sortby !== null ? 'SORTBY' : null,
-                $sortby ?? null,
-                $sortby !== null ? ($asc ? 'ASC' : 'DESC') : null,
-                'LIMIT',
-                0,
-                1000,
-            ];
-            $args = array_filter($args, function ($arg) {
-                return $arg !== null;
-            });
-            foreach ($fks as $fk) {
-                $args[] = 'APPENDFK';
-                $args[] = $fk;
+        $count0 = count($params);
+        $count1 = count(array_filter(array_keys($params), 'is_string'));
+        $is_assoc = $count0 === $count1;
+        $array_of_params = $is_assoc ? [$params] : $params;
+        $iterators = [];
+        $queries = [];
+        $promises = [];
+        $pointer = 0;
+        $max = count($array_of_params);
+        $resolver = function ($query, $args, $wait) use (&$queries, &$promises, &$pointer, $max) {
+            $deferred = new Deferred();
+            $promise = $deferred->promise();
+            $queries[$pointer] = [$query, $args];
+            $promises[$pointer] = $deferred;
+            $pointer++;
+            if (count($queries) === $max || !$wait) {
+                $ids = array_keys($queries);
+                $onResolve = function ($err, $res) use ($ids, &$promises) {
+                    foreach (($err ? $ids : []) as $id) {
+                        $promise = $promises[$id];
+                        unset($promises[$id]);
+                        $promise->fail($err);
+                    }
+                    foreach (($err ? [] : $res) as $id => $result) {
+                        $promise = $promises[$id];
+                        unset($promises[$id]);
+                        if (array_key_exists('error', $result)) {
+                            $promise->fail(new BitmapException($result['error']));
+                        } else {
+                            $promise->resolve($result['result']);
+                        }
+                    }
+                };
+                $p = $this->sendQueries($queries);
+                $p->onResolve($onResolve);
+                $queries = [];
             }
-            $ids = $this->client->SEARCH(...$args);
-            $size = array_shift($ids);
-            // var_dump($size);
-            $iterator->setContext($size, 'size');
-            while (($value = array_shift($ids)) !== null) {
-                $value = $fks ? $value : [$value];
-                $id = array_shift($value);
-                yield $emit([$id, $value]);
-            }
+            return $promise;
         };
-        $iterator->setIterator($emit);
-        return $iterator;
+        foreach ($array_of_params as $params) {
+            $iterator = new Iterator();
+            $emit = function ($emit) use ($index, $params, $iterator, $resolver) {
+                $params += [
+                    'query' => '*',
+                    'sortby' => null,
+                    'asc' => true,
+                    'min' => null,
+                    'max' => null,
+                    'foreignKeys' => [],
+                    'config' => [],
+                ];
+                [
+                    'query' => $query,
+                    'sortby' => $sortby,
+                    'asc' => $asc,
+                    'min' => $min,
+                    'max' => $max,
+                    'foreignKeys' => $foreignKeys,
+                    'config' => $config,
+                ] = $params;
+                $config += $this->config;
+                [
+                    'iterator_chunk_size' => $iterator_chunk_size,
+                ] = $config;
+                $command = 'SEARCH # ?';
+                $query = $min !== null ? "({$query}) & (@id >= {$min})" : $query;
+                $query = $max !== null ? "({$query}) & (@id <= {$max})" : $query;
+                $args = [$index, $query];
+                if ($sortby !== null) {
+                    $command .= ' SORTBY # ' . ($asc ? 'ASC' : 'DESC');
+                    $args[] = $sortby;
+                }
+                $foreignKeys = (array) $foreignKeys;
+                if ($foreignKeys) {
+                    $command .= ' WITHFOREIGNKEYS' . str_repeat(' #', count($foreignKeys));
+                    $args = array_merge($args, $foreignKeys);
+                }
+                $command .= ' WITHCURSOR TIMEOUT 3600';
+                $command .= ' LIMIT ' . min($limit, $iterator_chunk_size);
+                $response = yield $resolver($command, $args, true);
+                $iterator->setContext($response['total'], 'size');
+                $cursor = $response['cursor'];
+                foreach (($response['ids'] ?? $response['records']) as $elem) {
+                    yield $emit($elem);
+                }
+                while ($cursor) {
+                    $command = 'CURSOR #';
+                    $args = [$cursor];
+                    $response = yield $resolver($command, $args, false);
+                    $cursor = $response['cursor'];
+                    foreach (($response['ids'] ?? $response['records']) as $elem) {
+                        yield $emit($elem);
+                    }
+                }
+            };
+            $iterator->setIterator($emit);
+            $iterators[] = $iterator;
+        }
+        return $is_assoc ? $iterators[0] : $iterators;
     }
 
     /**
+     * @param string $query
+     * @param array  ...$args
+     *
+     * @return Promise
      */
-    public function close()
+    private function query(string $query, ...$args): Promise
     {
-        $this->client->close();
+        return \Amp\call(function ($query, $args) {
+            [$result] = yield $this->sendQueries([[$query, $args]]);
+            if (array_key_exists('error', $result)) {
+                throw new BitmapException($result['error']);
+            }
+            return $result['result'];
+        }, $query, $args);
     }
 
     /**
-     * @param Field $field
+     * @param array $queries
+     *
+     * @return Promise
+     */
+    private function sendQueries(array $queries): Promise
+    {
+        return \Amp\call(function ($queries) {
+            $collect = [];
+            foreach ($queries as $id => [$query, $args]) {
+                $collect[] = [
+                    'id' => $id,
+                    'query' => $this->substitute($query, $args),
+                ];
+            }
+            $request = new Request($this->dsn, 'POST');
+            $request->setBody(json_encode($collect));
+            $request->setHeader('Content-Type', 'application/json');
+            $response = yield $this->client->request($request);
+            $buffer = yield $response->getBody()->buffer();
+            $results = json_decode($buffer, true);
+            if (!$results) {
+                throw new BitmapException(self::NO_RESULTS_ERROR);
+            }
+            $collect = [];
+            foreach ($results as $result) {
+                $id = $result['id'];
+                unset($result['id']);
+                $collect[$id] = $result;
+            }
+            return $collect;
+        }, $queries);
+    }
+
+    /**
+     * @param string $query
+     * @param array  $args
      *
      * @return string
      */
-    private function getFieldTypeString(Field $field): string
+    private function substitute(string $query, array $args): string
     {
-        static $map;
-        if ($map === null) {
-            $map = [
-                (string) BitmapType::bool() => 'BOOLEAN',
-                (string) BitmapType::date() => 'DATE',
-                (string) BitmapType::dateTime() => 'DATETIME',
-                (string) BitmapType::string() => 'STRING',
-                (string) BitmapType::int() => 'INTEGER',
-                (string) BitmapType::array() => 'ARRAY',
-                (string) BitmapType::foreignKey() => 'FOREIGNKEY',
-                (string) BitmapType::fulltext() => 'FULLTEXT',
-                (string) BitmapType::triplets() => 'TRIPLETS',
-            ];
-        }
-        return $map[$field->getType()->getName()];
+        $query = trim($query);
+        $query = preg_replace('~\s+~', ' ', $query);
+        $args = array_values($args);
+        $pos = 0;
+        $e = ['\'' => '\\\'', '\\' => '\\\\'];
+        $query = preg_replace_callback('~((\\?|#|%)+)~i', function ($match) use (&$pos, $args, $e) {
+            $len = strlen($match[0]);
+            $single = $match[0][0];
+            $return = str_repeat($single, (int) ($len / 2));
+            if ($len % 2 === 1) {
+                $value = $args[$pos++] ?? null;
+                if ($single === '?') {
+                    if ($value === null) {
+                        $value = 'UNDEFINED';
+                    } else {
+                        $value = is_int($value) ? $value : '\'' . strtr($value, $e) . '\'';
+                    }
+                } elseif ($single === '#') {
+                    $value = '"' . $value . '"';
+                }
+                $return .= $value;
+            }
+            return $return;
+        }, $query);
+        return trim($query);
     }
 }
