@@ -2,15 +2,18 @@
 
 namespace Tests;
 
-use Ejz\Type;
-use Ejz\DatabaseBean;
-use Ejz\BitmapBean;
-use Ejz\Index;
-use Ejz\Iterator;
+// use Ejz\Type;
+// use Ejz\DatabaseBean;
+// use Ejz\BitmapBean;
+// use Ejz\Index;
+// use Ejz\Iterator;
 use Ejz\Repository;
 use Amp\Promise;
-use RuntimeException;
+use Ejz\DatabaseType;
+use Ejz\DatabaseIndex;
+use Ejz\DatabaseForeignKey;
 use Ejz\WhereCondition;
+// use RuntimeException;
 
 class TestCaseRepository extends AbstractTestCase
 {
@@ -31,7 +34,7 @@ class TestCaseRepository extends AbstractTestCase
             'm:!1;s:!2;' => ['0,2', '1'],
         ];
         foreach ($cases as $cluster => [$m, $s]) {
-            $repository = \Container\getRepository('t', ['database' => compact('cluster')]);
+            $repository = \Container\get(Repository::class, 't', ['database' => compact('cluster')]);
             $all = $repository->getDatabasePool()->names();
             $names = $repository->getMasterDatabasePool()->names();
             $this->assertEquals($m, $n2i($names, $all));
@@ -62,7 +65,7 @@ class TestCaseRepository extends AbstractTestCase
             'm:*;ms:*:id;' => ['2', '1,2,0'],
         ];
         foreach ($cases as $cluster => [$id, $m]) {
-            $repository = \Container\getRepository('t', ['database' => compact('cluster')]);
+            $repository = \Container\get(Repository::class, 't', ['database' => compact('cluster')]);
             $all = $repository->getDatabasePool()->names();
             $names = $repository->getMasterDatabasePool($id)->names();
             $this->assertEquals($m, $n2i($names, $all));
@@ -85,10 +88,10 @@ class TestCaseRepository extends AbstractTestCase
             'm:*;ms:2:id;' => '~^[01],[12]$~',
         ];
         foreach ($cases as $cluster => $regex) {
-            $repository = \Container\getRepository('t', ['database' => compact('cluster')]);
+            $repository = \Container\get(Repository::class, 't', ['database' => compact('cluster')]);
             $all = $repository->getDatabasePool()->names();
             $names = $repository->getReadableMasterDatabasePool()->names();
-            $this->assertRegExp($regex, $n2i($names, $all));
+            $this->assertMatchesRegularExpression($regex, $n2i($names, $all));
             $this->assertTrue($repository->getReadableSlaveDatabasePool()->names() === []);
         }
     }
@@ -98,7 +101,7 @@ class TestCaseRepository extends AbstractTestCase
      */
     public function test_case_repository_create_0()
     {
-        $repository = \Container\getRepository('t', [
+        $repository = \Container\get(Repository::class, 't', [
             'database' => [
                 'cluster' => 'm:*;',
             ],
@@ -114,17 +117,16 @@ class TestCaseRepository extends AbstractTestCase
      */
     public function test_case_repository_create_1()
     {
-        $repository = \Container\getRepository('t', [
+        $repository = \Container\get(Repository::class, 't', [
             'database' => [
                 'cluster' => 'm:0;s:*;',
-                'pk' => 'foo',
+                'primaryKey' => 'foo',
                 'fields' => [
-                    'f1' => Type::string(),
+                    'f1' => DatabaseType::STRING(),
                 ],
             ],
         ]);
         $repository->createSync();
-        return;
         $master = $repository->getMasterDatabasePool()->random();
         $slave = $repository->getSlaveDatabasePool()->random();
         $this->assertTrue($master->fieldExistsSync('t', 'foo'));
@@ -138,16 +140,16 @@ class TestCaseRepository extends AbstractTestCase
      */
     public function test_case_repository_create_2()
     {
-        $repository = \Container\getRepository('t', [
+        $repository = \Container\get(Repository::class, 't', [
             'database' => [
                 'cluster' => 'm:0;s:*;',
                 'fields' => [
-                    'f1' => Type::string(),
-                    'f2' => Type::string(),
+                    'f1' => DatabaseType::STRING(),
+                    'f2' => DatabaseType::STRING(),
                 ],
                 'indexes' => [
-                    'f1' => ['f1'],
-                    'f2' => ['f1', 'f2'],
+                    'f1' => DatabaseIndex::BTREE('f1'),
+                    'f2' => DatabaseIndex::BTREE('f1', 'f2'),
                 ],
             ],
         ]);
@@ -167,18 +169,15 @@ class TestCaseRepository extends AbstractTestCase
      */
     public function test_case_repository_create_3()
     {
-        $repository = \Container\getRepository('t', [
+        $repository = \Container\get(Repository::class, 't', [
             'database' => [
                 'cluster' => 'm:0;s:*;',
                 'table' => 't',
                 'fields' => [
-                    'f1' => Type::string(),
+                    'f1' => DatabaseType::STRING(),
                 ],
                 'indexes' => [
-                    'f1' => [
-                        'fields' => ['f1'],
-                        'type' => Index::INDEX_TYPE_UNIQUE,
-                    ],
+                    'f1' => DatabaseIndex::UNIQUE('f1'),
                 ],
             ],
         ]);
@@ -201,27 +200,27 @@ class TestCaseRepository extends AbstractTestCase
      */
     public function test_case_repository_create_4()
     {
-        $parent = \Container\getRepository('parent', [
+        $parent = \Container\get(Repository::class, 'parent', [
             'database' => [
                 'cluster' => 'm:0;s:*;',
-                'pk' => 'parent_id',
+                'primaryKey' => 'parent_id',
                 'fields' => [
-                    'text' => Type::string(true),
+                    'text' => DatabaseType::STRING(),
                 ],
             ],
         ]);
-        $child = \Container\getRepository('child', [
+        $child = \Container\get(Repository::class, 'child', [
             'database' => [
                 'cluster' => 'm:0;s:*;',
-                'pk' => 'child_id',
+                'primaryKey' => 'child_id',
                 'fields' => [
                     'parent_id' => [
-                        'type' => Type::bigInt(),
+                        'type' => DatabaseType::BIGINT(),
                         'slave' => true,
                     ],
                 ],
-                'fks' => [
-                    'parent_id' => 'parent.parent_id',
+                'foreignKeys' => [
+                    'parent_id' => DatabaseForeignKey::get('parent.parent_id'),
                 ],
             ],
         ]);
@@ -253,13 +252,13 @@ class TestCaseRepository extends AbstractTestCase
      */
     public function test_case_repository_crud_0()
     {
-        $repository = \Container\getRepository('t', [
+        $repository = \Container\get(Repository::class, 't', [
             'database' => [
                 'cluster' => 'm:*;ms:1:id;s:*;',
                 'fields' => [
-                    'field1' => Type::string(),
-                    'field2' => Type::string(true),
-                    'field3' => Type::int(),
+                    'field1' => DatabaseType::STRING(),
+                    'field2' => DatabaseType::STRING(['nullable' => true]),
+                    'field3' => DatabaseType::INT(),
                 ],
             ],
         ]);
@@ -269,13 +268,18 @@ class TestCaseRepository extends AbstractTestCase
         $id3 = $repository->insertSync();
         $id4 = $repository->insertSync();
         $id5 = $repository->insertSync();
-        foreach ($repository->get([$id5, $id2, $id1, $id5, $id4, $id3]) as $id => $bean) {
+        foreach ($repository->get([$id5, $id2, $id1, $id5, $id4, $id3]) as $bean) {
             $this->assertTrue($bean !== null);
+            $this->assertTrue(is_object($bean));
         }
-        $keys = array_keys(iterator_to_array($repository->get([$id5, $id2, $id1, $id5, $id4, $id3])));
-        $this->assertEquals([$id5, $id2, $id1, $id4, $id3], $keys);
+        $ids = function ($iterator) {
+            return array_map(function ($bean) {
+                return $bean->id ?? null;
+            }, iterator_to_array($iterator));
+        };
+        $iterator = $repository->get([$id5, $id2, 99, $id1, $id5, $id4, $id3, 99]);
+        $this->assertEquals([$id5, $id2, null, $id1, $id5, $id4, $id3, null], $ids($iterator));
         $bean = $repository->get([$id1])->current();
-        $this->assertTrue(is_object($bean));
         $values = $bean->getValues();
         $this->assertEquals(['field1' => '', 'field2' => null, 'field3' => 0], $values);
     }
@@ -285,12 +289,12 @@ class TestCaseRepository extends AbstractTestCase
      */
     public function test_case_repository_crud_1()
     {
-        $repository = \Container\getRepository('t', [
+        $repository = \Container\get(Repository::class, 't', [
             'database' => [
                 'cluster' => 'm:0;s:*;',
                 'fields' => [
-                    'field1' => Type::string(),
-                    'field2' => Type::int(),
+                    'field1' => DatabaseType::STRING(),
+                    'field2' => DatabaseType::INT(),
                 ],
             ],
         ]);
@@ -318,11 +322,11 @@ class TestCaseRepository extends AbstractTestCase
      */
     public function test_case_repository_crud_2()
     {
-        $repository = \Container\getRepository('t', [
+        $repository = \Container\get(Repository::class, 't', [
             'database' => [
                 'cluster' => 'm:0;s:*;',
                 'fields' => [
-                    'field1' => Type::string(),
+                    'field1' => DatabaseType::STRING(),
                 ],
             ],
         ]);
@@ -333,7 +337,7 @@ class TestCaseRepository extends AbstractTestCase
         $this->assertTrue($bean->deleteSync());
         $this->assertFalse($bean->deleteSync());
         $_ = iterator_to_array($repository->get([$id]));
-        $this->assertTrue($_ === [$id => null]);
+        $this->assertTrue($_ === [null]);
         $id = $repository->insertSync();
         $names = $repository->getWritableDatabasePool($id)->names();
         $this->assertTrue($repository->deleteSync([$id]) === count($names));
@@ -344,7 +348,7 @@ class TestCaseRepository extends AbstractTestCase
      */
     public function test_case_repository_crud_3()
     {
-        $repository = \Container\getRepository('t', [
+        $repository = \Container\get(Repository::class, 't', [
             'database' => [
                 'cluster' => 'm:0;s:*;',
             ],
@@ -352,14 +356,15 @@ class TestCaseRepository extends AbstractTestCase
         $repository->createSync();
         $id1 = $repository->insertSync();
         $id2 = $repository->insertSync();
-        $keys = array_keys(iterator_to_array($repository->get([$id1, 1E6, $id2])));
-        $this->assertEquals([$id1, (int) 1E6, $id2], $keys);
-        $vals = iterator_to_array($repository->get([1E6, $id1, 1E6, $id2, 1E6]), false);
-        $this->assertTrue($vals[0] === null);
-        $this->assertTrue($vals[1] !== null);
-        $this->assertTrue($vals[2] === null);
-        $this->assertTrue($vals[3] !== null);
-        $this->assertTrue($vals[4] === null);
+        $ids = function ($iterator) {
+            return array_map(function ($bean) {
+                return $bean->id ?? null;
+            }, iterator_to_array($iterator));
+        };
+        $it = $repository->get([$id1, 1E6, $id2]);
+        $this->assertEquals([$id1, null, $id2], $ids($it));
+        $it = $repository->get([1E6, $id1, 1E6, $id2, 1E6]);
+        $this->assertEquals([null, $id1, null, $id2, null], $ids($it));
     }
 
     /**
@@ -367,22 +372,22 @@ class TestCaseRepository extends AbstractTestCase
      */
     public function test_case_repository_crud_4()
     {
-        $repository = \Container\getRepository('t', [
+        $repository = \Container\get(Repository::class, 't', [
             'database' => [
                 'cluster' => 'm:*;ms:*:id;',
                 'fields' => [
-                    'text' => Type::string(),
+                    'text' => DatabaseType::STRING(),
                 ],
             ],
         ]);
         $index = $repository->getBitmapIndex();
         $repository->createSync();
         $id = $repository->insertSync(['text' => 'foo']);
-        foreach ($repository->iterate() as $id => $bean) {
+        foreach ($repository->iterate() as $bean) {
             $this->assertTrue(is_object($bean));
             $this->assertTrue(is_array($bean->getValues()));
         }
-        foreach ($repository->get([$id, 1E6]) as $id => $bean) {
+        foreach ($repository->get([$id, 1E6]) as $bean) {
             $this->assertTrue($bean === null || is_object($bean));
             $this->assertTrue($bean === null || is_array($bean->getValues()));
         }
@@ -393,17 +398,16 @@ class TestCaseRepository extends AbstractTestCase
      */
     public function test_case_repository_json_type()
     {
-        $repository = \Container\getRepository('t', [
+        $repository = \Container\get(Repository::class, 't', [
             'database' => [
                 'cluster' => 'm:0;s:*;',
                 'fields' => [
-                    'json' => Type::json(),
+                    'json' => DatabaseType::JSON(),
                 ],
             ],
         ]);
         $repository->createSync();
         $values = [
-            'string',
             ['string'],
             ['foo' => 'bar'],
         ];
@@ -419,18 +423,20 @@ class TestCaseRepository extends AbstractTestCase
      */
     public function test_case_repository_binary()
     {
-        $repository = \Container\getRepository('t', [
+        $repository = \Container\get(Repository::class, 't', [
             'database' => [
                 'cluster' => 'm:0;s:*;',
                 'fields' => [
-                    'binary' => Type::binary(),
+                    'binary' => DatabaseType::BINARY(),
                 ],
             ],
         ]);
         $repository->createSync();
         $values = [
             '',
+            'hello',
             chr(0),
+            chr(90),
             str_repeat(chr(1), 1E7) . str_repeat(chr(2), 1E7),
         ];
         foreach ($values as $value) {
@@ -445,11 +451,11 @@ class TestCaseRepository extends AbstractTestCase
      */
     public function test_case_repository_string_array()
     {
-        $repository = \Container\getRepository('t', [
+        $repository = \Container\get(Repository::class, 't', [
             'database' => [
                 'cluster' => 'm:0;s:*;',
                 'fields' => [
-                    'array' => Type::stringArray(),
+                    'array' => DatabaseType::STRARRAY(),
                 ],
             ],
         ]);
@@ -478,11 +484,11 @@ class TestCaseRepository extends AbstractTestCase
      */
     public function test_case_repository_int_array()
     {
-        $repository = \Container\getRepository('t', [
+        $repository = \Container\get(Repository::class, 't', [
             'database' => [
                 'cluster' => 'm:0;s:*;',
                 'fields' => [
-                    'array' => Type::intArray(),
+                    'array' => DatabaseType::INTARRAY(),
                 ],
             ],
         ]);
@@ -512,11 +518,11 @@ class TestCaseRepository extends AbstractTestCase
      */
     public function test_case_repository_enum()
     {
-        $repository = \Container\getRepository('t', [
+        $repository = \Container\get(Repository::class, 't', [
             'database' => [
                 'cluster' => 'm:0;s:*;',
                 'fields' => [
-                    'enum' => Type::enum(['foo', 'bar']),
+                    'enum' => DatabaseType::enum(['enums' => ['foo', 'bar']]),
                 ],
             ],
         ]);
@@ -528,7 +534,7 @@ class TestCaseRepository extends AbstractTestCase
             ['foo'],
             ['bar'],
             ['', 'foo'],
-            [[], 'foo'],
+            [null, 'foo'],
         ];
         foreach ($values as $value) {
             $value0 = $value[0];
@@ -544,11 +550,11 @@ class TestCaseRepository extends AbstractTestCase
      */
     public function test_case_repository_iterate_0()
     {
-        $repository = \Container\getRepository('t', [
+        $repository = \Container\get(Repository::class, 't', [
             'database' => [
                 'cluster' => 'm:*;ms:*:id;',
                 'fields' => [
-                    'text1' => Type::string(),
+                    'text1' => DatabaseType::STRING(),
                 ],
             ],
         ]);
@@ -594,11 +600,11 @@ class TestCaseRepository extends AbstractTestCase
      */
     public function test_case_repository_filter()
     {
-        $repository = \Container\getRepository('t', [
+        $repository = \Container\get(Repository::class, 't', [
             'database' => [
                 'cluster' => 'm:*;ms:*:id;',
                 'fields' => [
-                    'text1' => Type::string(),
+                    'text1' => DatabaseType::STRING(),
                 ],
             ],
         ]);
@@ -607,13 +613,13 @@ class TestCaseRepository extends AbstractTestCase
             $repository->insertSync(['text1' => mt_rand(1, 3)]);
         }
         $this->assertTrue(
-            count(iterator_to_array($repository->filter(['text1' => 1]))) +
-            count(iterator_to_array($repository->filter(['text1' => 2]))) +
-            count(iterator_to_array($repository->filter(['text1' => 3]))) ===
+            count(iterator_to_array($repository->filter(['text1' => '1']))) +
+            count(iterator_to_array($repository->filter(['text1' => '2']))) +
+            count(iterator_to_array($repository->filter(['text1' => '3']))) ===
             1000
         );
-        $this->assertTrue($repository->existsSync(['text1' => 1]));
-        $this->assertTrue(!$repository->existsSync(['text1' => 10]));
+        $this->assertTrue($repository->existsSync(['text1' => '1']));
+        $this->assertTrue(!$repository->existsSync(['text1' => '10']));
     }
 
     /**
@@ -621,17 +627,17 @@ class TestCaseRepository extends AbstractTestCase
      */
     public function test_case_repository_reid()
     {
-        $repository = \Container\getRepository('t', [
+        $repository = \Container\get(Repository::class, 't', [
             'database' => [
                 'cluster' => 'm:*;ms:*:id;',
                 'fields' => [
-                    'text1' => Type::string(),
+                    'text1' => DatabaseType::STRING(),
                 ],
             ],
         ]);
         $repository->createSync();
         $id = $repository->insertSync(['text1' => 'foo']);
-        $this->assertTrue($repository->reidSync($id, $id + 1));
+        $this->assertTrue($repository->reidSync([$id, $id + 1]));
         $null = $repository->get([$id])->current();
         $this->assertTrue($null === null);
         $bean = $repository->get([$id + 1])->current();
@@ -643,12 +649,12 @@ class TestCaseRepository extends AbstractTestCase
      */
     public function test_case_repository_sort_chains()
     {
-        $repository = \Container\getRepository('t', []);
-        $result = $this->call($repository, 'getSortChains', [1 => 1, 2 => 2]);
+        $repository = \Container\get(Repository::class, 't', []);
+        $result = $this->callPrivateMethod($repository, 'getSortChains', [1 => 1, 2 => 2]);
         $this->assertTrue($result[0] === [2, 1]);
-        $result = $this->call($repository, 'getSortChains', [1 => 1, 2 => 3, 3 => 2]);
+        $result = $this->callPrivateMethod($repository, 'getSortChains', [1 => 1, 2 => 3, 3 => 2]);
         $this->assertTrue($result[0] === [3, 2, 1]);
-        $result = $this->call($repository, 'getSortChains', [1 => 1, 2 => 3, 3 => 2, 10 => 10, 11 => 11]);
+        $result = $this->callPrivateMethod($repository, 'getSortChains', [1 => 1, 2 => 3, 3 => 2, 10 => 10, 11 => 11]);
         $this->assertTrue($result[0] === [11, 1]);
         $this->assertTrue($result[1] === [3, 10, 2]);
     }
@@ -658,11 +664,11 @@ class TestCaseRepository extends AbstractTestCase
      */
     public function test_case_repository_table_sort()
     {
-        $repository = \Container\getRepository('t', [
+        $repository = \Container\get(Repository::class, 't', [
             'database' => [
                 'cluster' => 'm:*;ms:*:id;',
                 'fields' => [
-                    'text1' => Type::int(),
+                    'text1' => DatabaseType::INTEGER(),
                 ],
             ],
             'getSortScore' => function ($bean) {
@@ -670,11 +676,11 @@ class TestCaseRepository extends AbstractTestCase
             },
         ]);
         $repository->createSync();
-        $text1s = [];
-        foreach (range(1, 2000) as $_) {
+        $values = [];
+        foreach (range(1, 1000) as $_) {
             $_ = mt_rand(1, 100);
-            $text1s[] = $_;
-            $repository->insertSync(['text1' => $_]);
+            $id = $repository->insertSync(['text1' => $_]);
+            $values[$id] = $_;
         }
         $this->assertTrue($repository->sortSync());
         $this->assertTrue($repository->sortSync());
@@ -692,18 +698,18 @@ class TestCaseRepository extends AbstractTestCase
     public function test_case_repository_cache_0()
     {
         $ttl = 3;
-        $repository = \Container\getRepository('t', [
+        $repository = \Container\get(Repository::class, 't', [
             'database' => [
                 'cluster' => 'm:*;ms:*:id;',
                 'fields' => [
-                    'text1' => Type::string(),
+                    'text1' => DatabaseType::STRING(),
                 ],
             ],
             'cache' => [
                 'ttl' => $ttl,
             ],
         ]);
-        $pk = $repository->getDatabasePk();
+        $pk = $repository->getDatabasePrimaryKey();
         $repository->createSync();
         $id = $repository->insertSync(['text1' => 'foo']);
         $text1 = $repository->get([$id])->current()->text1;

@@ -120,4 +120,22 @@ class TestCaseIterator extends AbstractTestCase
         $values = iterator_to_array(Iterator::offsetLimit(new Iterator($iterator), 10, 0));
         $this->assertEquals([], $values);
     }
+
+    /**
+     * @test
+     */
+    public function test_case_iterator_emitter()
+    {
+        $emitter = new \Amp\Emitter();
+        $promise = \Amp\call(function ($emitter) {
+            foreach (range(1, 10) as $i) {
+                yield $emitter->emit($i);
+            }
+        }, $emitter);
+        $promise->onResolve(function () use (&$emitter) {
+            $emitter->complete();
+        });
+        $iterator = new Iterator($emitter->iterate());
+        $this->assertTrue(iterator_to_array($iterator) === range(1, 10));
+    }
 }

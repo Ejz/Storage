@@ -6,6 +6,7 @@ use Ejz\Field;
 use Ejz\DatabaseType;
 use Ejz\WhereCondition;
 use Ejz\DatabaseException;
+use Ejz\DatabaseForeignKey;
 
 class TestCaseDatabase extends AbstractTestCase
 {
@@ -21,6 +22,7 @@ class TestCaseDatabase extends AbstractTestCase
             '' => [],
             '{}' => [],
             '{asd}' => ['asd'],
+            '{bar}' => ['bar'],
             '{foo,bar}' => ['foo', 'bar'],
             '{"foo","bar"}' => ['foo', 'bar'],
             '{{foo,bar},foo,bar}' => [['foo', 'bar'], 'foo', 'bar'],
@@ -496,5 +498,16 @@ class TestCaseDatabase extends AbstractTestCase
             return $db->tableExistsSync('t');
         });
         $this->assertEquals(array_fill_keys($pool->names(), true), $res);
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_database_foreign_key()
+    {
+        $fk = DatabaseForeignKey::get('f1', 'f2', 't', 'f3', 'f4');
+        $this->assertEquals($fk['childFields'], ['f1', 'f2']);
+        $this->assertEquals($fk['parentTable'], 't');
+        $this->assertEquals($fk['parentFields'], ['f3', 'f4']);
     }
 }
