@@ -75,7 +75,7 @@ class Repository implements NameInterface, ContextInterface
             $index = $this->getBitmapIndex();
             $fields = $this->getBitmapFields();
             if ($this->hasSortScore()) {
-                $fields[] = new Field(self::BITMAP_SYSTEM_FIELD, BitmapType::array());
+                $fields[] = new Field(self::BITMAP_SYSTEM_FIELD, BitmapType::ARRAY());
             }
             $this->getMasterBitmapPool()->create($index, $fields);
         });
@@ -102,22 +102,19 @@ class Repository implements NameInterface, ContextInterface
                 'foreignKeys' => $foreignKeys,
             ];
             $pools = [$this->getMasterDatabasePool(), $this->getSlaveDatabasePool()];
+            $isSlave = function ($smth) {
+                return is_object($smth) ? $smth->isSlave() : !empty($smth['slave']);
+            };
             foreach ($pools as $i => $pool) {
                 $isMaster = $i === 0;
                 $names = $pool->names();
                 $args['primaryKeyIncrement'] = count($names);
-                yield $pool->each(function ($database) use ($names, $args, $isMaster) {
+                yield $pool->each(function ($database) use ($names, $args, $isMaster, $isSlave) {
                     $args['primaryKeyStart'] = array_search($database->getName(), $names) + 1;
                     if (!$isMaster) {
-                        $args['fields'] = array_filter($args['fields'], function ($field) {
-                            return $field->isSlave();
-                        });
-                        $args['indexes'] = array_filter($args['indexes'], function ($index) {
-                            return $index->isSlave();
-                        });
-                        $args['foreignKeys'] = array_filter($args['foreignKeys'], function ($foreignKey) {
-                            return $foreignKey->isSlave();
-                        });
+                        $args['fields'] = array_filter($args['fields'], $isSlave);
+                        $args['indexes'] = array_filter($args['indexes'], $isSlave);
+                        $args['foreignKeys'] = array_filter($args['foreignKeys'], $isSlave);
                     }
                     return $database->create(...array_values($args));
                 });
@@ -246,13 +243,12 @@ class Repository implements NameInterface, ContextInterface
 
     /**
      * @param array $ids
-     * @param array $params (optional)
      *
      * @return Iterator
      */
-    public function get(array $ids, array $params = []): Iterator
+    public function get(array $ids): Iterator
     {
-        $emit = function ($emit) use ($ids, $params) {
+        $emit = function ($emit) use ($ids) {
             $ids = array_map('intval', $ids);
             $ids = array_values($ids);
             $table = $this->getDatabaseTable();
@@ -280,68 +276,69 @@ class Repository implements NameInterface, ContextInterface
                 $cached = array_filter($cached, $filter, ARRAY_FILTER_USE_BOTH);
             }
             foreach ($ids as $id) {
-                if ($id <= 0) {
+                if ($id < 1) {
                     continue;
                 }
                 $pool = $this->getMasterDatabasePool($id);
                 $names = $pool->names();
-                if (!$names) {
-                    continue;
-                }
                 $name = implode(',', $names);
                 $pools[$name] = $pools[$name] ?? ['pool' => $pool, 'ids' => []];
                 $pools[$name]['ids'][] = $id;
             }
-            $map = function ($value) use ($cacheConfig, $meta, $cache) {
+            $setMultipleComplex = [[], [], [], []];
+            $toDatabaseBean = function ($value) use ($cacheConfig, $meta, &$setMultipleComplex) {
                 [$id, $values] = $value;
                 $bean = $this->getDatabaseBeanWithValues($id, $values);
                 if (isset($meta[$id])) {
                     [$ck, $ct] = $meta[$id];
-                    $set = [$ck => $value];
+                    $cl = [];
                     foreach ($cacheConfig['cacheableFields'] as $field) {
                         $v = $bean->$field;
-                        if ($v === null) {
-                            continue;
-                        }
                         $where = new WhereCondition([$field => $v]);
-                        $set[$where->key()] = $id;
+                        $cl[] = $where->key();
                     }
-                    $cache->setMultiple($set, $cacheConfig['ttl'], $ct);
+                    $setMultipleComplex[0][$ck] = $value;
+                    $setMultipleComplex[1][$ck] = $cacheConfig['ttl'];
+                    $setMultipleComplex[2][$ck] = $ct;
+                    $setMultipleComplex[3][$ck] = $cl;
                 }
                 return $bean;
             };
-            $iterators = [Iterator::map(new Iterator($cached), $map)];
+            $iterators = [new Iterator($cached)];
             foreach ($pools as $pool) {
                 $params = $params ?? [
                     'pk' => [$this->getDatabasePrimaryKey()],
                     'fields' => $this->getDatabaseFields(),
                 ];
                 $iterator = $pool['pool']->random()->get($table, $pool['ids'], $params);
-                $iterators[] = Iterator::map($iterator, $map);
+                $iterators[] = $iterator;
             }
             $iterator = Iterator::merge($iterators, function ($value1, $value2) use ($_ids) {
                 return $_ids[$value1[0]] - $_ids[$value2[0]];
             });
+            $collector = [];
+            $pointer = 0;
+            foreach ($iterator as $value) {
+                $collector[] = $toDatabaseBean($value);
+            }
+            if ($cache !== null) {
+                $cache->setMultipleComplex(...$setMultipleComplex);
+            }
             $already = [];
             foreach ($ids as $id) {
                 if (isset($already[$id])) {
                     yield $emit($already[$id]);
                     continue;
                 }
-                $value = null;
-                if ($iterator !== null) {
-                    $advance = yield $iterator->advance();
-                    $value = $advance ? $iterator->getCurrent() : null;
-                    $iterator = $value !== null ? $iterator : null;
-                }
+                $value = $collector[$pointer++] ?? null;
                 if ($value === null) {
                     yield $emit(null);
                     continue;
                 }
-                [$vid] = $value;
+                $vid = $value->id;
                 $already[$vid] = $value;
                 if ($vid === $id) {
-                    yield $emit($value);
+                    yield $emit($already[$vid]);
                     continue;
                 }
                 yield $emit(null);
@@ -392,7 +389,7 @@ class Repository implements NameInterface, ContextInterface
             $id = $bean->id;
             if ($this->hasSortScore()) {
                 $value = $this->getMasterDatabasePool($id)->names();
-                $fields[] = new Field(self::BITMAP_SYSTEM_FIELD, BitmapType::array(), $value);
+                $fields[] = new Field(self::BITMAP_SYSTEM_FIELD, BitmapType::ARRAY(), $value);
             }
             yield $pool->add($index, $id, $fields);
             return $id;
@@ -553,9 +550,14 @@ class Repository implements NameInterface, ContextInterface
             count($cacheConfig['cacheableFields']) &&
             count($where) === 1
         ) {
-            $id = $this->getCache()->get($where->key());
+            $value = $this->getCache()->get($where->key());
+            if ($value !== null) {
+                [$id, $values] = $value;
+                $bean = $this->getDatabaseBeanWithValues($id, $values);
+                return new Iterator([$bean]);
+            }
         }
-        return isset($id) ? $this->get([$id]) : $this->iterate(compact('where') + $params);
+        return $this->iterate(compact('where') + $params);
     }
 
     /**
@@ -601,38 +603,32 @@ class Repository implements NameInterface, ContextInterface
     }
 
     /**
-     * @param int $coverage (optional)
-     *
      * @return Promise
      */
-    public function sort(int $coverage = 100): Promise
+    public function sort(): Promise
     {
-        return \Amp\call(function ($coverage) {
+        return \Amp\call(function () {
             $primaryKey = $this->getDatabasePrimaryKey();
             $pool = $this->getReadableMasterDatabasePool();
             $names = $pool->names();
+            $numbers = array_merge([1], $this->getPrimaryNumbers(1E4));
+            $numbers = array_reverse($numbers);
+            foreach ($numbers as $number) {
+                $pattern = '$field %% ' . $number . ' $operation $value';
+                $filters[] = [$primaryKey, 0, '=', $pattern];
+            }
             foreach ($names as $name) {
                 $_pool = $pool->filter($name);
-                foreach (range(0, 999) as $mod) {
-                    $filters[] = [$primaryKey, $mod, '=', '$field % 1000 $operation $value'];
-                }
-                foreach (range(0, 999) as $mult) {
-                    $filters[] = [$primaryKey, $mult * 1000 + 500, '>'];
-                    $filters[] = [$primaryKey, $mult * 1000, '>'];
-                }
                 foreach ($filters as $filter) {
-                    if (mt_rand(1, 100) > $coverage) {
-                        continue;
-                    }
                     $iterator = $this->filter([$filter], ['pool' => $_pool]);
                     $scores = [];
                     [$min, $max] = [null, null];
-                    foreach ($iterator as $id => $bean) {
+                    foreach ($iterator as $bean) {
                         $score = $this->getSortScore($bean);
-                        $scores[$id] = $score;
+                        $scores[$bean->id] = $score;
                         $min = $min === null ? $score : min($score, $min);
                         $max = $max === null ? $score : max($score, $max);
-                        if (count($scores) == 1000) {
+                        if (count($scores) == 10000) {
                             break;
                         }
                     }
@@ -647,7 +643,7 @@ class Repository implements NameInterface, ContextInterface
                 }
             }
             return true;
-        }, $coverage);
+        });
     }
 
     /**
@@ -667,65 +663,94 @@ class Repository implements NameInterface, ContextInterface
     }
 
     /**
-     * @param mixed $query
-     * @param array $params (optional)
+     * @param string $query
+     * @param array  $params (optional)
      *
      * @return Iterator
      */
-    public function search($query, array $params = []): Iterator
+    public function search(string $query, array $params = []): Iterator
     {
         $params += [
             'sortby' => null,
             'asc' => true,
+            'min' => null,
+            'max' => null,
             'foreignKeys' => [],
             'config' => [],
         ];
         [
             'sortby' => $sortby,
             'asc' => $asc,
+            'min' => $min,
+            'max' => $max,
+            'foreignKeys' => $foreignKeys,
             'config' => $config,
         ] = $params;
         $config += $this->config;
         [
             'search_chunk_size' => $search_chunk_size,
         ] = $config;
+        $foreignKeys = (array) $foreignKeys;
         $index = $this->getBitmapIndex();
         $bitmap = $this->getReadableMasterBitmapPool()->random();
         $names = [null];
-        if ($sortby === null && $this->hasSortScore()) {
+        if ($this->hasSortScore()) {
             $names = $this->getReadableMasterDatabasePool()->names();
         }
-        $size = 0;
-        $iterators = array_map(function ($name) use (
-            $bitmap, $index, $query, $params, &$size, $search_chunk_size
-        ) {
-            $_ = self::BITMAP_SYSTEM_FIELD;
-            $query = $name === null ? $query : "({$query}) & (@{$_}:{$name})";
-            $params = compact('query') + $params;
-            $iterator = $bitmap->search($index, $params);
-            $size += $iterator->getContext()['size'];
+        $args = [];
+        $bitmap_system_field = self::BITMAP_SYSTEM_FIELD;
+        foreach ($names as $name) {
+            $q = $name === null ? $query : "({$query}) & (@{$bitmap_system_field}:{$name})";
+            $args[] = [
+                'query' => $q,
+                'sortby' => $sortby,
+                'asc' => $asc,
+                'min' => $min,
+                'max' => $max,
+                'foreignKeys' => $foreignKeys,
+                'forceForeignKeyFormat' => true,
+                'emitTotal' => true,
+                'config' => [
+                    'iterator_chunk_size' => $search_chunk_size,
+                ],
+            ];
+        }
+        $iterators = $bitmap->search($index, $args);
+        Promise\wait(Promise\all(array_map(function ($iterator) {
+            return $iterator->advance();
+        }, $iterators)));
+        $sizes = array_map(function ($iterator) {
+            return $iterator->getCurrent();
+        }, $iterators);
+        $size = array_sum($sizes);
+        $iterators = array_map(function ($iterator) use ($search_chunk_size, $foreignKeys) {
             $iterator = Iterator::chunk($iterator, $search_chunk_size);
-            $repositories = [$this];
-            foreach ((array) $params['foreignKeys'] as $foreignKey) {
-                $repositories[] = $this->getRepositoryForForeignKey($foreignKey);
+            $repositories = ['id' => $this];
+            foreach ($foreignKeys as $foreignKey) {
+                $repositories[$foreignKey] = $this->getRepositoryForForeignKey($foreignKey);
             }
-            $count = count($repositories);
-            $emit = function ($emit) use ($iterator, $repositories, $count) {
+            $emit = function ($emit) use ($iterator, $repositories) {
                 while (yield $iterator->advance()) {
-                    $chunk = $iterator->getCurrent();
+                    $rows = $iterator->getCurrent();
                     $iterators = [];
-                    for ($i = 0; $i < $count; $i++) {
-                        $iterators[] = $repositories[$i]->get(array_column($chunk, $i));
+                    foreach ($repositories as $key => $repository) {
+                        $ids = array_column($rows, $key);
+                        $iterators[$key] = $repository->get($ids);
                     }
                     $paired = Iterator::pair($iterators);
                     while (yield $paired->advance()) {
                         $value = $paired->getCurrent();
-                        yield $emit($value);
+                        $bean = $value['id'];
+                        unset($value['id']);
+                        foreach ($value as $k => $v) {
+                            $bean->$k = $v;
+                        }
+                        yield $emit($bean);
                     }
                 }
             };
             return new Iterator($emit);
-        }, array_combine($names, $names));
+        }, $iterators);
         $iterator = Iterator::merge($iterators, $this->getSortScoreClosure($asc));
         $iterator->setContext($size, 'size');
         return $iterator;
@@ -738,7 +763,8 @@ class Repository implements NameInterface, ContextInterface
         $this->config = $this->config + [
             'database' => [],
             'bitmap' => [],
-            'search_chunk_size' => 30,
+            'get_chunk_size' => 100,
+            'search_chunk_size' => 10,
         ];
         $cluster = 'm:!*;ms:1:id;s:!*;ss:1:id;';
         $this->config['database']['cluster'] = $this->config['database']['cluster'] ?? 'w:!*;';
@@ -750,13 +776,13 @@ class Repository implements NameInterface, ContextInterface
         $this->config['database']['table'] = $this->config['database']['table'] ?? $name;
         $this->config['bitmap']['index'] = $this->config['bitmap']['index'] ?? $name;
         //
-        $_ = $this->config['database']['pk'] ?? '%s_id';
-        $this->config['database']['pk'] = sprintf($_, $this->config['database']['table']);
+        $_ = $this->config['database']['primaryKey'] ?? '%s_id';
+        $this->config['database']['primaryKey'] = sprintf($_, $this->config['database']['table']);
         //
         $fields = $this->config['database']['fields'] ?? [];
         $collect = [];
         foreach ($fields as $name => $field) {
-            if ($field instanceof AbstractType) {
+            if (!is_array($field)) {
                 $field = ['type' => $field];
             }
             $field['slave'] = $field['slave'] ?? false;
@@ -764,40 +790,16 @@ class Repository implements NameInterface, ContextInterface
         }
         $this->config['database']['fields'] = $collect;
         //
-        $indexes = $this->config['database']['indexes'] ?? [];
-        $collect = [];
-        foreach ($indexes as $name => $index) {
-            if ($index instanceof AbstractIndexType) {
-                $index = ['type' => $index, 'fields' => [$name]];
-            }
-            $index['slave'] = $index['slave'] ?? false;
-            $collect[$name] = $index;
-        }
-        $this->config['database']['indexes'] = $collect;
+        $this->config['database']['indexes'] = $this->config['database']['indexes'] ?? [];
         //
-        $foreignKeys = $this->config['database']['foreignKeys'] ?? [];
-        $collect = [];
-        foreach ($foreignKeys as $name => $foreignKey) {
-            if (is_string($foreignKey)) {
-                [$one, $two] = explode('.', $foreignKey);
-                $foreignKey = [
-                    'childFields' => explode(',', $two),
-                    'parentFields' => explode(',', $two),
-                    'parentTable' => $one,
-                ];
-            }
-            $foreignKey['slave'] = $foreignKey['slave'] ?? false;
-            $collect[$name] = $foreignKey;
-        }
-        $this->config['database']['foreignKeys'] = $collect;
+        $this->config['database']['foreignKeys'] = $this->config['database']['foreignKeys'] ?? [];
         //
         $fields = $this->config['bitmap']['fields'] ?? [];
         $collect = [];
         foreach ($fields as $name => $field) {
-            if ($field instanceof AbstractType) {
+            if (!is_array($field)) {
                 $field = ['type' => $field];
             }
-            $field['slave'] = $field['slave'] ?? false;
             $collect[$name] = $field;
         }
         $this->config['bitmap']['fields'] = $collect;
@@ -1135,14 +1137,6 @@ class Repository implements NameInterface, ContextInterface
     }
 
     /**
-     * @return array
-     */
-    public function getDatabaseFks(): array
-    {
-        return $this->getDatabaseForeignKeys();
-    }
-
-    /**
      * @return string
      */
     public function getBitmapIndex(): string
@@ -1155,19 +1149,18 @@ class Repository implements NameInterface, ContextInterface
      */
     public function getDatabaseForeignKeys(): array
     {
-        return $this->config['database']['fks'];
+        return $this->config['database']['foreignKeys'];
     }
 
     /**
      * @return array
      */
-    public function getBitmapFields(bool $_names = false): array
+    public function getBitmapFields(): array
     {
         $fields = $this->config['bitmap']['fields'];
         $collect = [];
         foreach ($fields as $name => $field) {
             $collect[$name] = new Field($name, $field['type']);
-            $collect[$name]->isSlave($field['slave']);
         }
         return $collect;
     }
@@ -1339,5 +1332,29 @@ class Repository implements NameInterface, ContextInterface
             $chains[] = array_reverse($chain);
         }
         return $chains;
+    }
+
+    /**
+     * @param int $max
+     *
+     * @return array
+     */
+    private function getPrimaryNumbers(int $max): array
+    {
+        $number = 1;
+        $collect = [];
+        while ($number++ < $max) {
+            $ok = true;
+            for ($i = 2; $i < $number; $i++) {
+                if (($number % $i) == 0) {
+                    $ok = false;
+                    break;
+                }
+            }
+            if ($ok) {
+                $collect[] = $number;
+            }
+        }
+        return $collect;
     }
 }
