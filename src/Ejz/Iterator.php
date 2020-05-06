@@ -227,19 +227,6 @@ class Iterator implements \Amp\Iterator, \Iterator, ContextInterface
     }
 
     /**
-     * @param self $iterator
-     *
-     * @return self
-     */
-    public static function wrap(self $iterator): self
-    {
-        return self::map($iterator, function ($value) {
-            $id = array_shift($value);
-            return [$id, $value];
-        });
-    }
-
-    /**
      * @param self     $iterator
      * @param callable $filter
      *
