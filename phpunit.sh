@@ -68,7 +68,7 @@ if [ "$action" = "end" -o "$action" = "finish" -o "$action" = "stop" ]; then
 fi
 
 if [ -f "$dotenv" ]; then
-    export $(cat "$dotenv" | xargs)
+    export $(cat "$dotenv" | grep -v '^#' | xargs)
     ./vendor/bin/phpunit "$@"
 else
     echo Run: "`basename "$this"`" start

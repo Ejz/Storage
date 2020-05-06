@@ -16,7 +16,6 @@
         "amphp/amp": "^2.4"
     },
     "require-dev": {
-        "vlucas/phpdotenv": "~2.0",
         "phpunit/phpunit": "^9.1",
         "composer/composer": "^1.10"
     },

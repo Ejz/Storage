@@ -6,9 +6,9 @@ namespace Container;
  * @param string $class
  * @param array  ...$args
  *
- * @return object
+ * @return mixed
  */
-function get(string $class, ...$args): object
+function get(string $class, ...$args)
 {
     switch ($class) {
         case \Ejz\RedisClient::class:
