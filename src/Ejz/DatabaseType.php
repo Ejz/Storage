@@ -50,10 +50,18 @@ class DatabaseType
         return new class(__FUNCTION__, $options) extends AbstractType {
             public function setValue($value)
             {
+                if ($value instanceof AbstractBean) {
+                    return $value;
+                }
                 if ($value === null) {
                     return $this->isNullable() ? null : 0;
                 }
                 return (int) $value;
+            }
+
+            public function exportValue($value)
+            {
+                return $value instanceof AbstractBean ? $value->id : $value;
             }
         };
     }
@@ -178,10 +186,18 @@ class DatabaseType
         return new class(__FUNCTION__, $options) extends AbstractType {
             public function setValue($value)
             {
+                if ($value instanceof AbstractBean) {
+                    return $value;
+                }
                 if ($value === null) {
                     return $this->isNullable() ? null : 0;
                 }
                 return (int) $value;
+            }
+
+            public function exportValue($value)
+            {
+                return $value instanceof AbstractBean ? $value->id : $value;
             }
         };
     }

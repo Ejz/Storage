@@ -149,7 +149,6 @@ class DatabaseConnection
             throw new DatabasePostgresConnection();
         }
         return \Amp\call(function ($sql, $args) {
-            // var_dump($this->substitute($sql, $args));
             $sql = $this->substitute($sql, $args);
             return $this->createResult(yield from $this->send('pg_send_query', $sql));
         }, $sql, $args);

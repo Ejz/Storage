@@ -4,13 +4,16 @@ this=`readlink -fe "$0"`
 this_dir=`dirname "$this"`
 cd "$this_dir"
 
+sudo=""
+test `id -u` -eq 0 || sudo="sudo"
+
 if [ "$1" -a -f "$1" ]; then
-    export $(cat "$1" | xargs)
+    export $(cat "$1" | grep -v '^#' | xargs)
     shift
 elif [ -f ".env" ]; then
-    export $(cat .env | xargs)
+    export $(cat .env | grep -v '^#' | xargs)
 elif [ -f ".env.phpunit" ]; then
-    export $(cat .env.phpunit | xargs)
+    export $(cat .env.phpunit | grep -v '^#' | xargs)
 fi
 
 function in_array() {
@@ -24,41 +27,36 @@ function in_array() {
     return 1
 }
 
-ENVS="$DB_ENVS"
-ENVS=`echo "$ENVS" | tr ',' ' '`
-ENVS=($ENVS)
-ENV="$1"
-if [ -z "$ENV" ]; then
-    ENV="0"
+POOL="$DATABASE_POOL"
+POOL=`echo "$POOL" | tr ',' ' '`
+POOL=($POOL)
+OBJ="$1"
+if [ -z "$OBJ" ]; then
+    OBJ="0"
 else
     shift
 fi
 
-if [ -n "$ENV" -a "$ENV" -eq "$ENV" ] 2>/dev/null; then
-    n="$ENV"
-    ENV="${ENVS[$n]}"
+if [ -n "$OBJ" -a "$OBJ" -eq "$OBJ" ] 2>/dev/null; then
+    n="$OBJ"
+    OBJ="${POOL[$n]}"
 fi
 
-ENV=${ENV^^}
+OBJ=${OBJ^^}
 
-if ! in_array "$ENV" "${ENVS[@]}"; then
-    echo 1>&2 "ENV NOT FOUND!"
+if ! in_array "$OBJ" "${POOL[@]}"; then
+    echo 1>&2 "OBJ NOT FOUND!"
     exit 1
 fi
 
-HOST=`printenv "DB_${ENV}_HOST"`
-HOST="${HOST:-$DB_HOST}"
+USER=`printenv "DATABASE_${OBJ}_USER"`
+USER="${USER:-$DATABASE_USER}"
 
-PORT=`printenv "DB_${ENV}_PORT"`
-PORT="${PORT:-$DB_PORT}"
+PASSWORD=`printenv "DATABASE_${OBJ}_PASSWORD"`
+PASSWORD="${PASSWORD:-$DATABASE_PASSWORD}"
 
-USER=`printenv "DB_${ENV}_USER"`
-USER="${USER:-$DB_USER}"
+NAME=`printenv "DATABASE_${OBJ}_NAME"`
+NAME="${NAME:-$DATABASE_NAME}"
 
-PASSWORD=`printenv "DB_${ENV}_PASSWORD"`
-PASSWORD="${PASSWORD:-$DB_PASSWORD}"
-
-NAME=`printenv "DB_${ENV}_NAME"`
-NAME="${NAME:-$DB_NAME}"
-
-psql "postgres://${USER}:${PASSWORD}@${HOST}:${PORT}/${NAME}" "$@"
+"$sudo" docker run -ti --link phpunit_database_"$OBJ":host \
+    postgres:11 psql "postgres://${USER}:${PASSWORD}@host:5432/${NAME}" "$@"

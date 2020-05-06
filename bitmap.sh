@@ -4,13 +4,16 @@ this=`readlink -fe "$0"`
 this_dir=`dirname "$this"`
 cd "$this_dir"
 
+sudo=""
+test `id -u` -eq 0 || sudo="sudo"
+
 if [ "$1" -a -f "$1" ]; then
-    export $(cat "$1" | xargs)
+    export $(cat "$1" | grep -v '^#' | xargs)
     shift
 elif [ -f ".env" ]; then
-    export $(cat .env | xargs)
+    export $(cat .env | grep -v '^#' | xargs)
 elif [ -f ".env.phpunit" ]; then
-    export $(cat .env.phpunit | xargs)
+    export $(cat .env.phpunit | grep -v '^#' | xargs)
 fi
 
 function in_array() {
@@ -24,32 +27,27 @@ function in_array() {
     return 1
 }
 
-ENVS="$BITMAP_ENVS"
-ENVS=`echo "$ENVS" | tr ',' ' '`
-ENVS=($ENVS)
-ENV="$1"
-if [ -z "$ENV" ]; then
-    ENV="0"
+POOL="$BITMAP_POOL"
+POOL=`echo "$POOL" | tr ',' ' '`
+POOL=($POOL)
+OBJ="$1"
+if [ -z "$OBJ" ]; then
+    OBJ="0"
 else
     shift
 fi
 
-if [ -n "$ENV" -a "$ENV" -eq "$ENV" ] 2>/dev/null; then
-    n="$ENV"
-    ENV="${ENVS[$n]}"
+if [ -n "$OBJ" -a "$OBJ" -eq "$OBJ" ] 2>/dev/null; then
+    n="$OBJ"
+    OBJ="${POOL[$n]}"
 fi
 
-ENV=${ENV^^}
+OBJ=${OBJ^^}
 
-if ! in_array "$ENV" "${ENVS[@]}"; then
-    echo 1>&2 "ENV NOT FOUND!"
+if ! in_array "$OBJ" "${POOL[@]}"; then
+    echo 1>&2 "OBJ NOT FOUND!"
     exit 1
 fi
 
-HOST=`printenv "BITMAP_${ENV}_HOST"`
-HOST="${HOST:-$BITMAP_HOST}"
-
-PORT=`printenv "BITMAP_${ENV}_PORT"`
-PORT="${PORT:-$BITMAP_PORT}"
-
-redis-cli -h "$HOST" -p "$PORT" "$@"
+"$sudo" docker run -ti --link phpunit_bitmap_"$OBJ":host \
+    ejzspb/bitmap node etc/client.js 61000 host

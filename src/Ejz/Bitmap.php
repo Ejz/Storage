@@ -30,6 +30,7 @@ class Bitmap implements NameInterface
         $this->dsn = $dsn;
         $this->config = $config + [
             'iterator_chunk_size' => 100,
+            'logger' => null,
         ];
     }
 
@@ -52,7 +53,7 @@ class Bitmap implements NameInterface
             if (!yield $this->indexExists($index)) {
                 return false;
             }
-            $this->query('DROP #', $index);
+            yield $this->query('DROP #', $index);
             return true;
         }, $index);
     }
@@ -68,7 +69,6 @@ class Bitmap implements NameInterface
             if (!yield $this->indexExists($index)) {
                 return false;
             }
-            $this->query('TRUNCATE #', $index);
             return true;
         }, $index);
     }
@@ -265,7 +265,9 @@ class Bitmap implements NameInterface
     private function query(string $query, ...$args): Promise
     {
         return \Amp\call(function ($query, $args) {
-            [$result] = yield $this->sendQueries([[$query, $args]]);
+            $id = str_replace('.', '', microtime(true));
+            $result = yield $this->sendQueries([$id => [$query, $args]]);
+            $result = $result[$id];
             if (array_key_exists('error', $result)) {
                 throw new BitmapException($result['error']);
             }
@@ -282,11 +284,11 @@ class Bitmap implements NameInterface
     {
         $ch = \curl_init($this->dsn);
         $collect = [];
+        $map = [];
         foreach ($queries as $id => [$query, $args]) {
-            $collect[] = [
-                'id' => $id,
-                'query' => $this->substitute($query, $args),
-            ];
+            $query = $this->substitute($query, $args);
+            $collect[] = compact('id', 'query');
+            $map[$id] = $query;
         }
         \curl_setopt($ch, \CURLOPT_POSTFIELDS, \json_encode($collect));
         \curl_setopt($ch, \CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
@@ -302,6 +304,9 @@ class Bitmap implements NameInterface
             $id = $result['id'];
             unset($result['id']);
             $collect[$id] = $result;
+            if ($this->config['logger'] !== null) {
+                $this->config['logger']($map[$id], $result);
+            }
         }
         return new Success($collect);
     }

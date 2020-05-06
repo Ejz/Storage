@@ -41,7 +41,7 @@ class Field implements NameInterface
      */
     public function exportValue()
     {
-        return $this->type->exportValue($this->value);
+        return $this->type->exportValue($this->getValue());
     }
 
     /**

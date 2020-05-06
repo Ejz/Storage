@@ -2,8 +2,6 @@
 
 namespace Ejz;
 
-use RuntimeException;
-
 class BitmapType
 {
     /**
@@ -101,12 +99,12 @@ class BitmapType
                 $options = $this->options;
                 $query = [];
                 $args = [];
-                $min = $options['min'] ?? null;
+                $min = $options['min'];
                 if ($min !== null) {
                     $query[] = 'MIN ?';
                     $args[] = $min;
                 }
-                $max = $options['max'] ?? null;
+                $max = $options['max'];
                 if ($max !== null) {
                     $query[] = 'MAX ?';
                     $args[] = $max;
@@ -154,12 +152,12 @@ class BitmapType
                 $options = $this->options;
                 $query = [];
                 $args = [];
-                $min = $options['min'] ?? null;
+                $min = $options['min'];
                 if ($min !== null) {
                     $query[] = 'MIN ?';
                     $args[] = $min;
                 }
-                $max = $options['max'] ?? null;
+                $max = $options['max'];
                 if ($max !== null) {
                     $query[] = 'MAX ?';
                     $args[] = $max;
@@ -207,12 +205,12 @@ class BitmapType
                 $options = $this->options;
                 $query = [];
                 $args = [];
-                $min = $options['min'] ?? null;
+                $min = $options['min'];
                 if ($min !== null) {
                     $query[] = 'MIN ?';
                     $args[] = $min;
                 }
-                $max = $options['max'] ?? null;
+                $max = $options['max'];
                 if ($max !== null) {
                     $query[] = 'MAX ?';
                     $args[] = $max;
@@ -229,34 +227,17 @@ class BitmapType
      */
     public static function FOREIGNKEY(array $options = []): AbstractType
     {
-        $options['nullable'] = $options['nullable'] ?? null;
-        $options['references'] = $options['references'] ?? null;
-        if ($options['references'] === null) {
-            throw new RuntimeException();
-        }
         return new class(__FUNCTION__, $options) extends AbstractType {
             public function setValue($value)
             {
-                $nullable = $this->options['nullable'];
-                if ($value === null) {
-                    if ($nullable) {
-                        return null;
-                    }
-                    throw new RuntimeException();
-                }
                 if ($value instanceof AbstractBean) {
-                    $id = $value->id;
-                    if (($id === null || $id < 1) && !$nullable) {
-                        throw new RuntimeException();
-                    }
                     return $value;
                 }
-                $value = (int) $value;
-                $value = $value < 1 ? null : $value;
-                if ($value === null && !$nullable) {
-                    throw new RuntimeException();
+                if ($value === null) {
+                    return null;
                 }
-                return $value;
+                $value = (int) $value;
+                return $value > 0 ? $value : null;
             }
 
             public function exportValue($value)
@@ -269,7 +250,7 @@ class BitmapType
                 $options = $this->options;
                 $query = [];
                 $args = [];
-                $references = $options['references'];
+                $references = $options['references'] ?? null;
                 if ($references !== null) {
                     $query[] = 'REFERENCES #';
                     $args[] = $references;
@@ -304,11 +285,8 @@ class BitmapType
                 $options = $this->options;
                 $query = [];
                 $args = [];
-                $separator = $options['separator'] ?? null;
-                if ($separator !== null) {
-                    $query[] = 'SEPARATOR ?';
-                    $args[] = $separator;
-                }
+                $query[] = 'SEPARATOR ?';
+                $args[] = $options['separator'];
                 return [implode(' ', $query), $args];
             }
         };

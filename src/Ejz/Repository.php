@@ -257,6 +257,7 @@ class Repository implements NameInterface, ContextInterface
             $cached = [];
             $cache = null;
             $cacheConfig = $this->getCacheConfig();
+            $alreadyCached = [];
             if ($cacheConfig !== null) {
                 $name = $this->getName();
                 $keys = array_map(function ($id) use ($name) {
@@ -265,8 +266,9 @@ class Repository implements NameInterface, ContextInterface
                 $key2id = array_combine($keys, $ids);
                 $cache = $this->getCache();
                 $cached = $cache->getMultiple($keys);
-                $filter = function ($value, $key) use (&$meta, $key2id, $name) {
+                $filter = function ($value, $key) use (&$meta, $key2id, $name, &$alreadyCached) {
                     if ($value !== null) {
+                        $alreadyCached[$key2id[$key]] = true;
                         return true;
                     }
                     $meta[$key2id[$key]] = [$key, [$name, $key]];
@@ -275,12 +277,15 @@ class Repository implements NameInterface, ContextInterface
                 $cached = array_filter($cached, $filter, ARRAY_FILTER_USE_BOTH);
             }
             foreach ($ids as $id) {
-                if ($id < 1) {
+                if ($id < 1 || isset($alreadyCached[$id])) {
                     continue;
                 }
                 $pool = $this->getMasterDatabasePool($id);
                 $names = $pool->names();
                 $name = implode(',', $names);
+                if (!$name) {
+                    continue;
+                }
                 $pools[$name] = $pools[$name] ?? ['pool' => $pool, 'ids' => []];
                 $pools[$name]['ids'][] = $id;
             }
@@ -651,11 +656,8 @@ class Repository implements NameInterface, ContextInterface
     public function populateBitmap(): Promise
     {
         return \Amp\call(function () {
-            yield $this->dropBitmap();
-            yield $this->createBitmap();
-            $iterator = $this->iterate();
-            while ($iterator->advanceSync()) {
-                $bean = $iterator->getCurrent();
+            yield $this->truncateBitmap();
+            foreach ($this->iterate() as $bean) {
                 $this->toBitmapBean($bean)->addSync();
             }
         });
@@ -740,9 +742,12 @@ class Repository implements NameInterface, ContextInterface
                     while (yield $paired->advance()) {
                         $value = $paired->getCurrent();
                         $bean = $value['id'];
+                        if ($bean === null) {
+                            continue;
+                        }
                         unset($value['id']);
                         foreach ($value as $k => $v) {
-                            $bean->$k = $v;
+                            $bean->$k = $v ?? $bean->$k;
                         }
                         yield $emit($bean);
                     }
@@ -1257,15 +1262,15 @@ class Repository implements NameInterface, ContextInterface
                 continue;
             }
             $type = $field->getType();
-            if ($type->getName() !== BitmapType::foreignKey()->getName()) {
+            if ($type->getName() !== 'FOREIGNKEY') {
                 continue;
             }
-            $parent = $type->getParent();
+            $options = $type->getOptions();
+            $references = $options['references'];
             $repositoryPool = $this->getContext()['repositoryPool'];
-            $names = $repositoryPool->names();
-            foreach ($names as $name) {
+            foreach ($repositoryPool->names() as $name) {
                 $repository = $repositoryPool->get($name);
-                if ($repository->getBitmapIndex() === $parent) {
+                if ($repository->getBitmapIndex() === $references) {
                     return $repository;
                 }
             }

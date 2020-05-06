@@ -6,7 +6,7 @@ namespace Tests;
 // use Ejz\DatabaseBean;
 // use Ejz\BitmapBean;
 // use Ejz\Index;
-// use Ejz\Iterator;
+use Ejz\RepositoryPool;
 use Ejz\Repository;
 use Amp\Promise;
 use Ejz\DatabaseType;
@@ -791,6 +791,7 @@ class TestCaseRepository extends AbstractTestCase
         $repository->populateBitmap();
         $ex = null;
         foreach ($repository->search('*') as $bean) {
+            // var_dump($bean);
             $id = $bean->id;
             $ex = $ex ?? $id;
             $this->assertTrue($id >= $ex);
@@ -813,17 +814,17 @@ class TestCaseRepository extends AbstractTestCase
      */
     public function test_case_repository_bitmap_1()
     {
-        $repository = \Container\getRepository('t', [
+        $repository = \Container\get(Repository::class, 't', [
             'database' => [
                 'cluster' => 'm:*;ms:1:id;',
                 'fields' => [
-                    'int' => Type::int(),
+                    'int' => DatabaseType::INT(),
                 ],
             ],
             'bitmap' => [
                 'cluster' => 'm:*;ms:*:id;',
                 'fields' => [
-                    'int' => Type::bitmapInt(),
+                    'int' => BitmapType::INT(),
                 ],
             ],
         ]);
@@ -859,28 +860,28 @@ class TestCaseRepository extends AbstractTestCase
         $repository->populateBitmap();
         //
         $collect = [];
-        foreach ($repository->search('*') as $id => $bean) {
-            $collect[] = [$id, $bean->int];
+        foreach ($repository->search('*') as $bean) {
+            $collect[] = [$bean->id, $bean->int];
         }
         $this->assertEquals($idAsc(), $collect);
         //
         $collect = [];
-        foreach ($repository->search('*', ['sortby' => 'int']) as $id => $bean) {
-            $collect[] = [$id, $bean->int];
+        foreach ($repository->search('*', ['sortby' => 'int']) as $bean) {
+            $collect[] = [$bean->id, $bean->int];
         }
         $this->assertEquals($valSort(), $collect);
         //
         $collect = [];
-        foreach ($repository->search('*', ['sortby' => 'int', 'asc' => false]) as $id => $bean) {
-            $collect[] = [$id, $bean->int];
+        foreach ($repository->search('*', ['sortby' => 'int', 'asc' => false]) as $bean) {
+            $collect[] = [$bean->id, $bean->int];
         }
         $this->assertEquals($valSort(null, false), $collect);
         //
         $collect = [];
         $iterator = $repository->search('*', ['sortby' => 'int', 'asc' => false]);
         while ($iterator->advanceSync()) {
-            [$id, $bean] = $iterator->getCurrent();
-            $collect[] = [$id, $bean->int];
+            $bean = $iterator->getCurrent();
+            $collect[] = [$bean->id, $bean->int];
         }
         $this->assertEquals($valSort(null, false), $collect);
     }
@@ -890,32 +891,101 @@ class TestCaseRepository extends AbstractTestCase
      */
     public function test_case_repository_bitmap_2()
     {
-        $pool = \Container\getRepositoryPool(['t' => [
-            'database' => [
-                'cluster' => 'm:*;ms:1:id,int;',
-                'fields' => [
-                    'int' => Type::int(),
-                    'fk' => Type::int(),
+        $pool = \Container\get(RepositoryPool::class, [
+            'c' => [
+                'bitmap' => [
+                    'cluster' => 'm:*;ms:*:id;',
                 ],
             ],
-            'bitmap' => [
-                'cluster' => 'm:*;ms:*:id;',
-                'fields' => [
-                    'int' => Type::bitmapInt(),
-                    'fk' => Type::bitmapForeignKey('t'),
+            't' => [
+                'database' => [
+                    'cluster' => 'm:*;ms:1:id,int;',
+                    'fields' => [
+                        'int' => DatabaseType::INT(),
+                        'fk' => DatabaseType::INT(),
+                    ],
+                ],
+                'bitmap' => [
+                    'cluster' => 'm:*;ms:*:id;',
+                    'fields' => [
+                        'int' => BitmapType::INT(),
+                        'fk' => BitmapType::FK(['references' => 'c']),
+                    ],
                 ],
             ],
-        ]]);
+        ]);
+        $repository = $pool->get('c');
+        $repository->createSync();
+        foreach (range(1, 100) as $_) {
+            $repository->addSync($_);
+        }
         $repository = $pool->get('t');
         $repository->createSync();
         foreach (range(1, 100) as $_) {
             $repository->insertSync(['int' => mt_rand(1, 100), 'fk' => mt_rand(1, 100)]);
         }
-        $repository->populateBitmap();
-        $iterator = $repository->search('*', ['sortby' => 'int', 'asc' => false, 'fks' => 'fk']);
-        while ($iterator->advanceSync()) {
-            [$id1, $bean1, $id2, $bean2] = $iterator->getCurrent();
-            $this->assertTrue($bean1->fk === $id2);
+        $repository->populateBitmapSync();
+        $params = ['sortby' => 'int', 'asc' => false, 'foreignKeys' => 'fk'];
+        $iterator = $repository->search('*', $params);
+        foreach ($iterator as $bean) {
+            $ex = $ex ?? $bean->int;
+            $this->assertTrue($bean->int <= $ex);
+            $this->assertTrue($bean->fk > 0);
+            $ex = $bean->int;
+        }
+    }
+
+    /**
+     * @test
+     */
+    public function test_case_repository_bitmap_3()
+    {
+        $pool = \Container\get(RepositoryPool::class, [
+            'c' => [
+                'database' => [
+                    'cluster' => 'm:*;ms:*:id;',
+                    'fields' => [
+                        'iii' => DatabaseType::INT(),
+                    ],
+                ],
+                'bitmap' => [
+                    'cluster' => 'm:*;ms:*:id;',
+                    'fields' => [
+                        'iii' => BitmapType::INT(),
+                    ],
+                ],
+            ],
+            't' => [
+                'database' => [
+                    'cluster' => 'm:*;ms:*:id,int;',
+                    'fields' => [
+                        'fk' => DatabaseType::INT(),
+                    ],
+                ],
+                'bitmap' => [
+                    'cluster' => 'm:*;ms:*:id;',
+                    'fields' => [
+                        'fk' => BitmapType::FK(['references' => 'c']),
+                    ],
+                ],
+            ],
+        ]);
+        $repository = $pool->get('c');
+        $repository->createSync();
+        foreach (range(1, 200) as $_) {
+            $repository->insertSync();
+        }
+        $repository->populateBitmapSync();
+        $repository = $pool->get('t');
+        $repository->createSync();
+        foreach (range(1, 100) as $_) {
+            $repository->insertSync(['fk' => mt_rand(1, 100)]);
+        }
+        $repository->populateBitmapSync();
+        $params = ['foreignKeys' => 'fk'];
+        $iterator = $repository->search('*', $params);
+        foreach ($iterator as $bean) {
+            $this->assertTrue(isset($bean->fk->iii));
         }
     }
 
@@ -924,17 +994,14 @@ class TestCaseRepository extends AbstractTestCase
      */
     public function test_case_repository_insert_unique()
     {
-        $repository = \Container\getRepository('t', [
+        $repository = \Container\get(Repository::class, 't', [
             'database' => [
                 'cluster' => 'm:*;ms:*:id;',
                 'fields' => [
-                    'int' => Type::int(),
+                    'int' => DatabaseType::INT(),
                 ],
                 'indexes' => [
-                    'f1' => [
-                        'fields' => ['int'],
-                        'type' => Index::INDEX_TYPE_UNIQUE,
-                    ],
+                    'f1' => DatabaseIndex::UNIQUE('int'),
                 ],
             ],
         ]);
@@ -951,8 +1018,7 @@ class TestCaseRepository extends AbstractTestCase
      */
     public function test_case_repository_get_if_no_database()
     {
-        return;
-        $repository = \Container\getRepository('t', [
+        $repository = \Container\get(Repository::class, 't', [
             'database' => [
             ],
             'bitmap' => [
@@ -961,12 +1027,7 @@ class TestCaseRepository extends AbstractTestCase
         ]);
         $repository->createSync();
         $repository->addSync(1);
-        foreach ($repository->search('*') as $id => $bean) {
-            $this->assertTrue($id > 0 && $bean === null);
-        }
-        foreach (Iterator::wrap($repository->search('*')) as $id => $beans) {
-            $this->assertTrue($id > 0 && $beans === [null] && $beans[0] === null);
-        }
+        $this->assertTrue(iterator_to_array($repository->search('*')) === []);
     }
 
     /**
@@ -974,7 +1035,7 @@ class TestCaseRepository extends AbstractTestCase
      */
     public function test_case_repository_get_order()
     {
-        $repository = \Container\getRepository('t', [
+        $repository = \Container\get(Repository::class, 't', [
             'database' => [
                 'cluster' => 'm:*;',
             ],
@@ -983,9 +1044,9 @@ class TestCaseRepository extends AbstractTestCase
         $id1 = $repository->insertSync();
         $id2 = $repository->insertSync();
         $ids = [];
-        foreach ($repository->get([$id2, 1E6, $id1, 1E6, $id2]) as $_ => $value) {
-            $ids[] = $_;
+        foreach ($repository->get([$id2, 1E6, $id1, 1E6, $id2]) as $value) {
+            $ids[] = $value->id ?? null;
         }
-        $this->assertTrue([$id2, (int) 1E6, $id1, (int) 1E6, $id2] === $ids);
+        $this->assertTrue([$id2, null, $id1, null, $id2] === $ids);
     }
 }

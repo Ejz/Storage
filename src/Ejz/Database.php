@@ -42,6 +42,7 @@ class Database implements NameInterface
         $this->config = $config + [
             'iterator_chunk_size' => 100,
             'rand_iterator_intervals' => 100,
+            'logger' => null,
         ];
         $this->connection = null;
     }
@@ -79,7 +80,11 @@ class Database implements NameInterface
             if ($this->connection === null) {
                 yield $this->connect();
             }
-            return yield $this->connection->query($sql, $args);
+            $result = yield $this->connection->query($sql, $args);
+            if ($this->config['logger'] !== null) {
+                $this->config['logger']($sql, $args, $result);
+            }
+            return $result;
         }, $sql, $args);
     }
 
