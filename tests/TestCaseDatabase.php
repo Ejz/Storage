@@ -441,7 +441,6 @@ class TestCaseDatabase extends AbstractTestCase
             'iterator_chunk_size' => mt_rand(10, 30),
             'rand_iterator_intervals' => mt_rand(2, 30),
         ];
-        // var_dump($min, $max, $config);
         $params = compact('min', 'max', 'config') + ['asc' => null];
         $values = iterator_to_array($db->iterate('tt', $params));
         $keys = array_map(function ($value) {

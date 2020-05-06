@@ -279,7 +279,7 @@ class TestCaseRepository extends AbstractTestCase
             }, iterator_to_array($iterator));
         };
         $iterator = $repository->get([$id5, $id2, 99, $id1, $id5, $id4, $id3, 99]);
-        $this->assertEquals([$id5, $id2, null, $id1, $id5, $id4, $id3, null], $ids($iterator));
+        $this->assertEquals([$id5, $id2, $id1, $id4, $id3], $ids($iterator));
         $bean = $repository->get([$id1])->current();
         $values = $bean->getValues();
         $this->assertEquals(['field1' => '', 'field2' => null, 'field3' => 0], $values);
@@ -337,7 +337,7 @@ class TestCaseRepository extends AbstractTestCase
         $this->assertTrue($bean->field1 === 'foo');
         $this->assertTrue($bean->deleteSync());
         $this->assertFalse($bean->deleteSync());
-        $_ = iterator_to_array($repository->get([$id]));
+        $_ = iterator_to_array($repository->get([$id], ['nullable' => true]));
         $this->assertTrue($_ === [null]);
         $id = $repository->insertSync();
         $names = $repository->getWritableDatabasePool($id)->names();
@@ -362,10 +362,10 @@ class TestCaseRepository extends AbstractTestCase
                 return $bean->id ?? null;
             }, iterator_to_array($iterator));
         };
-        $it = $repository->get([$id1, 1E6, $id2]);
-        $this->assertEquals([$id1, null, $id2], $ids($it));
-        $it = $repository->get([1E6, $id1, 1E6, $id2, 1E6]);
-        $this->assertEquals([null, $id1, null, $id2, null], $ids($it));
+        $it = $repository->get([$id1, $id2]);
+        $this->assertEquals([$id1, $id2], $ids($it));
+        $it = $repository->get([1E6, $id1, 1E6, $id2, 1E6], ['nullable' => true]);
+        $this->assertEquals([null, $id1, $id2], $ids($it));
     }
 
     /**
@@ -791,7 +791,6 @@ class TestCaseRepository extends AbstractTestCase
         $repository->populateBitmap();
         $ex = null;
         foreach ($repository->search('*') as $bean) {
-            // var_dump($bean);
             $id = $bean->id;
             $ex = $ex ?? $id;
             $this->assertTrue($id >= $ex);
@@ -1043,10 +1042,24 @@ class TestCaseRepository extends AbstractTestCase
         $repository->createSync();
         $id1 = $repository->insertSync();
         $id2 = $repository->insertSync();
+        $_ = [$id2, 1E6, $id1, 1E6, $id2];
+        $it1 = $repository->get($_, ['nullable' => true, 'repeatable' => true]);
+        $it2 = $repository->get($_, ['nullable' => false, 'repeatable' => true]);
+        $it3 = $repository->get($_, ['nullable' => true, 'repeatable' => false]);
         $ids = [];
-        foreach ($repository->get([$id2, 1E6, $id1, 1E6, $id2]) as $value) {
+        foreach ($it1 as $value) {
             $ids[] = $value->id ?? null;
         }
         $this->assertTrue([$id2, null, $id1, null, $id2] === $ids);
+        $ids = [];
+        foreach ($it2 as $value) {
+            $ids[] = $value->id ?? null;
+        }
+        $this->assertTrue([$id2, $id1, $id2] === $ids);
+        $ids = [];
+        foreach ($it3 as $value) {
+            $ids[] = $value->id ?? null;
+        }
+        $this->assertTrue([$id2, null, $id1] === $ids);
     }
 }

@@ -242,17 +242,30 @@ class Repository implements NameInterface, ContextInterface
 
     /**
      * @param array $ids
+     * @param array $params
      *
      * @return Iterator
      */
-    public function get(array $ids): Iterator
+    public function get(array $ids, array $params = []): Iterator
     {
-        $emit = function ($emit) use ($ids) {
+        $emit = function ($emit) use ($ids, $params) {
+            $params += [
+                'repeatable' => false,
+                'nullable' => false,
+            ];
+            [
+                'repeatable' => $repeatable,
+                'nullable' => $nullable,
+            ] = $params;
             $ids = array_map('intval', $ids);
             $ids = array_values($ids);
+            $uniq = array_unique($ids);
+            if (!$repeatable) {
+                $ids = $uniq;
+            }
+            $_ids = array_flip($uniq);
             $table = $this->getDatabaseTable();
             $pools = [];
-            $_ids = array_flip(array_unique($ids));
             $meta = [];
             $cached = [];
             $cache = null;
@@ -310,11 +323,11 @@ class Repository implements NameInterface, ContextInterface
             };
             $iterators = [new Iterator($cached)];
             foreach ($pools as $pool) {
-                $params = $params ?? [
+                $_params = $_params ?? [
                     'pk' => [$this->getDatabasePrimaryKey()],
                     'fields' => $this->getDatabaseFields(),
                 ];
-                $iterator = $pool['pool']->random()->get($table, $pool['ids'], $params);
+                $iterator = $pool['pool']->random()->get($table, $pool['ids'], $_params);
                 $iterators[] = $iterator;
             }
             $iterator = Iterator::merge($iterators, function ($value1, $value2) use ($_ids) {
@@ -336,7 +349,9 @@ class Repository implements NameInterface, ContextInterface
                 }
                 $value = $collector[$pointer++] ?? null;
                 if ($value === null) {
-                    yield $emit(null);
+                    if ($nullable) {
+                        yield $emit(null);
+                    }
                     continue;
                 }
                 $vid = $value->id;
@@ -345,7 +360,9 @@ class Repository implements NameInterface, ContextInterface
                     yield $emit($already[$vid]);
                     continue;
                 }
-                yield $emit(null);
+                if ($nullable) {
+                    yield $emit(null);
+                }
             }
         };
         return new Iterator($emit);
@@ -736,15 +753,15 @@ class Repository implements NameInterface, ContextInterface
                     $iterators = [];
                     foreach ($repositories as $key => $repository) {
                         $ids = array_column($rows, $key);
-                        $iterators[$key] = $repository->get($ids);
+                        $iterators[$key] = $repository->get($ids, [
+                            'repeatable' => $key !== 'id',
+                            'nullable' => $key !== 'id',
+                        ]);
                     }
                     $paired = Iterator::pair($iterators);
                     while (yield $paired->advance()) {
                         $value = $paired->getCurrent();
                         $bean = $value['id'];
-                        if ($bean === null) {
-                            continue;
-                        }
                         unset($value['id']);
                         foreach ($value as $k => $v) {
                             $bean->$k = $v ?? $bean->$k;
