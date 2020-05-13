@@ -515,7 +515,7 @@ class Repository implements NameInterface, ContextInterface
         $cache = $this->getCache();
         $name = $this->getName();
         foreach (array_chunk($ids, 1000, false) as $chunk) {
-            $cache->drop(...array_map(function ($id) use ($name) {
+            $cache->dropUnion(...array_map(function ($id) use ($name) {
                 return $name . '.' . $id;
             }, $chunk));
         }
