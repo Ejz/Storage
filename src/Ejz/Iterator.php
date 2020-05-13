@@ -228,6 +228,26 @@ class Iterator implements \Amp\Iterator, \Iterator, ContextInterface
 
     /**
      * @param self     $iterator
+     * @param callable $generator
+     * @param array    ...$args
+     *
+     * @return self
+     */
+    public static function generator(self $iterator, callable $generator, ...$args): self
+    {
+        $emit = function ($emit) use ($iterator, $generator, $args) {
+            while (yield $iterator->advance()) {
+                $value = $iterator->getCurrent();
+                foreach ($generator($value, ...$args) as $value) {
+                    yield $emit($value);
+                }
+            }
+        };
+        return new self($emit);
+    }
+
+    /**
+     * @param self     $iterator
      * @param callable $filter
      *
      * @return self

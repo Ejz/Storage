@@ -149,4 +149,18 @@ class TestCaseIterator extends AbstractTestCase
         $res = iterator_to_array(Iterator::pair(compact('it1', 'it2')));
         $this->assertEquals($res, [['it1' => 1, 'it2' => 3], ['it1' => 2, 'it2' => 4]]);
     }
+
+    /**
+     * @test
+     */
+    public function test_case_iterator_generator()
+    {
+        $it = new Iterator([1, 2, 3]);
+        $res = iterator_to_array(Iterator::generator($it, function ($value, $from) {
+            foreach (range($from, $value) as $i) {
+                yield $i;
+            }
+        }, 0));
+        $this->assertEquals($res, [0, 1, 0, 1, 2, 0, 1, 2, 3]);
+    }
 }
