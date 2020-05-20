@@ -71,6 +71,7 @@ class Repository implements NameInterface, ContextInterface
     public function createBitmap(): Promise
     {
         return \Amp\call(function () {
+            yield $this->dropBitmap();
             $index = $this->getBitmapIndex();
             $fields = $this->getBitmapFields();
             if ($this->hasSortScore()) {
@@ -86,6 +87,7 @@ class Repository implements NameInterface, ContextInterface
     public function createDatabase(): Promise
     {
         return \Amp\call(function () {
+            yield $this->dropDatabase();
             $table = $this->getDatabaseTable();
             $primaryKey = $this->getDatabasePrimaryKey();
             $fields = $this->getDatabaseFields();
@@ -124,17 +126,6 @@ class Repository implements NameInterface, ContextInterface
     /**
      * @return Promise
      */
-    public function truncate(): Promise
-    {
-        return \Amp\call(function () {
-            yield $this->truncateDatabase();
-            yield $this->truncateBitmap();
-        });
-    }
-
-    /**
-     * @return Promise
-     */
     public function drop(): Promise
     {
         return \Amp\call(function () {
@@ -150,7 +141,6 @@ class Repository implements NameInterface, ContextInterface
     {
         return \Amp\call(function () {
             $table = $this->getDatabaseTable();
-            yield $this->truncateDatabase();
             yield $this->databasePool->drop($table);
         });
     }
@@ -162,30 +152,7 @@ class Repository implements NameInterface, ContextInterface
     {
         return \Amp\call(function () {
             $index = $this->getBitmapIndex();
-            yield $this->truncateBitmap();
             yield $this->bitmapPool->drop($index);
-        });
-    }
-
-    /**
-     * @return Promise
-     */
-    public function truncateDatabase(): Promise
-    {
-        return \Amp\call(function () {
-            $table = $this->getDatabaseTable();
-            yield $this->databasePool->truncate($table);
-        });
-    }
-
-    /**
-     * @return Promise
-     */
-    public function truncateBitmap(): Promise
-    {
-        return \Amp\call(function () {
-            $index = $this->getBitmapIndex();
-            yield $this->bitmapPool->truncate($index);
         });
     }
 
@@ -673,7 +640,7 @@ class Repository implements NameInterface, ContextInterface
     public function populateBitmap(): Promise
     {
         return \Amp\call(function () {
-            yield $this->truncateBitmap();
+            yield $this->createBitmap();
             foreach ($this->iterate() as $bean) {
                 $this->toBitmapBean($bean)->addSync();
             }
