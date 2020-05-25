@@ -79,6 +79,16 @@ class Iterator implements \Amp\Iterator, \Iterator, ContextInterface
     }
 
     /**
+     * @return Promise
+     */
+    public function getNextAsync(): Promise
+    {
+        return \Amp\call(function () {
+            return yield $this->advance() ? $this->getCurrent() : null;
+        });
+    }
+
+    /**
      * @return mixed
      */
     public function current()
