@@ -121,7 +121,7 @@ class Repository implements NameInterface, ContextInterface
                 });
                 $queries = $this->getDatabaseAdditionalCreateQueries();
                 foreach ($queries as $query) {
-                    yield $pool->execute($query);
+                    yield $pool->exec($query);
                 }
             }
         });
