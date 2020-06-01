@@ -119,6 +119,10 @@ class Repository implements NameInterface, ContextInterface
                     }
                     return $database->create(...array_values($args));
                 });
+                $queries = $this->getDatabaseAdditionalCreateQueries();
+                foreach ($queries as $query) {
+                    yield $pool->execute($query);
+                }
             }
         });
     }
@@ -782,6 +786,8 @@ class Repository implements NameInterface, ContextInterface
         //
         $this->config['database']['foreignKeys'] = $this->config['database']['foreignKeys'] ?? [];
         //
+        $this->config['database']['additional_create_queries'] = $this->config['database']['additional_create_queries'] ?? [];
+        //
         $fields = $this->config['bitmap']['fields'] ?? [];
         $collect = [];
         foreach ($fields as $name => $field) {
@@ -1138,6 +1144,14 @@ class Repository implements NameInterface, ContextInterface
     public function getDatabaseForeignKeys(): array
     {
         return $this->config['database']['foreignKeys'];
+    }
+
+    /**
+     * @return array
+     */
+    public function getDatabaseAdditionalCreateQueries(): array
+    {
+        return $this->config['database']['additional_create_queries'];
     }
 
     /**
