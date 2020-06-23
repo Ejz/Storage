@@ -306,8 +306,8 @@ class Repository implements NameInterface, ContextInterface
             });
             $collector = [];
             $pointer = 0;
-            foreach ($iterator as $value) {
-                $collector[] = $toDatabaseBean($value);
+            while (yield $iterator->advance()) {
+                $collector[] = $toDatabaseBean($iterator->getCurrent());
             }
             if ($cache !== null) {
                 $cache->setMultipleComplex(...$setMultipleComplex);
