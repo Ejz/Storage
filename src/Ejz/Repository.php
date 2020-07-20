@@ -851,13 +851,16 @@ class Repository implements NameInterface, ContextInterface
     }
 
     /**
-     * @param bool $asc
+     * @param ?bool $asc
      *
      * @return Closure
      */
-    public function getSortScoreClosure(bool $asc): Closure
+    public function getSortScoreClosure(?bool $asc): Closure
     {
         return function ($bean1, $bean2) use ($asc) {
+            if ($asc === null) {
+                return mt_rand(0, 1) ? +1 : -1;
+            }
             $score1 = $this->getSortScore($bean1);
             $score2 = $this->getSortScore($bean2);
             if (!$asc) {
