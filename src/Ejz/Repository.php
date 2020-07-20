@@ -645,8 +645,9 @@ class Repository implements NameInterface, ContextInterface
     {
         return \Amp\call(function () {
             yield $this->createBitmap();
-            foreach ($this->iterate() as $bean) {
-                $this->toBitmapBean($bean)->addSync();
+            $iterator = $this->iterate();
+            while (yield $iterator->advance()) {
+                yield $this->toBitmapBean($iterator->getCurrent())->add();
             }
         });
     }
